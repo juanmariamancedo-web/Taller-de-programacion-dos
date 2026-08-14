@@ -1,22 +1,14 @@
-import { contextBridge } from 'electron'
-import { electronAPI } from '@electron-toolkit/preload'
+import { contextBridge, ipcRenderer } from 'electron'
 
-// Custom APIs for renderer
-const api = {}
+contextBridge.exposeInMainWorld('electronAPI', {
+  // Función para escuchar el cambio de tema desde el menú nativo
+  onThemeChanged: (callback: (isDark: boolean) => void) => {
+    const subscription = (_event: unknown, isDark: boolean) => callback(isDark)
+    ipcRenderer.on('theme-changed', subscription)
 
-// Use `contextBridge` APIs to expose Electron APIs to
-// renderer only if context isolation is enabled, otherwise
-// just add to the DOM global.
-if (process.contextIsolated) {
-  try {
-    contextBridge.exposeInMainWorld('electron', electronAPI)
-    contextBridge.exposeInMainWorld('api', api)
-  } catch (error) {
-    console.error(error)
+    // Retornamos una función para limpiar el listener al desmontar el componente
+    return () => {
+      ipcRenderer.removeListener('theme-changed', subscription)
+    }
   }
-} else {
-  // @ts-ignore (define in dts)
-  window.electron = electronAPI
-  // @ts-ignore (define in dts)
-  window.api = api
-}
+})
