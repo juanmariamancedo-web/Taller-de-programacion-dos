@@ -1,19 +1,44 @@
 import { Header } from './components/Header/Header'
+import { useState } from 'react'
+import HomePanel from './components/views/HomePanel'
+import ProductsPanel from './components/views/ProductsPanel'
+
+//Paneles posibles
+export type Tab = 'dashboard' | 'clients' | 'settings' | "products"
+
+export type NavItem = {
+  id: Tab, 
+  label: string
+}
 
 function App(): React.JSX.Element {
-  const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
+  //Asociacion de id de paneles con labels
+  const navItems: NavItem[] = [
+    { id: 'dashboard', label: 'Inicio'},
+    { id: 'clients', label: 'Clientes'},
+    { id: 'settings', label: 'Ajustes'},
+    { id: 'products', label: 'Productos'}
+  ]
+
+  //Asocciacion de id de paneles con Views
+  const renderPanel = () => {
+    switch(currentTab){
+      case "dashboard":
+        return <HomePanel />
+      case"products":
+        return <ProductsPanel />
+      default:
+        return null
+    }
+  }
+
+  const [currentTab, setCurrentTab] = useState<Tab>("dashboard")
+
 
   return (
     <>
-      <Header />
-        <div className="action">
-          <a target="_blank" rel="noreferrer" onClick={ipcHandle}>
-            Send IPC
-          </a>
-        </div>
-      <p className='bg-red-500 dark:bg-slate-900, dark:text-white text-bold'>
-        Hola
-      </p>
+      <Header onSelectTab={setCurrentTab} currentTab={currentTab} navItems={navItems} />
+      {renderPanel()}
     </>
   )
 }

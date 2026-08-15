@@ -2,11 +2,19 @@ import { useEffect, useState} from "react"
 import ButtonOfDarkMode from "./ButtonOfDarkMode";
 import SwitchOpen from "./SwitchOpen";
 import Home from "../icons/HomeIcon";
-import LoginOut from "./LoginOut";
-import ProfileIcon from "../icons/ProfileIcon";
-import TogglePanel from "./TogglePanel";
+import { Tab, NavItem } from "@renderer/App";
+// import LoginOut from "./LoginOut";
+// import ProfileIcon from "../icons/ProfileIcon";
+// import TogglePanel from "./TogglePanel";
 
-export function Header(){
+
+interface Props {
+    onSelectTab: React.Dispatch<React.SetStateAction<Tab>>,
+    currentTab: string,
+    navItems: NavItem[]
+}
+
+export function Header({onSelectTab, currentTab, navItems}: Props){
     const [open, setOpen] = useState(false)
 
     useEffect(()=>{
@@ -53,28 +61,22 @@ export function Header(){
                                         lg:bg-neutral-200/50 lg:dark:bg-black/50  
                                         lg:backdrop-blur-2xl dark:text-white 
                                         flex-grow-0`}>
-                            <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
-                                <SwitchOpen setOpen={setOpen}>
-                                    <></>
-                                    {/* <Link className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center cursor-pointer" href={homeUrl}>
-                                        <Home className=""/>
-                                    </Link> */}
-                                </SwitchOpen>    
-                            </li>
-                            <div className="flex flex-col lg:flex-row items-center justify-center gap-3 lg:gap-5">
-                                {/* {pages.length > 0 && pages.map((page, index)=>{
-                                    return(
-                                        <li key={index}>
-                                            <SwitchOpen setOpen={setOpen}>
-                                                <Link className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition" href={page.href}>
-                                                    {page.name}
-                                                </Link>
-                                            </SwitchOpen>
-                                        </li>
-                                    )
-                                })} */}
-
-                                {/* <TogglePanel setOpen={setOpen} /> */}
+                            <div className="flex flex-col lg:flex-row items-center justify-center gap-3"> 
+                                {navItems.length >= 1 && 
+                                    navItems.map((item)=>{
+                                        return(
+                                            <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
+                                                <SwitchOpen setOpen={setOpen}>
+                                                    <button onClick={()=> onSelectTab(item.id)}>
+                                                        <span className={`${currentTab == item.id && `text-bold`} `}>
+                                                            {item.label}
+                                                        </span>
+                                                    </button>
+                                                </SwitchOpen>
+                                            </li>
+                                        )
+                                    })
+                                }
                             </div>
                             <div className="flex flex-col lg:flex-row items-center justify-center gap-3">
                                 <div className="flex flex-row items-center justify-center gap-3">
