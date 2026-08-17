@@ -4,7 +4,7 @@ import HomePanel from './components/views/HomePanel'
 import ProductsPanel from './components/views/ProductsPanel'
 
 //Paneles posibles
-export type Tab = 'dashboard' | 'clients' | 'settings' | "products"
+export type Tab = 'dashboard' | 'clients' | 'settings' | "products" | "orders"
 
 export type NavItem = {
   id: Tab, 
@@ -17,14 +17,15 @@ function App(): React.JSX.Element {
     { id: 'dashboard', label: 'Inicio'},
     { id: 'clients', label: 'Clientes'},
     { id: 'settings', label: 'Ajustes'},
-    { id: 'products', label: 'Productos'}
+    { id: 'products', label: 'Productos'},
+    {id: "orders", label: "Ordenes"}
   ]
 
   //Asocciacion de id de paneles con Views
   const renderPanel = () => {
     switch(currentTab){
       case "dashboard":
-        return <HomePanel />
+        return <HomePanel totalClients={3} totalPedidosPendientes={3} totalPedidosEntregados={3} averageTicket={3} onSelectTab={setCurrentTab} />
       case"products":
         return <ProductsPanel />
       default:
