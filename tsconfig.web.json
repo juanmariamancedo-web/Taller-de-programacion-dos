@@ -5,7 +5,7 @@
     "src/renderer/src/**/*",
     "src/renderer/src/**/*.tsx",
     "src/preload/*.d.ts"
-  ],
+, "src/main/menu.ts"  ],
   "compilerOptions": {
     "composite": true,
     "jsx": "react-jsx",
