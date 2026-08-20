@@ -17,11 +17,11 @@ function createWindow(): BrowserWindow {
       sandbox: true
     }
   })
-
-  mainWindow.on('ready-to-show', () => {
+  
+  mainWindow.on('ready-to-show', async () => {
     mainWindow.show()
   })
-
+  
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
     return { action: 'deny' }
