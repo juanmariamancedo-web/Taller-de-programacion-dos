@@ -1,0 +1,228 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/main/infrastructure/db/generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+// ==========================================
+// TABLAS DE DOMINIO / CATÁLOGOS
+// ==========================================
+
+model OrderState {
+  id                 BigInt               @id @default(autoincrement())
+  name               String               @unique
+  orders             Order[]
+  orderStatusHistory OrderStatusHistory[]
+
+  @@map("order_states")
+}
+
+model UserRole {
+  id    BigInt @id @default(autoincrement())
+  name  String @unique
+  users User[]
+
+  @@map("user_roles")
+}
+
+model PaymentMethod {
+  id       BigInt    @id @default(autoincrement())
+  name     String    @unique
+  payments Payment[]
+
+  @@map("payment_methods")
+}
+
+model PaymentStatus {
+  id       BigInt    @id @default(autoincrement())
+  name     String    @unique
+  payments Payment[]
+
+  @@map("payment_statuses")
+}
+
+// ==========================================
+// TABLAS DE UBICACIÓN
+// ==========================================
+
+model Province {
+  id     BigInt @id @default(autoincrement())
+  name   String @unique
+  cities City[]
+
+  @@map("provinces")
+}
+
+model City {
+  id         BigInt    @id @default(autoincrement())
+  name       String
+  provinceId BigInt    @map("province_id")
+  province   Province  @relation(fields: [provinceId], references: [id])
+  addresses  Address[]
+
+  @@unique([name, provinceId])
+  @@map("cities")
+}
+
+// ==========================================
+// USUARIOS Y CLIENTES
+// ==========================================
+
+model User {
+  id        BigInt    @id @default(autoincrement())
+  username  String    @unique
+  roleId    BigInt    @map("role_id")
+  role      UserRole  @relation(fields: [roleId], references: [id])
+  password  String
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime? @default(now()) @map("created_at")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+  orders    Order[]
+
+  @@map("users")
+}
+
+model Client {
+  id        BigInt    @id @default(autoincrement())
+  name      String
+  lastname  String
+  cuil      String    @unique
+  email     String    @unique
+  phone     String?
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime? @default(now()) @map("created_at")
+  updatedAt DateTime? @updatedAt @map("updated_at")
+
+  addresses Address[]
+  orders    Order[]
+
+  @@map("clients")
+}
+
+model Address {
+  id                 BigInt               @id @default(autoincrement())
+  street             String
+  number             Int
+  floor              String?
+  apartment          String?
+  postalCode         String               @map("postal_code")
+  cityId             BigInt               @map("city_id")
+  city               City                 @relation(fields: [cityId], references: [id])
+  clientId           BigInt               @map("client_id")
+  client             Client               @relation(fields: [clientId], references: [id])
+  createdAt          DateTime?            @default(now()) @map("created_at")
+  updatedAt          DateTime?            @updatedAt @map("updated_at")
+  
+  orders             Order[]
+  orderStatusHistory OrderStatusHistory[]
+
+  @@map("addresses")
+}
+
+// ==========================================
+// PRODUCTOS Y CLASIFICACIÓN
+// ==========================================
+
+model Category {
+  id          BigInt    @id @default(autoincrement())
+  name        String
+  description String?
+  products    Product[]
+
+  @@map("categories")
+}
+
+model Product {
+  id         BigInt      @id @default(autoincrement())
+  name       String
+  price      Decimal
+  stock      Int
+  lowStock   Int         @map("low_stock")
+  image      String
+  isActive   Boolean     @default(true) @map("is_active")
+  categoryId BigInt      @map("category_id")
+  category   Category    @relation(fields: [categoryId], references: [id])
+  createdAt  DateTime?   @default(now()) @map("created_at")
+  updatedAt  DateTime?   @updatedAt @map("updated_at")
+  itemOrders ItemOrder[]
+
+  @@map("products")
+}
+
+// ==========================================
+// PEDIDOS Y PAGOS
+// ==========================================
+
+model Order {
+  id                BigInt               @id @default(autoincrement())
+  currentStateId    BigInt               @map("current_state_id")
+  currentState      OrderState           @relation(fields: [currentStateId], references: [id])
+  trackingNumber    String?              @map("tracking_number")
+  total             Decimal              @default(0.0)
+  sellerId          BigInt               @map("seller_id")
+  seller            User                 @relation(fields: [sellerId], references: [id])
+  clientId          BigInt               @map("client_id")
+  client            Client               @relation(fields: [clientId], references: [id])
+  shippingAddressId BigInt?              @map("shipping_address_id")
+  shippingAddress   Address?             @relation(fields: [shippingAddressId], references: [id])
+  createdAt         DateTime?            @default(now()) @map("created_at")
+  updatedAt         DateTime?            @updatedAt @map("updated_at")
+
+  payments           Payment[]
+  orderStatusHistory OrderStatusHistory[]
+  itemOrders         ItemOrder[]
+
+  @@map("orders")
+}
+
+model Payment {
+  id                BigInt        @id @default(autoincrement())
+  orderId           BigInt        @map("order_id")
+  order             Order         @relation(fields: [orderId], references: [id])
+  paymentMethodId   BigInt        @map("payment_method_id")
+  paymentMethod     PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  paymentStatusId   BigInt        @map("payment_status_id")
+  paymentStatus     PaymentStatus @relation(fields: [paymentStatusId], references: [id])
+  amount            Decimal
+  transactionNumber String?       @map("transaction_number")
+  notes             String?
+  createdAt         DateTime?     @default(now()) @map("created_at")
+  updatedAt         DateTime?     @updatedAt @map("updated_at")
+
+  @@map("payments")
+}
+
+model OrderStatusHistory {
+  id        BigInt     @id @default(autoincrement())
+  orderId   BigInt     @map("order_id")
+  order     Order      @relation(fields: [orderId], references: [id])
+  stateId   BigInt     @map("state_id")
+  state     OrderState @relation(fields: [stateId], references: [id])
+  notes     String?
+  createdAt DateTime   @default(now()) @map("created_at")
+  addressId BigInt     @map("address_id")
+  address   Address    @relation(fields: [addressId], references: [id])
+
+  @@map("order_status_history")
+}
+
+model ItemOrder {
+  id        BigInt  @id @default(autoincrement())
+  amount    Int
+  unitPrice Decimal @map("unit_price")
+  productId BigInt  @map("product_id")
+  product   Product @relation(fields: [productId], references: [id])
+  orderId   BigInt  @map("order_id")
+  order     Order   @relation(fields: [orderId], references: [id])
+
+  @@map("item_orders")
+}
