@@ -1,0 +1,15 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Instalar openssl y libc6-compat (necesarios para el motor de Prisma en Alpine)
+RUN apk add --no-cache openssl libc6-compat
+
+COPY package*.json ./
+COPY prisma ./prisma/
+
+RUN npm install
+
+COPY . .
+
+EXPOSE 5555
