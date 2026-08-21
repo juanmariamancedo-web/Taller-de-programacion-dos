@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  # 1. Base de datos PostgreSQL
+  postgres:
+    image: postgres:16-alpine
+    container_name: taller_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-admin123}
+      POSTGRES_DB: ${POSTGRES_DB:-taller_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Gestor web para inspeccionar la base de datos
+  adminer:
+    image: adminer
+    container_name: taller_adminer
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+
+  # 3. Prisma Client Generator & Studio
+  prisma-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: taller_prisma_dev
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-admin123}@postgres:5432/${POSTGRES_DB:-taller_db}?schema=public
+    ports:
+      - "5555:5555"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: sh -c "npx prisma db push && npx prisma generate && npx prisma studio --port 5555"
+
+volumes:
+  postgres_data:
