@@ -3,6 +3,7 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setMainManu } from './menu'
+// import {prisma} from "../main/infrastructure/db/prisma"
 
 function createWindow(): BrowserWindow {
   // Create the browser window.
@@ -20,6 +21,9 @@ function createWindow(): BrowserWindow {
   
   mainWindow.on('ready-to-show', async () => {
     mainWindow.show()
+
+    // const {name} = await prisma.category.create({data: {name: "Turnos"}})
+    // console.log("Se creo la categoria: " + name)
   })
   
   mainWindow.webContents.setWindowOpenHandler((details) => {
