@@ -1,12 +1,13 @@
 import { Header } from './components/Header/Header'
-import { useState } from 'react'
 import HomePanel from './components/views/HomePanel'
 import ProductsPanel from './components/views/ProductsPanel'
-import { Tab } from "../../main/domain/types/Tab"
 import { NavItem } from '../../main/domain/types/NavItem'
 import OrdersPanel from './components/views/OrdersPanel'
+import { useAppSelector } from "./store/hooks";
 
 function App(): React.JSX.Element {
+  const currentTab = useAppSelector((state) => state.app.currentTab)
+
   //Asociacion de id de paneles con labels
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Inicio'},
@@ -30,9 +31,6 @@ function App(): React.JSX.Element {
     }
   }
 
-  const [currentTab, setCurrentTab] = useState<Tab>("dashboard")
-
-
   return (
     <div className="min-h-screen flex flex-col justify-between gap-10">
       <div
@@ -40,7 +38,7 @@ function App(): React.JSX.Element {
           bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(217,216,255,0.5),rgba(255,255,255,0.9))]
           dark:bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.3),rgba(255,255,255,0))]"
       ></div>
-      <Header onSelectTab={setCurrentTab} currentTab={currentTab} navItems={navItems} />
+      <Header navItems={navItems} />
       <main className="container mx-auto pt-14 px-4">
         {renderPanel()}
       </main>
