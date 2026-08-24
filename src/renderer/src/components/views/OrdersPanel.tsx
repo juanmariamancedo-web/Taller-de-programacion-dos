@@ -1,3 +1,5 @@
+import Paginacion from "../Pagination"
+
 export default function(){
 
     return(
@@ -90,7 +92,7 @@ export default function(){
                         </tbody>
                     </table>
                 </div>
-                {/* <Paginacion dir="/admin/ordenes"  pagina={pagina} paginas={paginas} /> */}
+                <Paginacion paginas={5} />
             </ div>
         </>
     )
