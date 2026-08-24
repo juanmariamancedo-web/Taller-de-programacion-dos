@@ -1,20 +1,22 @@
 import { useEffect, useState} from "react"
 import ButtonOfDarkMode from "./ButtonOfDarkMode";
 import SwitchOpen from "./SwitchOpen";
-import { Tab } from "../../../../main/domain/types/Tab";
 import { NavItem } from "../../../../main/domain/types/NavItem";
+import { useAppDispatch, useAppSelector } from "../../store/hooks";
+import { setCurrentTab } from "../../store/slices/appSlice";
 // import LoginOut from "./LoginOut";
 // import ProfileIcon from "../icons/ProfileIcon";
 // import TogglePanel from "./TogglePanel";
 
 
 interface Props {
-    onSelectTab: React.Dispatch<React.SetStateAction<Tab>>,
-    currentTab: string,
     navItems: NavItem[]
 }
 
-export function Header({onSelectTab, currentTab, navItems}: Props){
+export function Header({navItems}: Props){
+    const dispatch = useAppDispatch()
+
+    const currentTab = useAppSelector((state) => state.app.currentTab)
     const [open, setOpen] = useState(false)
 
     useEffect(()=>{
@@ -67,7 +69,7 @@ export function Header({onSelectTab, currentTab, navItems}: Props){
                                         return(
                                             <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
                                                 <SwitchOpen setOpen={setOpen}>
-                                                    <button onClick={()=> onSelectTab(item.id)}>
+                                                    <button onClick={()=> dispatch(setCurrentTab(item.id))}>
                                                         <span className={`${currentTab == item.id && `text-bold`} `}>
                                                             {item.label}
                                                         </span>

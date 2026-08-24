@@ -1,4 +1,5 @@
-import { Tab } from "../../../../main/domain/types/Tab"
+import { setCurrentTab } from "./../../store/slices/appSlice"
+import { useAppDispatch } from "./../../store/hooks"
 
 type Ordenes = {
     id: number,
@@ -18,7 +19,6 @@ export default function HomePanel({
         // topProductos,
         averageTicket,
         // ultimasOrdenes, 
-        onSelectTab
     } 
     : 
     {
@@ -28,8 +28,9 @@ export default function HomePanel({
         // topProductos : Producto[], 
         averageTicket : number, 
         // ultimasOrdenes: Ordenes[],
-        onSelectTab: React.Dispatch<React.SetStateAction<Tab>>
     }){
+    const dispatch = useAppDispatch()
+
     return(
         <div className="flex flex-col items-center">
             <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold flex flex-row gap-x-4 pb-6 lg:pb-10">
@@ -92,7 +93,7 @@ export default function HomePanel({
                             </h2>
                             <button
                                 className="text-sm text-blue-600 hover:underline dark:text-blue-400"
-                                onClick={()=>onSelectTab('orders')}>
+                                onClick={()=>dispatch(setCurrentTab("orders"))}>
                                 Ver todos
                             </button>
                         </div>
