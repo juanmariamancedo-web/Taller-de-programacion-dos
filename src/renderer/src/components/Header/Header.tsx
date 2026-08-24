@@ -1,7 +1,8 @@
 import { useEffect, useState} from "react"
 import ButtonOfDarkMode from "./ButtonOfDarkMode";
 import SwitchOpen from "./SwitchOpen";
-import { Tab, NavItem } from "@renderer/App";
+import { Tab } from "../../../../main/domain/types/Tab";
+import { NavItem } from "../../../../main/domain/types/NavItem";
 // import LoginOut from "./LoginOut";
 // import ProfileIcon from "../icons/ProfileIcon";
 // import TogglePanel from "./TogglePanel";
