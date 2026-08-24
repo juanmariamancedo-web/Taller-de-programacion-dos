@@ -21,7 +21,7 @@ function App(): React.JSX.Element {
   const renderPanel = () => {
     switch(currentTab){
       case "dashboard":
-        return <HomePanel totalClients={3} totalPedidosPendientes={3} totalPedidosEntregados={3} averageTicket={3} onSelectTab={setCurrentTab} />
+        return <HomePanel totalClients={3} totalPedidosPendientes={3} totalPedidosEntregados={3} averageTicket={3} />
       case"products":
         return <ProductsPanel />
       case "orders":
