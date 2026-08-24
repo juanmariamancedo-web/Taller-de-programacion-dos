@@ -1,5 +1,4 @@
-
-export default function({ ordenes , paginas, pagina, sort}: { ordenes: Order[], paginas: number, pagina: number, sort: string }){
+export default function(){
 
     return(
         <>
@@ -13,37 +12,40 @@ export default function({ ordenes , paginas, pagina, sort}: { ordenes: Order[], 
                         <thead className="bg-gray-100 dark:bg-white/10">
                             <tr className="text-left text-sm font-semibold text-gray-700 dark:text-gray-200">
                                 <th className="px-4 py-3">
-                                    <Sort 
+                                    {/* <Sort 
                                         sort={sort} dir="/ordenes"
                                         name="Pedido"
                                         serverArg="pedido"
                                         className=""
                                         search=""
-                                    />
+                                    /> */}
+                                    Pedido
                                 </th>
                                 <th className="px-4 py-3">
-                                    <Sort 
+                                    {/* <Sort 
                                         sort={sort} dir="/ordenes"
                                         name="Total"
                                         serverArg="total"
                                         className=""
                                         search=""
-                                    />
+                                    /> */}
+                                    Total
                                 </th>
                                 <th className="px-4 py-3">
-                                    <Sort 
+                                    {/* <Sort 
                                         sort={sort} dir="/ordenes"
                                         name="Estado"
                                         serverArg="state"
                                         className=""
                                         search=""
-                                    />
+                                    /> */}
+                                    Estado
                                 </th>
                             </tr>
                         </thead>
 
                         <tbody className="divide-y divide-gray-200 dark:divide-white/10 text-sm">
-                            {ordenes?.length ? (
+                            {/* {ordenes?.length ? (
                                 ordenes.map((order) => {   
                                     const total = order.item_orders.reduce(
                                         (acc, item) => acc + item.unit_price * item.amount, 0
@@ -78,17 +80,17 @@ export default function({ ordenes , paginas, pagina, sort}: { ordenes: Order[], 
                                         )
                                     }
                                 )
-                            ) : (
+                            ) : ( */}
                                 <tr>
                                     <td colSpan={4} className="text-center py-6 text-gray-500">
                                         No hay órdenes encontradas
                                     </td>
                                 </tr>
-                            )}
+                            {/* )} */}
                         </tbody>
                     </table>
                 </div>
-                <Paginacion dir="/admin/ordenes"  pagina={pagina} paginas={paginas} />
+                {/* <Paginacion dir="/admin/ordenes"  pagina={pagina} paginas={paginas} /> */}
             </ div>
         </>
     )

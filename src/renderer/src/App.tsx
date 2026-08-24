@@ -2,14 +2,9 @@ import { Header } from './components/Header/Header'
 import { useState } from 'react'
 import HomePanel from './components/views/HomePanel'
 import ProductsPanel from './components/views/ProductsPanel'
-
-//Paneles posibles
-export type Tab = 'dashboard' | 'clients' | 'settings' | "products" | "orders"
-
-export type NavItem = {
-  id: Tab, 
-  label: string
-}
+import { Tab } from "../../main/domain/types/Tab"
+import { NavItem } from '../../main/domain/types/NavItem'
+import OrdersPanel from './components/views/OrdersPanel'
 
 function App(): React.JSX.Element {
   //Asociacion de id de paneles con labels
@@ -28,6 +23,8 @@ function App(): React.JSX.Element {
         return <HomePanel totalClients={3} totalPedidosPendientes={3} totalPedidosEntregados={3} averageTicket={3} onSelectTab={setCurrentTab} />
       case"products":
         return <ProductsPanel />
+      case "orders":
+        return <OrdersPanel />
       default:
         return null
     }

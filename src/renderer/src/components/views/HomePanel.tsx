@@ -1,4 +1,4 @@
-import { Tab } from "@renderer/App"
+import { Tab } from "../../../../main/domain/types/Tab"
 
 type Ordenes = {
     id: number,
