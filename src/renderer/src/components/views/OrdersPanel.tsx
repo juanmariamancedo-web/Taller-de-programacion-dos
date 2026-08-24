@@ -1,4 +1,5 @@
 import Paginacion from "../Pagination"
+import { Sort } from "../Sort"
 
 export default function(){
 
@@ -14,34 +15,25 @@ export default function(){
                         <thead className="bg-gray-100 dark:bg-white/10">
                             <tr className="text-left text-sm font-semibold text-gray-700 dark:text-gray-200">
                                 <th className="px-4 py-3">
-                                    {/* <Sort 
-                                        sort={sort} dir="/ordenes"
+                                    <Sort   
                                         name="Pedido"
                                         serverArg="pedido"
                                         className=""
-                                        search=""
-                                    /> */}
-                                    Pedido
+                                    />
                                 </th>
                                 <th className="px-4 py-3">
-                                    {/* <Sort 
-                                        sort={sort} dir="/ordenes"
+                                    <Sort 
                                         name="Total"
                                         serverArg="total"
                                         className=""
-                                        search=""
-                                    /> */}
-                                    Total
+                                    />
                                 </th>
                                 <th className="px-4 py-3">
-                                    {/* <Sort 
-                                        sort={sort} dir="/ordenes"
+                                    <Sort 
                                         name="Estado"
                                         serverArg="state"
                                         className=""
-                                        search=""
-                                    /> */}
-                                    Estado
+                                    />
                                 </th>
                             </tr>
                         </thead>
