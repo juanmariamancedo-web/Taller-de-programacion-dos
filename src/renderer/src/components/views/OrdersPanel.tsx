@@ -1,3 +1,4 @@
+import Search from "../Search"
 import Paginacion from "../Pagination"
 import { Sort } from "../Sort"
 
@@ -9,6 +10,7 @@ export default function(){
                 <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold flex flex-row gap-x-4 pb-6 lg:pb-10">
                     Ordenes
                 </h1>
+                <Search />
                 <div className="w-full overflow-x-auto rounded-xl border border-gray-200 dark:border-white/10">
                     <table className="w-full min-w-[640px] bg-black/5 dark:bg-white/5 text-sm text-gray-900 dark:text-white">
 
