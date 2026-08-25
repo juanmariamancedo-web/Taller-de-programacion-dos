@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import DarkMode from "../icons/DarkMode"
 import LightMode from "../icons/lightMode"
 
-type Theme = "light" | "dark"
+type Theme = "dark" | "light"
 
 function applyTheme(theme: Theme) {
   if (theme === "dark") {
@@ -13,37 +13,54 @@ function applyTheme(theme: Theme) {
 }
 
 export default function ButtonOfDarkMode() {
-  const [theme, setTheme] = useState<Theme>(() => {
-    const savedTheme = localStorage.getItem("theme") as Theme | null
-    if (savedTheme === "dark" || savedTheme === "light") return savedTheme
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
-  })
+  const [theme, setTheme] = useState<Theme>("light")
 
-  // Sincronizar clases de Tailwind
+  // 1. Sincronizar la clase HTML de Tailwind y localStorage en cada cambio de estado
   useEffect(() => {
     applyTheme(theme)
     localStorage.setItem("theme", theme)
   }, [theme])
 
+  // 2. Cargar tema inicial y escuchar eventos del Main Process (o fallback Web)
   useEffect(() => {
-    // 1. Si no existe Electron, salimos temprano
-    if (!window.electron?.ipcRenderer) return
+    const api = window.electronAPI
 
-    const handleThemeChanged = (_event: unknown, isDarkFromMenu: boolean) => {
-      setTheme(isDarkFromMenu ? "dark" : "light")
+    if (!api) {
+      const isSystemDark = window.matchMedia("(prefers-color-scheme: dark)").matches
+      const savedTheme = localStorage.getItem("theme") as Theme | null
+      const initial = savedTheme === "dark" || savedTheme === "light" 
+        ? savedTheme 
+        : (isSystemDark ? "dark" : "light")
+      
+      setTheme(initial)
+      return
     }
 
-    // 2. Escuchamos el evento
-    window.electron.ipcRenderer.on('theme-changed', handleThemeChanged)
+    // Tema inicial en Electron
+    api.getInitialTheme().then((initialTheme) => {
+      setTheme(initialTheme)
+    })
 
-    // 3. Función de limpieza (ahora está en el flujo principal del useEffect)
+    // Escuchar actualizaciones dinámicas desde Electron
+    const unsubscribe = api.onThemeChanged((isDarkFromMain) => {
+      setTheme(isDarkFromMain ? "dark" : "light")
+    })
+
     return () => {
-      window.electron.ipcRenderer.removeListener('theme-changed', handleThemeChanged)
+      if (unsubscribe) unsubscribe()
     }
   }, [])
 
-  const changeThemeMode = () => {
-    setTheme((prevTheme) => (prevTheme === "dark" ? "light" : "dark"))
+  // 3. Cambiar el tema al hacer clic
+  const changeThemeMode = async () => {
+    const nextTheme: Theme = theme === "dark" ? "light" : "dark"
+
+    if (window.electronAPI) {
+      const isDark = await window.electronAPI.setTheme(nextTheme)
+      setTheme(isDark ? "dark" : "light")
+    } else {
+      setTheme(nextTheme)
+    }
   }
 
   return (
