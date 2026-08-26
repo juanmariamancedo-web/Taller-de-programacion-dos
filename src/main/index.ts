@@ -1,9 +1,10 @@
-import { app, shell, BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { app, shell, BrowserWindow, nativeTheme } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setMainManu } from './menu'
-import { ThemeSource } from '../main/domain/types/electron-env'
+import { registerThemeIPC } from './presentation/ipc/theme.ipc';
+import { registerAuthIPC } from './presentation/ipc/auth.ipc'
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -66,22 +67,9 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
-// Handlers IPC para el Tema
-ipcMain.handle('theme:set', (_event, theme: ThemeSource) => {
-  nativeTheme.themeSource = theme
-  return nativeTheme.shouldUseDarkColors
-})
-
-ipcMain.handle('theme:get-initial', () => {
-  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
-})
-
-ipcMain.handle('theme:get-state', () => {
-  return {
-    isDark: nativeTheme.shouldUseDarkColors,
-    themeSource: nativeTheme.themeSource
-  }
-})
+//se registran IPC de forma modulars
+registerThemeIPC()
+registerAuthIPC()
 
 // Inicialización de la aplicación
 app.whenReady().then(() => {
