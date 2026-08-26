@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setMainManu } from './menu'
 import { ThemeSource } from '../main/domain/types/electron-env'
+import { registerThemeIPC } from './presentation/ipc/theme.ipc';
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -66,22 +67,7 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
-// Handlers IPC para el Tema
-ipcMain.handle('theme:set', (_event, theme: ThemeSource) => {
-  nativeTheme.themeSource = theme
-  return nativeTheme.shouldUseDarkColors
-})
-
-ipcMain.handle('theme:get-initial', () => {
-  return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
-})
-
-ipcMain.handle('theme:get-state', () => {
-  return {
-    isDark: nativeTheme.shouldUseDarkColors,
-    themeSource: nativeTheme.themeSource
-  }
-})
+registerThemeIPC()
 
 // Inicialización de la aplicación
 app.whenReady().then(() => {
