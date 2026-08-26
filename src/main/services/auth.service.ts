@@ -1,13 +1,27 @@
-const bcrypt = require('bcrypt')
-import {prisma} from "../infrastructure/db/prisma"
-import {Credentials, AuthResponse} from "../domain/types/electron-env"
+const bcrypt = require('bcryptjs');
+import { prisma } from '../infrastructure/db/prisma';
+import { Credentials, AuthResponse } from '../domain/types/electron-env';
+import { sessionService } from './session.service';
 
 export class AuthService {
+  async getActiveSession() {
+    const userId = sessionService.getToken();
+    if (!userId) return null;
+
+    // Buscar usuario en la BD usando el ID guardado
+    const user = await prisma.user.findUnique({
+      where: { id: Number(userId) },
+      select: { id: true, username: true, isActive: true }
+    });
+
+    return user;
+  }
+
   async login(credentials: Credentials): Promise<AuthResponse> {
     const { username, password } = credentials;
 
     try {
-      // 1. Buscar usuario por email con Prisma
+      // 1. Buscar usuario por username con Prisma
       const user = await prisma.user.findUnique({
         where: { username }
       });
@@ -29,7 +43,10 @@ export class AuthService {
         };
       }
 
-      // 3. Devolver datos del usuario (excluyendo el hash del password)
+      // 3. Persistir sesión encriptada en disco
+      sessionService.saveToken(String(user.id));
+
+      // 4. Devolver respuesta exitosa con los datos del usuario
       return {
         success: true,
         user: {
@@ -45,6 +62,11 @@ export class AuthService {
         message: 'Error al consultar la base de datos'
       };
     }
+  }
+
+  async logout() {
+    sessionService.clearSession();
+    return { success: true };
   }
 }
 
