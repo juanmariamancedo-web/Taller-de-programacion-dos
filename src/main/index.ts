@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { setMainManu } from './menu'
 import { ThemeSource } from '../main/domain/types/electron-env'
 import { registerThemeIPC } from './presentation/ipc/theme.ipc';
+import { registerAuthIPC } from './presentation/ipc/auth.ipc'
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -67,7 +68,9 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
+//se registran IPC de forma modulars
 registerThemeIPC()
+registerAuthIPC()
 
 // Inicialización de la aplicación
 app.whenReady().then(() => {
