@@ -1,9 +1,8 @@
-import { app, shell, BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { app, shell, BrowserWindow, nativeTheme } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setMainManu } from './menu'
-import { ThemeSource } from '../main/domain/types/electron-env'
 import { registerThemeIPC } from './presentation/ipc/theme.ipc';
 import { registerAuthIPC } from './presentation/ipc/auth.ipc'
 
