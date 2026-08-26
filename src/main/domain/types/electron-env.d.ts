@@ -29,6 +29,12 @@ export interface IElectronAPI {
   // Suscripción: recibe un callback y retorna la función de desuscripción
   onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe;
   login: (credentials: Credentials) => Promise<AuthResponse>;
+  logout: () => Promise<{success: boolean}>; 
+  getSession: () => Promise<{
+    id: bigint;
+    username: string;
+    isActive: boolean;
+  } | null>
 }
 
 // Extensión global del objeto Window

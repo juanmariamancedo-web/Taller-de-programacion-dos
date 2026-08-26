@@ -4,6 +4,7 @@ import ProductsPanel from './components/views/ProductsPanel'
 import { NavItem } from '../../main/domain/types/NavItem'
 import OrdersPanel from './components/views/OrdersPanel'
 import { useAppSelector } from "./store/hooks";
+import LoginPanel from './components/views/LoginPanel'
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
@@ -40,7 +41,9 @@ function App(): React.JSX.Element {
       ></div>
       <Header navItems={navItems} />
       <main className="container mx-auto pt-14 px-4">
-        {renderPanel()}
+        <LoginPanel>
+          {renderPanel()}
+        </LoginPanel>
       </main>
     </div>
   )
