@@ -15,6 +15,7 @@ interface Props {
 }
 
 export function Header({navItems}: Props){
+    const session = useAppSelector(state=>state.app.session)
     const dispatch = useAppDispatch()
 
     const currentTab = useAppSelector((state) => state.app.currentTab)
@@ -90,11 +91,13 @@ export function Header({navItems}: Props){
                                             </Link>
                                         </SwitchOpen>
                                     </li> */}
-                                    <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
-                                        <SwitchOpen setOpen={setOpen}>
-                                            <LoginOut />
-                                        </SwitchOpen>
-                                    </li>
+                                    {session &&
+                                        <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
+                                            <SwitchOpen setOpen={setOpen}>
+                                                <LoginOut />
+                                            </SwitchOpen>
+                                        </li>
+                                    }
                                     <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
                                         <SwitchOpen setOpen={setOpen}>
                                             <ButtonOfDarkMode />
