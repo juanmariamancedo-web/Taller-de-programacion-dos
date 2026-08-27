@@ -49,13 +49,19 @@ export default function LoginPanel({ children }: Props) {
     setLoginError(null);
 
     try {
-      await window.electronAPI?.login({ username, password });
+      const res = await window.electronAPI?.login({ username, password });
+
+      if (!res?.success) {
+        setLoginError(res?.message || 'Usuario o contraseña incorrectos');
+        return;
+      }
 
       const activeSession = await window.electronAPI?.getSession();
-      handleSetSession(activeSession); // Aplica el cast de bigint a string
+      handleSetSession(activeSession);
+
     } catch (error) {
-      console.error('Error al iniciar sesión:', error);
-      setLoginError('Credenciales inválidas o error de conexión.');
+      console.error('Error imprevisto en IPC:', error);
+      setLoginError('Error de conexión con el sistema.');
     }
   }
 
