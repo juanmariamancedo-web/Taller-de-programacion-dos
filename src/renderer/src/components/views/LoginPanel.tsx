@@ -1,24 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
+
+interface Session {
+  id: bigint;
+  username: string;
+  isActive: boolean;
+}
 
 interface Props {
   children: React.ReactNode;
 }
 
 export default function LoginPanel({ children }: Props) {
-  const [session, setSession] = useState<{
-        id: bigint;
-        username: string;
-        isActive: boolean;
-    } | null | undefined>(null);
+  const [session, setSession] = useState<Session | null | undefined>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   useEffect(() => {
     const checkSession = async () => {
       try {
         const activeSession = await window.electronAPI?.getSession();
-        console.log(activeSession);
         setSession(activeSession);
       } catch (error) {
         console.error('Error al obtener la sesión:', error);
@@ -30,8 +32,20 @@ export default function LoginPanel({ children }: Props) {
     checkSession();
   }, []);
 
-  function submit(){
+  async function submit(e: FormEvent){
+    e.preventDefault()
+    setLoginError(null);
 
+    try {
+        await window.electronAPI?.login({ username, password });
+        
+        const activeSession = await window.electronAPI?.getSession();
+      
+        setSession(activeSession);
+    } catch (error) {
+      console.error('Error al iniciar sesión:', error);
+      setLoginError('Credenciales inválidas o error de conexión.');
+    }
   }
 
   // Mientras se consulta el IPC de Electron, mostrás un loader o nada
@@ -42,7 +56,7 @@ export default function LoginPanel({ children }: Props) {
   // Si no hay sesión activa
   if (!session) {
     return (
-        <div className='container'>
+        <div className='flex-1 flex flex-col items-center justify-center'>
             <form onSubmit={submit} className="space-y-6">
                 {/* Email */}
                 <div className="flex flex-col gap-2">
@@ -58,10 +72,6 @@ export default function LoginPanel({ children }: Props) {
                         required
                         className="block w-full rounded-md bg-black/5 px-3 py-1.5 text-gray-900 outline-1 outline-gray-300 focus:outline-2 focus:outline-indigo-600 dark:bg-white/5 dark:text-white"
                     />
-
-                    {/* {errors.email && (
-                        <div className="text-red-500 text-sm">{errors.email}</div>
-                    )} */}
                 </div>
 
                 {/* Password */}
@@ -85,19 +95,17 @@ export default function LoginPanel({ children }: Props) {
                         autoComplete="current-password"
                         className="block w-full rounded-md bg-black/5 px-3 py-1.5 text-gray-900 outline-1 outline-gray-300 focus:outline-2 focus:outline-indigo-600 dark:bg-white/5 dark:text-white"
                     />
-
-                    {/* {errors.password && (
-                        <div className="text-red-500 text-sm">{errors.password}</div>
-                    )} */}
                 </div>
+
+                {loginError && (
+                    <div className="text-red-500 text-sm">{loginError}</div>
+                )}
 
                 {/* Submit */}
                 <button
                     type="submit"
-                    // disabled={processing}
                     className="w-full rounded-md bg-indigo-600 py-2 text-white font-semibold hover:bg-indigo-500 disabled:opacity-50"
                 >
-                    {/* {processing ? 'Enviando...' : 'Ingresar'} */}
                     Ingresar
                 </button>
             </form>
