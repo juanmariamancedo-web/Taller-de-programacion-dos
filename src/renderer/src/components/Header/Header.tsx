@@ -4,6 +4,7 @@ import SwitchOpen from "./SwitchOpen";
 import { NavItem } from "../../../../main/domain/types/NavItem";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { setCurrentTab } from "../../store/slices/appSlice";
+import LoginOut from "./Logout";
 // import LoginOut from "./LoginOut";
 // import ProfileIcon from "../icons/ProfileIcon";
 // import TogglePanel from "./TogglePanel";
@@ -91,8 +92,7 @@ export function Header({navItems}: Props){
                                     </li> */}
                                     <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
                                         <SwitchOpen setOpen={setOpen}>
-                                            <></>
-                                            {/* <LoginOut /> */}
+                                            <LoginOut />
                                         </SwitchOpen>
                                     </li>
                                     <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
