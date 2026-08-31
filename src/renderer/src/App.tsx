@@ -5,6 +5,7 @@ import { NavItem } from '../../main/domain/types/NavItem'
 import OrdersPanel from './components/views/OrdersPanel'
 import { useAppSelector } from "./store/hooks";
 import LoginPanel from './components/views/LoginPanel'
+import Users from './components/views/Users'
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
@@ -15,7 +16,8 @@ function App(): React.JSX.Element {
     { id: 'clients', label: 'Clientes'},
     { id: 'settings', label: 'Ajustes'},
     { id: 'products', label: 'Productos'},
-    {id: "orders", label: "Ordenes"}
+    {id: "orders", label: "Ordenes"},
+    {id: "users", label: "Usuarios"}
   ]
 
   //Asocciacion de id de paneles con Views
@@ -27,6 +29,8 @@ function App(): React.JSX.Element {
         return <ProductsPanel />
       case "orders":
         return <OrdersPanel />
+      case "users":
+        return <Users />
       default:
         return null
     }
