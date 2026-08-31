@@ -1,4 +1,4 @@
-const bcrypt = require('bcrypt');
+import bcrypt from 'bcryptjs';
 import { prisma } from '../infrastructure/db/prisma';
 import { Credentials, AuthResponse } from '../domain/types/electron-env';
 import { sessionService } from './session.service';
