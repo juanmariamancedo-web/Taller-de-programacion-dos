@@ -3,6 +3,7 @@ import HomePanel from './components/views/HomePanel'
 import ProductsPanel from './components/views/ProductsPanel'
 import { NavItem } from '../../main/domain/types/NavItem'
 import OrdersPanel from './components/views/OrdersPanel'
+import ClientsPanel from './components/views/ClientsPanel'
 import { useAppSelector } from "./store/hooks";
 import LoginPanel from './components/views/LoginPanel'
 
@@ -27,6 +28,8 @@ function App(): React.JSX.Element {
         return <ProductsPanel />
       case "orders":
         return <OrdersPanel />
+      case "clients":
+        return <ClientsPanel />
       default:
         return null
     }
