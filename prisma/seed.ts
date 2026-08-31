@@ -1,5 +1,5 @@
 import { prisma } from  "../src/main/infrastructure/db/prisma"
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 
 async function main() {
   // 1. Crear o asegurar que existan los tres roles
