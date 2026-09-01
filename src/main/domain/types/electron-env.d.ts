@@ -26,6 +26,21 @@ export interface SearchParams {
   sort: string
 }
 
+export interface OrderState {
+  id: bigint;
+  name: string;
+}
+
+export type OrderWithState = Prisma.OrderGetPayload<{
+  include: { currentState: true };
+}>;
+
+export interface OrderResponse {
+  success: boolean;
+  data?: OrderWithState[];
+  message?: string;
+}
+
 // Tipo explícito para la función de desuscripción
 export type Unsubscribe = () => void;
 
@@ -33,7 +48,7 @@ export interface IElectronAPI {
   // Invokes (Promesas)
   setTheme: (theme: ThemeSource) => Promise<boolean>;
   getInitialTheme: () => Promise<Theme>;
-  getOrders: (searchParams: SearchParams) => Promise<Order[]>
+  getOrders: (searchParams: SearchParams) => Promise<OrderResponse>
 
   // Suscripción: recibe un callback y retorna la función de desuscripción
   onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe;

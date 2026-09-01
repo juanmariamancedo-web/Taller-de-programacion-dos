@@ -8,10 +8,17 @@ export class OrdersService {
     const orders = await prisma.order.findMany({
       skip: (page - 1) * 5,
       take: 5,
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
+      select: {
+        currentState: {
+            select : {
+                name: true
+            }
+        }
+      }
     });
 
-    // Mapeamos los campos que no sean serializables directamente por IPC
+    // Mapeamos los acampos que no sean serializables directamente por IPC
     return orders.map(order => ({
       ...order
     }));
