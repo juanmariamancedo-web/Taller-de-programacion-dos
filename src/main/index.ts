@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { setMainManu } from './menu'
 import { registerThemeIPC } from './presentation/ipc/theme.ipc';
 import { registerAuthIPC } from './presentation/ipc/auth.ipc'
+import { registerOrderIPC } from './presentation/ipc/orders.ipc'
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -70,6 +71,7 @@ function createWindow(): BrowserWindow {
 //se registran IPC de forma modulars
 registerThemeIPC()
 registerAuthIPC()
+registerOrderIPC()
 
 // Inicialización de la aplicación
 app.whenReady().then(() => {
