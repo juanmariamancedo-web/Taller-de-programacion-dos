@@ -1,23 +1,28 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { ThemeSource, Credentials, AuthResponse, SearchParams } from '../main/domain/types/electron-env'
+import {
+  ThemeSource,
+  Credentials,
+  AuthResponse,
+  SearchParams,
+  ProvinceOption
+} from '../main/domain/types/electron-env'
 
 const api = {
-  login: (credentials: Credentials): Promise<AuthResponse> => ipcRenderer.invoke('auth:login', credentials),
+  login: (credentials: Credentials): Promise<AuthResponse> =>
+    ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
   getOrders: (params: SearchParams) => ipcRenderer.invoke('orders:getOrders', params),
+  getProvinces: (): Promise<ProvinceOption[]> => ipcRenderer.invoke('provinces:get-all'),
   logout: () => ipcRenderer.invoke('auth:logout'),
-  setTheme: (theme: ThemeSource): Promise<boolean> => 
-    ipcRenderer.invoke('theme:set', theme),
+  setTheme: (theme: ThemeSource): Promise<boolean> => ipcRenderer.invoke('theme:set', theme),
 
   getInitialTheme: (): Promise<'dark' | 'light'> => ipcRenderer.invoke('theme:get-initial'),
 
   onThemeChanged: (callback: (isDark: boolean) => void) => {
-    const subscription = (
-      _event: Electron.IpcRendererEvent, 
-      isDark: boolean
-    ): void => callback(isDark);
+    const subscription = (_event: Electron.IpcRendererEvent, isDark: boolean): void =>
+      callback(isDark)
 
-    ipcRenderer.on('theme-changed', subscription);
+    ipcRenderer.on('theme-changed', subscription)
   }
 }
 

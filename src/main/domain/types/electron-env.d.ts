@@ -1,69 +1,75 @@
-import { Order, Prisma } from "../../infrastructure/db/generated/client/client";
+import { Order, Prisma } from '../../infrastructure/db/generated/client/client'
 
 // electron-env.d.ts
-export type ThemeSource = "system" | "dark" | "light";
-export type Theme = "dark" | "light";
+export type ThemeSource = 'system' | 'dark' | 'light'
+export type Theme = 'dark' | 'light'
 
 export interface Credentials {
-  username: string;
-  password: string;
+  username: string
+  password: string
 }
 
 export interface AuthResponse {
-  success: boolean;
-  token?: string;
+  success: boolean
+  token?: string
   user?: {
-    id: string;
-    username: string;
-    isActive: boolean;
-  };
-  message?: string;
+    id: string
+    username: string
+    isActive: boolean
+  }
+  message?: string
 }
 
 export interface SearchParams {
-  search: string;
-  page: number;
-  sort: string;
+  search: string
+  page: number
+  sort: string
 }
 
 export interface OrderState {
-  id: bigint;
-  name: string;
+  id: bigint
+  name: string
 }
 
 export type OrderWithState = Prisma.OrderGetPayload<{
-  include: { currentState: true };
-}>;
+  include: { currentState: true }
+}>
 
 export interface OrderResponse {
-  success: boolean;
-  data?: OrderWithState[];
-  message?: string;
+  success: boolean
+  data?: OrderWithState[]
+  message?: string
+}
+
+export interface ProvinceOption {
+  id: string
+  name: string
 }
 
 // Tipo explícito para la función de desuscripción
-export type Unsubscribe = () => void;
+export type Unsubscribe = () => void
 
 export interface IElectronAPI {
   // Invokes (Promesas)
-  setTheme: (theme: ThemeSource) => Promise<boolean>;
-  getInitialTheme: () => Promise<Theme>;
-  getOrders: (searchParams: SearchParams) => Promise<OrderResponse>;
+  setTheme: (theme: ThemeSource) => Promise<boolean>
+  getInitialTheme: () => Promise<Theme>
+  getOrders: (searchParams: SearchParams) => Promise<OrderResponse>
+  getProvinces: () => Promise<ProvinceOption[]>
 
   // Suscripción: recibe un callback y retorna la función de desuscripción
-  onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe;
-  login: (credentials: Credentials) => Promise<AuthResponse>;
-  logout: () => Promise<{ success: boolean }>; 
+  onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe
+  login: (credentials: Credentials) => Promise<AuthResponse>
+  logout: () => Promise<{ success: boolean }>
   getSession: () => Promise<{
-    id: bigint;
-    username: string;
-    isActive: boolean;
-  } | null>;
+    id: bigint
+    username: string
+    isActive: boolean
+  } | null>
 }
 
 // Extensión global del objeto Window
 declare global {
   interface Window {
-    electronAPI?: IElectronAPI;
+    electronAPI?: IElectronAPI
   }
 }

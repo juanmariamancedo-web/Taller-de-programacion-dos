@@ -3,9 +3,10 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { setMainManu } from './menu'
-import { registerThemeIPC } from './presentation/ipc/theme.ipc';
+import { registerThemeIPC } from './presentation/ipc/theme.ipc'
 import { registerAuthIPC } from './presentation/ipc/auth.ipc'
 import { registerOrderIPC } from './presentation/ipc/orders.ipc'
+import { registerProvinceIPC } from './presentation/ipc/provinces.ipc'
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -27,7 +28,7 @@ function createWindow(): BrowserWindow {
   const handleThemeUpdate = () => {
     if (!mainWindow.isDestroyed()) {
       const isDark = nativeTheme.shouldUseDarkColors
-      
+
       mainWindow.webContents.send('theme-changed', isDark)
 
       if (process.platform === 'win32') {
@@ -72,6 +73,7 @@ function createWindow(): BrowserWindow {
 registerThemeIPC()
 registerAuthIPC()
 registerOrderIPC()
+registerProvinceIPC()
 
 // Inicialización de la aplicación
 app.whenReady().then(() => {
