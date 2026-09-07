@@ -9,7 +9,7 @@ export class UsersService {
       skip: (page - 1) * 5,
       take: 5,
       orderBy: { createdAt: "desc" },
-      select: {
+      include: {
         role: {
             select: {
                 name: true
@@ -19,8 +19,8 @@ export class UsersService {
     });
 
     // Mapeamos los acampos que no sean serializables directamente por IPC
-    return users.map(order => ({
-      ...order
+    return users.map(user => ({
+      ...user
     }));
   }
 }

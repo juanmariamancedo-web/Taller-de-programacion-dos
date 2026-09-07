@@ -41,13 +41,13 @@ export interface OrderResponse {
   message?: string;
 }
 
-export type UserWithState = Prisma.UserGetPayload<{
-  include: { roles: true };
+export type UserWithRole = Prisma.UserGetPayload<{
+  include: { role: true };
 }>;
 
 export interface UserResponse {
   success: boolean;
-  data?: User;
+  data?: UserWithRole[];
   message?: string;
 }
 
