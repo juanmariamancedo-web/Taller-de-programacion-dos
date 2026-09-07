@@ -56,6 +56,13 @@ export interface ProvinceOption {
   name: string
 }
 
+export interface DashboardData {
+  pendingOrders: number,
+  deliveredOrders: number,
+  averageTicket: number,
+  registeredClients: number
+}
+
 // Tipo explícito para la función de desuscripción
 export type Unsubscribe = () => void
 
@@ -63,6 +70,8 @@ export interface IElectronAPI {
   // Invokes (Promesas)
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
+
+  getDashboardData: ()=> Promise<DashboardData>
   getOrders: (searchParams: SearchParams) => Promise<OrderResponse>
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
   getProvinces: () => Promise<ProvinceOption[]>
