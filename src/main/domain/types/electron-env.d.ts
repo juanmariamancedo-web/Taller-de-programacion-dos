@@ -1,4 +1,4 @@
-import { Order } from "../../infrastructure/db/generated/client/client";
+import { Order, Prisma } from "../../infrastructure/db/generated/client/client";
 
 // electron-env.d.ts
 export type ThemeSource = "system" | "dark" | "light";
@@ -21,9 +21,9 @@ export interface AuthResponse {
 }
 
 export interface SearchParams {
-  search: string, 
-  page: number,
-  sort: string
+  search: string;
+  page: number;
+  sort: string;
 }
 
 export interface OrderState {
@@ -48,17 +48,17 @@ export interface IElectronAPI {
   // Invokes (Promesas)
   setTheme: (theme: ThemeSource) => Promise<boolean>;
   getInitialTheme: () => Promise<Theme>;
-  getOrders: (searchParams: SearchParams) => Promise<OrderResponse>
+  getOrders: (searchParams: SearchParams) => Promise<OrderResponse>;
 
   // Suscripción: recibe un callback y retorna la función de desuscripción
   onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe;
   login: (credentials: Credentials) => Promise<AuthResponse>;
-  logout: () => Promise<{success: boolean}>; 
+  logout: () => Promise<{ success: boolean }>; 
   getSession: () => Promise<{
     id: bigint;
     username: string;
     isActive: boolean;
-  } | null>,
+  } | null>;
 }
 
 // Extensión global del objeto Window

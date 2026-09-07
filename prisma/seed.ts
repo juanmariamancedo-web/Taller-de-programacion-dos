@@ -17,13 +17,13 @@ async function main() {
     create: { name: 'supervisor' },
   });
 
-  const sellerRole = await prisma.userRole.upsert({
+  await prisma.userRole.upsert({
     where: { name: 'seller' },
     update: {},
     create: { name: 'seller' },
   });
 
-  // 2. Usuario Vendedor / Admin
+  // 2. Usuario Admin
   const hashedPassword = await bcrypt.hash('123456', 10);
 
   const adminUser = await prisma.user.upsert({
