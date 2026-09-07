@@ -4,6 +4,7 @@ import ProductsPanel from './components/views/ProductsPanel'
 import { NavItem } from '../../main/domain/types/NavItem'
 import OrdersPanel from './components/views/OrdersPanel'
 import ClientsPanel from './components/views/ClientsPanel'
+import CreateClientPage from './components/views/CreateClientPage' // Importamos la vista del formulario
 import { useAppSelector } from "./store/hooks";
 import LoginPanel from './components/views/LoginPanel'
 import Users from './components/views/Users'
@@ -11,22 +12,20 @@ import Users from './components/views/Users'
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
 
-  //Asociacion de id de paneles con labels
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Inicio'},
     { id: 'clients', label: 'Clientes'},
     { id: 'settings', label: 'Ajustes'},
     { id: 'products', label: 'Productos'},
-    {id: "orders", label: "Ordenes"},
-    {id: "users", label: "Usuarios"}
+    { id: 'orders', label: 'Ordenes'},
+    { id: 'users', label: 'Usuarios'}
   ]
 
-  //Asocciacion de id de paneles con Views
   const renderPanel = () => {
     switch(currentTab){
       case "dashboard":
         return <HomePanel totalClients={3} totalPedidosPendientes={3} totalPedidosEntregados={3} averageTicket={3} />
-      case"products":
+      case "products":
         return <ProductsPanel />
       case "orders":
         return <OrdersPanel />
@@ -34,8 +33,11 @@ function App(): React.JSX.Element {
         return <Users />
       case "clients":
         return <ClientsPanel />
+      case "clients-create": 
+        return <CreateClientPage />
       default:
         return null
+        return <HomePanel totalClients={3} totalPedidosPendientes={3} totalPedidosEntregados={3} averageTicket={3} />
     }
   }
 

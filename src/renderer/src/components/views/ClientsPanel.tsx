@@ -4,25 +4,25 @@ import CambiarRole from '../Admin/CambiarRol'
 import BannearUsuario from '../Admin/BannerUsuario'
 import Search from '../Search'
 import { Sort } from '../Sort'
-import { useAppSelector } from '../../store/hooks'
 import type { User } from '../../types/User'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import { setCurrentTab } from "./../../store/slices/appSlice"
 
 export default function ClientsPanel() {
+  const dispatch = useAppDispatch()
   const session = useAppSelector((state) => state.app.session)
   const usuarios: User[] = []
-  
-  // Estado para controlar la visibilidad del formulario/modal
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
 
   return (
     <div className="flex flex-col items-center gap-3">
-      {/* Encabezado con Botón de Acción */}
+      {/* Encabezado */}
       <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
         <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">
           Clientes
         </h1>
+        
         <button
-          onClick={() => setIsAddModalOpen(true)}
+          onClick={() => dispatch(setCurrentTab('clients-create'))}
           className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2.5 rounded-lg transition shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500/50"
         >
           <svg
