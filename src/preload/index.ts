@@ -1,9 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { ThemeSource, Credentials, AuthResponse } from '../main/domain/types/electron-env'
+import { ThemeSource, Credentials, AuthResponse, SearchParams } from '../main/domain/types/electron-env'
 
 const api = {
   login: (credentials: Credentials): Promise<AuthResponse> => ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
+  getOrders: (params: SearchParams) => ipcRenderer.invoke('orders:getOrders', params),
   logout: () => ipcRenderer.invoke('auth:logout'),
   setTheme: (theme: ThemeSource): Promise<boolean> => 
     ipcRenderer.invoke('theme:set', theme),
