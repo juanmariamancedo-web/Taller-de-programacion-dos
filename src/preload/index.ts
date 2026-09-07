@@ -5,6 +5,7 @@ const api = {
   login: (credentials: Credentials): Promise<AuthResponse> => ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
   getOrders: (params: SearchParams) => ipcRenderer.invoke('orders:getOrders', params),
+  getUsers: (params: SearchParams) => ipcRenderer.invoke('users:getUsers', params),
   logout: () => ipcRenderer.invoke('auth:logout'),
   setTheme: (theme: ThemeSource): Promise<boolean> => 
     ipcRenderer.invoke('theme:set', theme),

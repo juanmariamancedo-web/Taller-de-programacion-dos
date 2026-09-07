@@ -6,6 +6,7 @@ import { setMainManu } from './menu'
 import { registerThemeIPC } from './presentation/ipc/theme.ipc';
 import { registerAuthIPC } from './presentation/ipc/auth.ipc'
 import { registerOrderIPC } from './presentation/ipc/orders.ipc'
+import { registerUserIPC } from './presentation/ipc/users.ipc'
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -72,6 +73,7 @@ function createWindow(): BrowserWindow {
 registerThemeIPC()
 registerAuthIPC()
 registerOrderIPC()
+registerUserIPC()
 
 // Inicialización de la aplicación
 app.whenReady().then(() => {
