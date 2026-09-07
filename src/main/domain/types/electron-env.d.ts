@@ -1,4 +1,4 @@
-import { Order, Prisma } from '../../infrastructure/db/generated/client/client'
+import { Order, Prisma, User } from '../../infrastructure/db/generated/client/client'
 
 // electron-env.d.ts
 export type ThemeSource = 'system' | 'dark' | 'light'
@@ -41,6 +41,16 @@ export interface OrderResponse {
   message?: string
 }
 
+export type UserWithRole = Prisma.UserGetPayload<{
+  include: { role: true }
+}>
+
+export interface UserResponse {
+  success: boolean
+  data?: UserWithRole[]
+  message?: string
+}
+
 export interface ProvinceOption {
   id: string
   name: string
@@ -54,6 +64,7 @@ export interface IElectronAPI {
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
   getOrders: (searchParams: SearchParams) => Promise<OrderResponse>
+  getUsers: (searchParams: SearchParams) => Promise<UserResponse>
   getProvinces: () => Promise<ProvinceOption[]>
 
   // Suscripción: recibe un callback y retorna la función de desuscripción

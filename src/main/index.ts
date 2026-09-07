@@ -7,6 +7,7 @@ import { registerThemeIPC } from './presentation/ipc/theme.ipc'
 import { registerAuthIPC } from './presentation/ipc/auth.ipc'
 import { registerOrderIPC } from './presentation/ipc/orders.ipc'
 import { registerProvinceIPC } from './presentation/ipc/provinces.ipc'
+import { registerUserIPC } from './presentation/ipc/users.ipc'
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -69,11 +70,12 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
-//se registran IPC de forma modulars
+// Se registran IPCs de forma modular
 registerThemeIPC()
 registerAuthIPC()
 registerOrderIPC()
 registerProvinceIPC()
+registerUserIPC()
 
 // Inicialización de la aplicación
 app.whenReady().then(() => {

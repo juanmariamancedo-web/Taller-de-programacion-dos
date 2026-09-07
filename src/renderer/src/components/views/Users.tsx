@@ -1,6 +1,8 @@
 import Search from "../Search"
 import Paginacion from "../Pagination"
 import { Sort } from "../Sort"
+import { useEffect, useState } from "react";
+import { UserWithRole } from "../../../../main/domain/types/electron-env";
 
 // model User {
 //   id        BigInt    @id @default(autoincrement())
@@ -17,6 +19,31 @@ import { Sort } from "../Sort"
 // }
 
 export default function(){
+    const [users, setUsers] = useState<UserWithRole[]>();
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchUsers = async () => {
+            try {
+                setIsLoading(true);
+                const response = await window.electronAPI?.getUsers({ page: 1, sort: "", search: "" });
+                
+                if (response?.success && response.data) {
+                    setUsers(response.data); // Envolver en array
+                } else {
+                    setError(response?.message || "");
+                }
+            } catch (err) {
+                setError('Error de comunicación con Electron');
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchUsers();
+    }, []);
+
     return(
         <>
             <div className="flex flex-col items-center gap-3">
@@ -29,6 +56,13 @@ export default function(){
 
                         <thead className="bg-gray-100 dark:bg-white/10">
                             <tr className="text-left text-sm font-semibold text-gray-700 dark:text-gray-200">
+                                <th className="px-4 py-3">
+                                    <Sort   
+                                        name="ID"
+                                        serverArg="id"
+                                        className=""
+                                    />
+                                </th>
                                 <th className="px-4 py-3">
                                     <Sort   
                                         name="Username"
@@ -54,48 +88,54 @@ export default function(){
                         </thead>
 
                         <tbody className="divide-y divide-gray-200 dark:divide-white/10 text-sm">
-                            {/* {ordenes?.length ? (
-                                ordenes.map((order) => {   
-                                    const total = order.item_orders.reduce(
-                                        (acc, item) => acc + item.unit_price * item.amount, 0
-                                    ) 
+                            {users?.length ? (
+                                users.map((user) => {   
                                     
                                     return (
                                                 <tr
-                                                key={order.id}
+                                                key={user.id}
                                                 className="hover:bg-gray-50 dark:hover:bg-white/5 transition"
                                                 >
                                                     <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
-                                                        <Link href={`/ordenes/${order.id}`} className="font-bold">
-                                                            #{order.id}
-                                                        </Link>
+                                                        {/* <Link href={`/ordenes/${order.id}`} className="font-bold"> */}
+                                                            #{user.id}
+                                                        {/* </Link> */}
                                                     </td>
 
                                                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                                                        ${total}
+                                                        {user.username}
                                                     </td>
                                                     <td className="px-4 py-3">
                                                         <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                                            order.state === "delivered"
-                                                                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                                                                : order.state === "paid"
-                                                                ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                                                                : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                                                            user.isActive?
+                                                                "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                                                : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-800"
                                                         }`}>
-                                                            {order.state}
+                                                            {user.isActive? "Activo": "Inactivo"}
+                                                        </span>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                                                            user.role.name === "admin"
+                                                                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                                                : user.role.name === "supervisor"
+                                                                ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                                                                : "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                                                        }`}>
+                                                            {user.role.name}
                                                         </span>
                                                     </td>
                                                 </tr>
                                         )
                                     }
                                 )
-                            ) : ( */}
+                            ) : (
                                 <tr>
                                     <td colSpan={4} className="text-center py-6 text-gray-500">
                                         No hay usuarios encontradas
                                     </td>
                                 </tr>
-                            {/* )} */}
+                            )}
                         </tbody>
                     </table>
                 </div>
