@@ -4,7 +4,9 @@ import {
   Credentials,
   AuthResponse,
   SearchParams,
-  ProvinceOption
+  ProvinceOption,
+  CreateClientInput,
+  CreateClientResponse
 } from '../main/domain/types/electron-env'
 
 const api = {
@@ -14,6 +16,8 @@ const api = {
   getOrders: (params: SearchParams) => ipcRenderer.invoke('orders:getOrders', params),
   getUsers: (params: SearchParams) => ipcRenderer.invoke('users:getUsers', params),
   getProvinces: (): Promise<ProvinceOption[]> => ipcRenderer.invoke('provinces:get-all'),
+  createClient: (input: CreateClientInput): Promise<CreateClientResponse> =>
+    ipcRenderer.invoke('clients:create', input),
   logout: () => ipcRenderer.invoke('auth:logout'),
   setTheme: (theme: ThemeSource): Promise<boolean> =>
     ipcRenderer.invoke('theme:set', theme),

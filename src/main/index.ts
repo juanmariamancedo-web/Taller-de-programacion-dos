@@ -7,7 +7,11 @@ import { registerThemeIPC } from './presentation/ipc/theme.ipc'
 import { registerAuthIPC } from './presentation/ipc/auth.ipc'
 import { registerOrderIPC } from './presentation/ipc/orders.ipc'
 import { registerProvinceIPC } from './presentation/ipc/provinces.ipc'
+<<<<<<< HEAD
 import { registerUserIPC } from './presentation/ipc/users.ipc'
+=======
+import { registerClientIPC } from './presentation/ipc/clients.ipc'
+>>>>>>> 0118c1d (se agregaron los campos faltantes del formulario y los datos se guardan correctamente en la db)
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -75,7 +79,11 @@ registerThemeIPC()
 registerAuthIPC()
 registerOrderIPC()
 registerProvinceIPC()
+<<<<<<< HEAD
 registerUserIPC()
+=======
+registerClientIPC()
+>>>>>>> 0118c1d (se agregaron los campos faltantes del formulario y los datos se guardan correctamente en la db)
 
 // Inicialización de la aplicación
 app.whenReady().then(() => {

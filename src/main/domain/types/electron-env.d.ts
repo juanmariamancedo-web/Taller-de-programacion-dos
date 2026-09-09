@@ -1,4 +1,4 @@
-import { Order, Prisma, User } from '../../infrastructure/db/generated/client/client'
+import { Prisma } from '../../infrastructure/db/generated/client/client'
 
 // electron-env.d.ts
 export type ThemeSource = 'system' | 'dark' | 'light'
@@ -56,6 +56,24 @@ export interface ProvinceOption {
   name: string
 }
 
+export interface CreateClientInput {
+  name: string
+  lastname: string
+  cuil: string
+  email: string
+  province: string
+  city: string
+  postalCode: string
+  street: string
+  number: number
+}
+
+export interface CreateClientResponse {
+  success: boolean
+  data?: { id: string }
+  error?: string
+}
+
 // Tipo explícito para la función de desuscripción
 export type Unsubscribe = () => void
 
@@ -66,6 +84,7 @@ export interface IElectronAPI {
   getOrders: (searchParams: SearchParams) => Promise<OrderResponse>
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
   getProvinces: () => Promise<ProvinceOption[]>
+  createClient: (input: CreateClientInput) => Promise<CreateClientResponse>
 
   // Suscripción: recibe un callback y retorna la función de desuscripción
   onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe
