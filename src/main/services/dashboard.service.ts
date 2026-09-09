@@ -10,6 +10,7 @@ export class DashboardService {
       totalOrdersCount,
       lastOrders,
       ordersTotalAggregate,
+      topProductsGrouped,
     ] = await Promise.all([
       prisma.client.count(),
 
@@ -31,7 +32,6 @@ export class DashboardService {
 
       prisma.order.count(),
 
-      // Solución al error de TypeScript: Incluimos 'currentState'
       prisma.order.findMany({
         orderBy: {
           createdAt: 'desc',
@@ -39,16 +39,49 @@ export class DashboardService {
         take: 5,
         include: {
           currentState: true,
+          client: true, // Incluimos client por si renderizas su nombre
         },
       }),
 
-      // Dado que Order tiene el campo `total`, agregamos directo desde la DB
       prisma.order.aggregate({
         _sum: {
           total: true,
         },
       }),
+
+      // Agrupamos en 'itemOrder' por productId y sumamos 'amount'
+      prisma.itemOrder.groupBy({
+        by: ['productId'],
+        _sum: {
+          amount: true,
+        },
+        orderBy: {
+          _sum: {
+            amount: 'desc',
+          },
+        },
+        take: 5,
+      }),
     ]);
+
+    // Mapeamos los IDs obtenidos para buscar sus detalles
+    const productIds = topProductsGrouped.map((item) => item.productId);
+
+    const productsDetails = await prisma.product.findMany({
+      where: {
+        id: { in: productIds },
+      },
+    });
+
+    // Combinamos la información del agrupamiento con los datos del producto
+    const topProducts = topProductsGrouped.map((item) => {
+      const product = productsDetails.find((p) => p.id === item.productId);
+      return {
+        id: item.productId,
+        name: product?.name ?? 'Producto no encontrado',
+        totalSold: item._sum.amount ?? 0,
+      };
+    });
 
     const totalRevenue = Number(ordersTotalAggregate._sum.total ?? 0);
     const averageTicket = totalOrdersCount > 0 ? totalRevenue / totalOrdersCount : 0;
@@ -61,6 +94,7 @@ export class DashboardService {
         deliveredOrders,
         averageTicket,
         lastOrders,
+        topProducts,
       },
     };
   }

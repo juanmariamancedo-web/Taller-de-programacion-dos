@@ -56,12 +56,19 @@ export interface ProvinceOption {
   name: string
 }
 
+export interface TopProduct {
+  id: bigint;
+  name: string;
+  totalSold: number;
+}
+
 export interface DashboardData {
   pendingOrders: number,
   deliveredOrders: number,
   averageTicket: number,
   registeredClients: number,
-  lastOrders?: OrderWithState[]
+  lastOrders?: OrderWithState[],
+  topProducts?: TopProduct[]
 }
 
 export interface DashboardDataResponse {

@@ -149,15 +149,16 @@ export default function HomePanel(){
                             </tbody>
                         </table>
                     </section>
-                    {/* {topProductos.length > 0 && (
+                    {dashboardData?.topProducts?.length && (
                         <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white col-span-1 flex flex-col gap-3">
                             <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
                                 Top 5 productos vendidos
                             </h2>
                             <div className="flex gap-2 flex-col">
-                                {topProductos.map((product, index)=>{
+                                {dashboardData.topProducts.map((product, index)=>{
                                     return(
-                                        <Link href={`\\catalogo\\${product.name}`}>
+                                        
+                                        // <Link href={`\\catalogo\\${product.name}`}>
                                             <article>
                                                 <h3 className="font-mono">
                                                     {product.name}
@@ -166,12 +167,12 @@ export default function HomePanel(){
                                                     Ranking #{index + 1}
                                                 </span>
                                             </article>
-                                        </Link>
+                                        // </Link>
                                     )
                                 })}
                             </div>
                         </section>
-                    )} */}
+                    )}
                 </ div>
             </ div>
         </div>
