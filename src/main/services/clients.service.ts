@@ -5,14 +5,10 @@ export class ClientsService {
   async deleteClient(id: string): Promise<{ id: string }> {
     return prisma.$transaction(async (transaction) => {
       const clientId = BigInt(id)
-      const orders = await transaction.order.count({ where: { clientId } })
-
-      if (orders > 0) {
-        throw new Error('No se puede eliminar un cliente que tiene órdenes asociadas.')
-      }
-
-      await transaction.address.deleteMany({ where: { clientId } })
-      await transaction.client.delete({ where: { id: clientId } })
+      await transaction.client.update({
+        where: { id: clientId },
+        data: { isActive: false }
+      })
 
       return { id }
     })
