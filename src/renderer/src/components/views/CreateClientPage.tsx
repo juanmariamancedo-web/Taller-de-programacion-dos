@@ -6,9 +6,12 @@ type FormData = {
   name: string
   lastname: string
   cuil_cuit: string
+  email: string
   province: string
   city: string
   postcode: string
+  street: string
+  number: string
 }
 
 type FormErrors = Partial<Record<keyof FormData, string>>
@@ -49,7 +52,12 @@ function validateForm(data: FormData, provinceNames: string[]): FormErrors {
   }
 
   if (!isValidCuil(data.cuil_cuit)) errors.cuil_cuit = 'Debe tener 11 dígitos y un CUIT/CUIL válido.'
+  if (!/^\S+@\S+\.\S+$/.test(data.email)) errors.email = 'Ingresá un email válido.'
   if (!/^\d{4,8}$/.test(data.postcode)) errors.postcode = 'Usa entre 4 y 8 números.'
+  if (data.street.trim().length < 2 || data.street.trim().length > 80) {
+    errors.street = 'Usa entre 2 y 80 caracteres.'
+  }
+  if (!/^\d{1,6}$/.test(data.number)) errors.number = 'Usa entre 1 y 6 números.'
 
   return errors
 }
@@ -77,15 +85,20 @@ export default function CreateClientPage() {
     name: '',
     lastname: '',
     cuil_cuit: '',
+    email: '',
     province: '',
     city: '',
     postcode: '',
+    street: '',
+    number: '',
   })
   const [errors, setErrors] = useState<FormErrors>({})
   const [hasSubmitted, setHasSubmitted] = useState(false)
   const [provinces, setProvinces] = useState<Array<{ id: string; name: string }>>([])
   const [loadingProvinces, setLoadingProvinces] = useState(true)
   const [provinceLoadError, setProvinceLoadError] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     const loadProvinces = async () => {
@@ -108,6 +121,7 @@ export default function CreateClientPage() {
     const { name, value } = e.target
     const nextValue =
       name === 'cuil_cuit' || name === 'postcode'
+      || name === 'number'
         ? value.replace(/\D/g, '')
         : name === 'name' || name === 'lastname' || name === 'city'
           ? value.replace(invalidTextCharactersPattern, '')
@@ -126,7 +140,7 @@ export default function CreateClientPage() {
   }
 }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const validationErrors = validateForm(formData, provinces.map((province) => province.name))
     setHasSubmitted(true)
@@ -134,8 +148,29 @@ export default function CreateClientPage() {
 
     if (Object.keys(validationErrors).length > 0) return
 
-    // Aquí conectaremos más adelante con Prisma / IPC de Electron
-    console.log('Datos del nuevo cliente:', formData)
+    setSaving(true)
+    setSaveError(null)
+
+    try {
+      const response = await window.electronAPI?.createClient({
+        name: formData.name.trim(),
+        lastname: formData.lastname.trim(),
+        cuil: formData.cuil_cuit,
+        email: formData.email.trim(),
+        province: formData.province,
+        city: formData.city.trim(),
+        postalCode: formData.postcode,
+        street: formData.street.trim(),
+        number: Number(formData.number)
+      })
+
+      if (!response?.success) throw new Error(response?.error ?? 'No se pudo guardar el cliente.')
+      dispatch(setCurrentTab('clients'))
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'No se pudo guardar el cliente.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const hasValue = (field: keyof FormData) => formData[field].trim().length > 0
@@ -146,7 +181,7 @@ export default function CreateClientPage() {
         ? 'border-emerald-400 bg-emerald-50/50 focus:border-emerald-500 focus:ring-emerald-500/20 dark:border-emerald-400/70 dark:bg-emerald-500/10'
         : 'border-slate-200 bg-slate-50/70 focus:border-blue-500 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04]'
 
-    return `w-full rounded-xl border px-4 py-3 pr-10 text-slate-900 outline-none transition placeholder:text-slate-400 focus:ring-4 dark:text-white ${stateClass}`
+    return `relative z-10 w-full cursor-text select-text rounded-xl border px-4 py-3 pr-10 text-slate-900 caret-blue-600 outline-none transition placeholder:text-slate-400 focus:ring-4 dark:text-white dark:caret-blue-300 ${stateClass}`
   }
 
   const fieldMessage = (field: keyof FormData) => errors[field] || (hasSubmitted && hasValue(field) ? 'Campo válido' : '')
@@ -176,7 +211,7 @@ export default function CreateClientPage() {
       {/* Formulario */}
       <form
         onSubmit={handleSubmit}
-        className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_18px_50px_-30px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-zinc-900"
+        className="relative z-0 space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_18px_50px_-30px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-zinc-900"
       >
         <div className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-900 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-100">
           <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">i</span>
@@ -261,6 +296,28 @@ export default function CreateClientPage() {
             <p className={`mt-1.5 text-xs ${errors.cuil_cuit ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'}`}>{fieldMessage('cuil_cuit')}</p>
           </div>
 
+          {/* Email */}
+          <div>
+            <label htmlFor="email" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
+              Email
+            </label>
+            <div className="relative">
+              <input
+                id="email"
+                type="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                placeholder="Ej. juan@correo.com"
+                required
+                className={inputClass('email')}
+                aria-invalid={Boolean(errors.email)}
+              />
+              <FieldStatus error={errors.email} valid={hasSubmitted && hasValue('email')} />
+            </div>
+            <p className={`mt-1.5 text-xs ${errors.email ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'}`}>{fieldMessage('email')}</p>
+          </div>
+
           {/* Código Postal */}
           <div>
             <label htmlFor="postcode" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
@@ -283,6 +340,51 @@ export default function CreateClientPage() {
               <FieldStatus error={errors.postcode} valid={hasSubmitted && hasValue('postcode')} />
             </div>
             <p className={`mt-1.5 text-xs ${errors.postcode ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'}`}>{fieldMessage('postcode')}</p>
+          </div>
+
+          {/* Domicilio */}
+          <div>
+            <label htmlFor="street" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
+              Calle
+            </label>
+            <div className="relative">
+              <input
+                id="street"
+                type="text"
+                name="street"
+                value={formData.street}
+                onChange={handleChange}
+                placeholder="Ej. San Martín"
+                required
+                className={inputClass('street')}
+                aria-invalid={Boolean(errors.street)}
+              />
+              <FieldStatus error={errors.street} valid={hasSubmitted && hasValue('street')} />
+            </div>
+            <p className={`mt-1.5 text-xs ${errors.street ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'}`}>{fieldMessage('street')}</p>
+          </div>
+
+          <div>
+            <label htmlFor="number" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
+              Número
+            </label>
+            <div className="relative">
+              <input
+                id="number"
+                type="text"
+                name="number"
+                value={formData.number}
+                onChange={handleChange}
+                placeholder="Ej. 1234"
+                required
+                inputMode="numeric"
+                maxLength={6}
+                className={inputClass('number')}
+                aria-invalid={Boolean(errors.number)}
+              />
+              <FieldStatus error={errors.number} valid={hasSubmitted && hasValue('number')} />
+            </div>
+            <p className={`mt-1.5 text-xs ${errors.number ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'}`}>{fieldMessage('number')}</p>
           </div>
 
           {/* Provincia */}
@@ -343,6 +445,12 @@ export default function CreateClientPage() {
           </div>
         </div>
 
+        {saveError && (
+          <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-200">
+            {saveError}
+          </div>
+        )}
+
         {/* Botones de acción */}
         <div className="flex justify-end gap-4 border-t border-slate-200 pt-4 dark:border-white/10">
           <button
@@ -354,9 +462,10 @@ export default function CreateClientPage() {
           </button>
           <button
             type="submit"
+            disabled={saving}
             className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-500/30"
           >
-            Guardar cliente
+            {saving ? 'Guardando...' : 'Guardar cliente'}
           </button>
         </div>
       </form>

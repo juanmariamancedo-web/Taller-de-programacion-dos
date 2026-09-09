@@ -1,0 +1,172 @@
+import { prisma } from '../infrastructure/db/prisma'
+import { CreateClientInput, SearchParams } from '../domain/types/electron-env'
+
+export class ClientsService {
+  async deleteClient(id: string): Promise<{ id: string }> {
+    return prisma.$transaction(async (transaction) => {
+      const clientId = BigInt(id)
+      const orders = await transaction.order.count({ where: { clientId } })
+
+      if (orders > 0) {
+        throw new Error('No se puede eliminar un cliente que tiene órdenes asociadas.')
+      }
+
+      await transaction.address.deleteMany({ where: { clientId } })
+      await transaction.client.delete({ where: { id: clientId } })
+
+      return { id }
+    })
+  }
+
+  async getClients(searchParams: SearchParams): Promise<{
+    data: Array<{
+      id: string
+      name: string
+      lastname: string
+      cuil: string
+      email: string
+      isActive: boolean
+      address?: { postalCode: string; city: string; province: string }
+    }>
+    total: number
+  }> {
+    const page = Math.max(searchParams.page, 1)
+    const pageSize = 5
+    const search = searchParams.search.trim()
+    const where = search
+      ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' as const } },
+            { lastname: { contains: search, mode: 'insensitive' as const } },
+            { cuil: { contains: search, mode: 'insensitive' as const } },
+            { email: { contains: search, mode: 'insensitive' as const } }
+          ]
+        }
+      : undefined
+
+    const [clients, total] = await prisma.$transaction([
+      prisma.client.findMany({
+        where,
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        orderBy: { id: searchParams.sort.toLowerCase().endsWith('desc') ? 'desc' : 'asc' },
+        select: {
+          id: true,
+          name: true,
+          lastname: true,
+          cuil: true,
+          email: true,
+          isActive: true,
+          addresses: {
+            take: 1,
+            select: {
+              postalCode: true,
+              city: { select: { name: true, province: { select: { name: true } } } }
+            }
+          }
+        }
+      }),
+      prisma.client.count({ where })
+    ])
+
+    return {
+      data: clients.map((client) => {
+        const address = client.addresses[0]
+        return {
+          id: client.id.toString(),
+          name: client.name,
+          lastname: client.lastname,
+          cuil: client.cuil,
+          email: client.email,
+          isActive: client.isActive,
+          ...(address
+            ? {
+                address: {
+                  postalCode: address.postalCode,
+                  city: address.city.name,
+                  province: address.city.province.name
+                }
+              }
+            : {})
+        }
+      }),
+      total
+    }
+  }
+
+  async createClient(input: CreateClientInput): Promise<{ id: string }> {
+    return prisma.$transaction(async (transaction) => {
+      const duplicate = await transaction.client.findFirst({
+        where: {
+          OR: [{ cuil: input.cuil }, { email: input.email }]
+        },
+        select: { cuil: true, email: true }
+      })
+
+      if (duplicate?.cuil === input.cuil) {
+        throw new Error('Ya existe un cliente registrado con ese CUIL/CUIT.')
+      }
+
+      if (duplicate?.email === input.email) {
+        throw new Error('Ya existe un cliente registrado con ese email.')
+      }
+
+      const province = await transaction.province.findUnique({
+        where: { name: input.province },
+        select: { id: true }
+      })
+
+      if (!province) {
+        throw new Error('La provincia seleccionada no existe.')
+      }
+
+      const existingCity = await transaction.city.findFirst({
+        where: { name: input.city, provinceId: province.id },
+        select: { id: true }
+      })
+
+      const city = existingCity ?? await transaction.city.create({
+        data: { name: input.city, provinceId: province.id },
+        select: { id: true }
+      })
+
+      const clients = await transaction.client.findMany({
+        select: { id: true },
+        orderBy: { id: 'asc' }
+      })
+      let nextClientId = 1n
+
+      for (const existingClient of clients) {
+        if (existingClient.id === nextClientId) {
+          nextClientId++
+          continue
+        }
+
+        if (existingClient.id > nextClientId) break
+      }
+
+      const client = await transaction.client.create({
+        data: {
+          id: nextClientId,
+          name: input.name,
+          lastname: input.lastname,
+          cuil: input.cuil,
+          email: input.email,
+          addresses: {
+            create: {
+              street: input.street,
+              number: input.number,
+              postalCode: input.postalCode,
+              city: { connect: { id: city.id } }
+            }
+          }
+        },
+        select: { id: true }
+      })
+
+      return { id: client.id.toString() }
+    })
+  }
+}
+
+export const clientsService = new ClientsService()

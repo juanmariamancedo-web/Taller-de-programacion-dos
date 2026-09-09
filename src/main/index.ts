@@ -8,6 +8,7 @@ import { registerAuthIPC } from './presentation/ipc/auth.ipc'
 import { registerOrderIPC } from './presentation/ipc/orders.ipc'
 import { registerProvinceIPC } from './presentation/ipc/provinces.ipc'
 import { registerUserIPC } from './presentation/ipc/users.ipc'
+import { registerClientIPC } from './presentation/ipc/clients.ipc'
 import { registerDashboardIPC } from './presentation/ipc/dashboard.ipc'
 
 function createWindow(): BrowserWindow {
@@ -26,7 +27,6 @@ function createWindow(): BrowserWindow {
     }
   })
 
-  // Sincronizar el estado del tema con la UI (Renderer) y la barra nativa
   const handleThemeUpdate = () => {
     if (!mainWindow.isDestroyed()) {
       const isDark = nativeTheme.shouldUseDarkColors
@@ -71,15 +71,14 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
-// Se registran IPCs de forma modular
 registerThemeIPC()
 registerAuthIPC()
 registerOrderIPC()
 registerProvinceIPC()
 registerUserIPC()
+registerClientIPC()
 registerDashboardIPC()
 
-// Inicialización de la aplicación
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')
 

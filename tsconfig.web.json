@@ -8,10 +8,6 @@
     "src/main/**/*"
   ],
   "compilerOptions": {
-    "composite": true,
-    "baseUrl": "./src/renderer/src",
-    "paths": {
-      "*": ["*"]
-    }
+    "composite": true
   }
 }

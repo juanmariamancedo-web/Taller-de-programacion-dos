@@ -3,37 +3,34 @@ import { useAppDispatch } from "./../../store/hooks"
 import { useEffect, useState } from "react"
 import { DashboardData } from "../../../../main/domain/types/electron-env"
 
-export default function HomePanel(){
+export default function HomePanel() {
     const dispatch = useAppDispatch()
-    const [dashboardData, setDashboardData] = useState<DashboardData>();
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    
+    const [dashboardData, setDashboardData] = useState<DashboardData>()
+    const [isLoading, setIsLoading] = useState(true)
+    const [error, setError] = useState<string | null>(null)
 
     useEffect(() => {
         const fetchHomePanel = async () => {
             try {
-                setIsLoading(true);
-                const response = await window.electronAPI?.getDashboardData();
-                
+                setIsLoading(true)
+                const response = await window.electronAPI?.getDashboardData()
+
                 if (response && response.success) {
-                    // Si la data viene dentro de response.data:
-                    setDashboardData(response.data);
+                    setDashboardData(response.data)
                 } else {
-                    setError(response?.message || "No se pudieron cargar los datos");
+                    setError(response?.message || "No se pudieron cargar los datos")
                 }
             } catch (err) {
-                setError("Error de comunicación con Electron");
+                setError("Error de comunicación con Electron")
             } finally {
-                setIsLoading(false);
+                setIsLoading(false)
             }
-        };
+        }
 
-        fetchHomePanel();
-    }, []);
+        fetchHomePanel()
+    }, [])
 
-
-    return(
+    return (
         <div className="flex flex-col items-center">
             <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold flex flex-row gap-x-4 pb-6 lg:pb-10">
                 Dashboard
@@ -49,7 +46,6 @@ export default function HomePanel(){
                                 {dashboardData?.pendingOrders}
                             </span>
                         </header>
-
                     </section>
 
                     <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white">
@@ -61,8 +57,8 @@ export default function HomePanel(){
                                 ${dashboardData?.averageTicket ?? (dashboardData as any)?.averageticket}
                             </span>
                         </header>
-                        
                     </section>
+
                     <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white">
                         <header>
                             <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
@@ -72,7 +68,6 @@ export default function HomePanel(){
                                 {dashboardData?.registeredClients}
                             </span>
                         </header>
-                        
                     </section>
 
                     <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white">
@@ -84,9 +79,9 @@ export default function HomePanel(){
                                 {dashboardData?.deliveredOrders}
                             </span>
                         </header>
-                        
                     </section>
                 </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <section className="col-span-1 sm:col-span-2 flex flex-col">
                         <div className="flex items-center justify-between mb-4">
@@ -95,7 +90,8 @@ export default function HomePanel(){
                             </h2>
                             <button
                                 className="text-sm text-blue-600 hover:underline dark:text-blue-400"
-                                onClick={()=>dispatch(setCurrentTab("orders"))}>
+                                onClick={() => dispatch(setCurrentTab("orders"))}
+                            >
                                 Ver todos
                             </button>
                         </div>
@@ -116,22 +112,18 @@ export default function HomePanel(){
                                             key={order.id}
                                             className="hover:bg-gray-50 dark:hover:bg-white/5 transition"
                                         >
-                                            {/* 1. ID del Pedido */}
                                             <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
                                                 #{order.id}
                                             </td>
 
-                                            {/* 2. Cliente */}
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                                                {order.client.name ? `${order.client.name ?? ''} ${order.client.lastname ?? ''}` : 'Sin cliente'}
+                                                {order.client?.name ? `${order.client.name ?? ''} ${order.client.lastname ?? ''}` : 'Sin cliente'}
                                             </td>
 
-                                            {/* 3. Total */}
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                                                 ${Number(order.total) ?? 0}
                                             </td>
 
-                                            {/* 4. Estado */}
                                             <td className="px-4 py-3">
                                                 <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
                                                     order.currentState.name === "delivered"
@@ -155,32 +147,28 @@ export default function HomePanel(){
                             </tbody>
                         </table>
                     </section>
-                    {dashboardData?.topProducts?.length && (
+
+                    {dashboardData?.topProducts && dashboardData.topProducts.length > 0 && (
                         <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white col-span-1 flex flex-col gap-3">
                             <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
                                 Top 5 productos vendidos
                             </h2>
                             <div className="flex gap-2 flex-col">
-                                {dashboardData.topProducts.map((product, index)=>{
-                                    return(
-                                        
-                                        // <Link href={`\\catalogo\\${product.name}`}>
-                                            <article>
-                                                <h3 className="font-mono">
-                                                    {product.name}
-                                                </h3>
-                                                <span className="font-bold">
-                                                    Ranking #{index + 1}
-                                                </span>
-                                            </article>
-                                        // </Link>
-                                    )
-                                })}
+                                {dashboardData.topProducts.map((product, index) => (
+                                    <article key={product.id ?? index}>
+                                        <h3 className="font-mono">
+                                            {product.name}
+                                        </h3>
+                                        <span className="font-bold">
+                                            Ranking #{index + 1}
+                                        </span>
+                                    </article>
+                                ))}
                             </div>
                         </section>
                     )}
-                </ div>
-            </ div>
+                </div>
+            </div>
         </div>
     )
 }
