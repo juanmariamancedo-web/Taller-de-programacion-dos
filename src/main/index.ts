@@ -7,11 +7,8 @@ import { registerThemeIPC } from './presentation/ipc/theme.ipc'
 import { registerAuthIPC } from './presentation/ipc/auth.ipc'
 import { registerOrderIPC } from './presentation/ipc/orders.ipc'
 import { registerProvinceIPC } from './presentation/ipc/provinces.ipc'
-<<<<<<< HEAD
 import { registerUserIPC } from './presentation/ipc/users.ipc'
-=======
 import { registerClientIPC } from './presentation/ipc/clients.ipc'
->>>>>>> 0118c1d (se agregaron los campos faltantes del formulario y los datos se guardan correctamente en la db)
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -29,7 +26,6 @@ function createWindow(): BrowserWindow {
     }
   })
 
-  // Sincronizar el estado del tema con la UI (Renderer) y la barra nativa
   const handleThemeUpdate = () => {
     if (!mainWindow.isDestroyed()) {
       const isDark = nativeTheme.shouldUseDarkColors
@@ -74,18 +70,13 @@ function createWindow(): BrowserWindow {
   return mainWindow
 }
 
-// Se registran IPCs de forma modular
 registerThemeIPC()
 registerAuthIPC()
 registerOrderIPC()
 registerProvinceIPC()
-<<<<<<< HEAD
 registerUserIPC()
-=======
 registerClientIPC()
->>>>>>> 0118c1d (se agregaron los campos faltantes del formulario y los datos se guardan correctamente en la db)
 
-// Inicialización de la aplicación
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')
 

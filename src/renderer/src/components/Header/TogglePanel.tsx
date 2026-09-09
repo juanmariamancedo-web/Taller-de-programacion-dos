@@ -1,6 +1,6 @@
 // import SwitchOpen from "./SwitchOpen";
 
-export default function TogglePanel({ setOpen }: { setOpen: React.Dispatch<React.SetStateAction<boolean>> }) {
+export default function TogglePanel() {
     return (
         <></>
     )

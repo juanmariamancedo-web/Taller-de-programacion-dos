@@ -51,6 +51,8 @@ export default function(){
                     Usuarios
                 </h1>
                 <Search />
+                {error && <p className="text-rose-600 dark:text-rose-300">{error}</p>}
+                {isLoading && <p className="text-gray-500">Cargando usuarios...</p>}
                 <div className="w-full overflow-x-auto rounded-xl border border-gray-200 dark:border-white/10">
                     <table className="w-full min-w-[640px] bg-black/5 dark:bg-white/5 text-sm text-gray-900 dark:text-white">
 

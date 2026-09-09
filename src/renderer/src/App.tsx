@@ -37,7 +37,6 @@ function App(): React.JSX.Element {
         return <CreateClientPage />
       default:
         return null
-        return <HomePanel totalClients={3} totalPedidosPendientes={3} totalPedidosEntregados={3} averageTicket={3} />
     }
   }
 

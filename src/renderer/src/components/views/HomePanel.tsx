@@ -1,17 +1,6 @@
 import { setCurrentTab } from "./../../store/slices/appSlice"
 import { useAppDispatch } from "./../../store/hooks"
 
-type Ordenes = {
-    id: number,
-    user : {
-        name: string,
-        lastname: string,
-    },
-    state: string,
-
-    total: number
-}
-
 export default function HomePanel({
         totalClients,
         totalPedidosPendientes,
