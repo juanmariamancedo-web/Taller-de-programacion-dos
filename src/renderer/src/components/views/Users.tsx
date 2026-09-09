@@ -3,6 +3,9 @@ import Paginacion from "../Pagination"
 import { Sort } from "../Sort"
 import { useEffect, useState } from "react";
 import { UserWithRole } from "../../../../main/domain/types/electron-env";
+import { useAppSelector } from "../../store/hooks"
+
+
 
 // model User {
 //   id        BigInt    @id @default(autoincrement())
@@ -20,17 +23,23 @@ import { UserWithRole } from "../../../../main/domain/types/electron-env";
 
 export default function(){
     const [users, setUsers] = useState<UserWithRole[]>();
+    const [pages, setPages] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const sort = useAppSelector(state=>state.app.sort)
+    const search = useAppSelector(state=>state.app.search)
+    const page = useAppSelector(state=>state.app.page)
 
     useEffect(() => {
         const fetchUsers = async () => {
             try {
                 setIsLoading(true);
-                const response = await window.electronAPI?.getUsers({ page: 1, sort: "", search: "" });
+                const response = await window.electronAPI?.getUsers({ page, sort, search});
                 
                 if (response?.success && response.data) {
-                    setUsers(response.data); // Envolver en array
+                    console.log(response)
+                    setUsers(response.data);
+                    setPages(response.totalPages)
                 } else {
                     setError(response?.message || "");
                 }
@@ -42,7 +51,11 @@ export default function(){
         };
 
         fetchUsers();
-    }, []);
+    }, [sort, search, page]);
+
+    // useEffect(()=>{
+    //     console.log(users)
+    // }, [sort, search, page])
 
     return(
         <>
@@ -59,7 +72,7 @@ export default function(){
                                 <th className="px-4 py-3">
                                     <Sort   
                                         name="ID"
-                                        serverArg="id"
+                                        serverArg="userID"
                                         className=""
                                     />
                                 </th>
@@ -73,7 +86,7 @@ export default function(){
                                 <th className="px-4 py-3">
                                     <Sort 
                                         name="Activo"
-                                        serverArg="activo"
+                                        serverArg="active"
                                         className=""
                                     />
                                 </th>
@@ -139,7 +152,7 @@ export default function(){
                         </tbody>
                     </table>
                 </div>
-                <Paginacion paginas={5} />
+                <Paginacion paginas={pages} />
             </ div>
         </>
     )
