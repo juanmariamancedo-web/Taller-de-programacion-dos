@@ -74,6 +74,27 @@ export interface CreateClientResponse {
   error?: string
 }
 
+export interface ClientListItem {
+  id: string
+  name: string
+  lastname: string
+  cuil: string
+  email: string
+  isActive: boolean
+  address?: {
+    postalCode: string
+    city: string
+    province: string
+  }
+}
+
+export interface ClientListResponse {
+  success: boolean
+  data?: ClientListItem[]
+  total?: number
+  error?: string
+}
+
 // Tipo explícito para la función de desuscripción
 export type Unsubscribe = () => void
 
@@ -85,6 +106,7 @@ export interface IElectronAPI {
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
   getProvinces: () => Promise<ProvinceOption[]>
   createClient: (input: CreateClientInput) => Promise<CreateClientResponse>
+  getClients: (searchParams: SearchParams) => Promise<ClientListResponse>
 
   // Suscripción: recibe un callback y retorna la función de desuscripción
   onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe
