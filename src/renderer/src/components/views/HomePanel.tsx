@@ -122,19 +122,25 @@ export default function HomePanel(){
                                             </td>
 
                                             {/* 2. Cliente */}
-                                            {/* <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                                                {order.user ? `${order.user.name ?? ''} ${order.user.lastname ?? ''}` : 'Sin cliente'}
-                                            </td> */}
+                                            <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                                                {order.client.name ? `${order.client.name ?? ''} ${order.client.lastname ?? ''}` : 'Sin cliente'}
+                                            </td>
 
                                             {/* 3. Total */}
-                                            {/* <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                                                ${order.total ?? 0}
-                                            </td> */}
+                                            <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                                                ${Number(order.total) ?? 0}
+                                            </td>
 
                                             {/* 4. Estado */}
                                             <td className="px-4 py-3">
-                                                <span className="px-2 py-1 rounded-full text-xs font-semibold bg-gray-200 dark:bg-white/10 text-gray-800 dark:text-gray-200">
-                                                    {order.currentState?.name ?? 'Sin estado'}
+                                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                                                    order.currentState.name === "delivered"
+                                                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                                        : order.currentState.name === "paid"
+                                                        ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                                                        : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                                                }`}>
+                                                    {order.currentState.name}
                                                 </span>
                                             </td>
                                         </tr>

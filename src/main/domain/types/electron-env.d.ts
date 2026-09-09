@@ -32,7 +32,7 @@ export interface OrderState {
 }
 
 export type OrderWithState = Prisma.OrderGetPayload<{
-  include: { currentState: true }
+  include: { currentState: true, client: true }
 }>
 
 export interface OrderResponse {

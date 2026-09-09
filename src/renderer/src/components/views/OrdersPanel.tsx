@@ -79,7 +79,7 @@ export default function OrdersPage() {
                                             </td>
 
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                                                {/* ${order.total} */}
+                                                ${Number(order.total)}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
