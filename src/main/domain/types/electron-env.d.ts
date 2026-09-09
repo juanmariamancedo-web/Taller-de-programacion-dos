@@ -60,7 +60,8 @@ export interface DashboardData {
   pendingOrders: number,
   deliveredOrders: number,
   averageTicket: number,
-  registeredClients: number
+  registeredClients: number,
+  lastOrders?: OrderWithState[]
 }
 
 export interface DashboardDataResponse {

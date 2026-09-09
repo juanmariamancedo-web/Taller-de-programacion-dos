@@ -24,7 +24,7 @@ function App(): React.JSX.Element {
   const renderPanel = () => {
     switch(currentTab){
       case "dashboard":
-        return <HomePanel totalClients={3} totalPedidosPendientes={3} totalPedidosEntregados={3} averageTicket={3} />
+        return <HomePanel />
       case "products":
         return <ProductsPanel />
       case "orders":
@@ -36,8 +36,7 @@ function App(): React.JSX.Element {
       case "clients-create": 
         return <CreateClientPage />
       default:
-        return null
-        return <HomePanel totalClients={3} totalPedidosPendientes={3} totalPedidosEntregados={3} averageTicket={3} />
+        return <HomePanel />
     }
   }
 

@@ -3,13 +3,13 @@ import { prisma } from '../infrastructure/db/prisma';
 
 export class DashboardService {
   async getDashboardData(): Promise<DashboardDataResponse> {
-    // 1. Ejecutamos todas las consultas independientes en paralelo
     const [
       registeredClients,
       pendingOrders,
       deliveredOrders,
       totalOrdersCount,
-      itemOrders,
+      lastOrders,
+      ordersTotalAggregate,
     ] = await Promise.all([
       prisma.client.count(),
 
@@ -31,18 +31,26 @@ export class DashboardService {
 
       prisma.order.count(),
 
-      prisma.itemOrder.findMany({
-        select: {
-          amount: true,
-          unitPrice: true,
+      // Solución al error de TypeScript: Incluimos 'currentState'
+      prisma.order.findMany({
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 5,
+        include: {
+          currentState: true,
+        },
+      }),
+
+      // Dado que Order tiene el campo `total`, agregamos directo desde la DB
+      prisma.order.aggregate({
+        _sum: {
+          total: true,
         },
       }),
     ]);
 
-    const totalRevenue = itemOrders.reduce((acc, item) => {
-      return acc + item.amount * Number(item.unitPrice);
-    }, 0);
-
+    const totalRevenue = Number(ordersTotalAggregate._sum.total ?? 0);
     const averageTicket = totalOrdersCount > 0 ? totalRevenue / totalOrdersCount : 0;
 
     return {
@@ -52,6 +60,7 @@ export class DashboardService {
         pendingOrders,
         deliveredOrders,
         averageTicket,
+        lastOrders,
       },
     };
   }

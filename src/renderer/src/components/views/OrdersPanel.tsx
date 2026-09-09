@@ -30,10 +30,6 @@ export default function OrdersPage() {
         fetchOrders();
     }, []);
 
-    useEffect(() => {
-        console.log(orders);
-    }, [orders]);
-
     return (
         <>
             <div className="flex flex-col items-center gap-3">
