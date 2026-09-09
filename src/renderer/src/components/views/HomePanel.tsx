@@ -1,35 +1,37 @@
 import { setCurrentTab } from "./../../store/slices/appSlice"
 import { useAppDispatch } from "./../../store/hooks"
+import { useEffect, useState } from "react"
+import { DashboardData } from "../../../../main/domain/types/electron-env"
 
-type Ordenes = {
-    id: number,
-    user : {
-        name: string,
-        lastname: string,
-    },
-    state: string,
-
-    total: number
-}
-
-export default function HomePanel({
-        totalClients,
-        totalPedidosPendientes,
-        totalPedidosEntregados,
-        // topProductos,
-        averageTicket,
-        // ultimasOrdenes, 
-    } 
-    : 
-    {
-        totalClients : number,
-        totalPedidosPendientes :  number, 
-        totalPedidosEntregados : number, 
-        // topProductos : Producto[], 
-        averageTicket : number, 
-        // ultimasOrdenes: Ordenes[],
-    }){
+export default function HomePanel(){
     const dispatch = useAppDispatch()
+    const [dashboardData, setDashboardData] = useState<DashboardData>();
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    
+
+    useEffect(() => {
+        const fetchHomePanel = async () => {
+            try {
+                setIsLoading(true);
+                const response = await window.electronAPI?.getDashboardData();
+                
+                if (response && response.success) {
+                    // Si la data viene dentro de response.data:
+                    setDashboardData(response.data);
+                } else {
+                    setError(response?.message || "No se pudieron cargar los datos");
+                }
+            } catch (err) {
+                setError("Error de comunicación con Electron");
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchHomePanel();
+    }, []);
+
 
     return(
         <div className="flex flex-col items-center">
@@ -44,7 +46,7 @@ export default function HomePanel({
                                 Pedidos pendientes
                             </h2>
                             <span className="font-bold">
-                                {totalPedidosPendientes}
+                                {dashboardData?.pendingOrders}
                             </span>
                         </header>
 
@@ -56,7 +58,7 @@ export default function HomePanel({
                                 Ticket medio
                             </h2>
                             <span className="font-bold">
-                                ${averageTicket}
+                                ${dashboardData?.averageTicket ?? (dashboardData as any)?.averageticket}
                             </span>
                         </header>
                         
@@ -67,7 +69,7 @@ export default function HomePanel({
                                 Clientes registrados
                             </h2>
                             <span className="font-bold">
-                                {totalClients}
+                                {dashboardData?.registeredClients}
                             </span>
                         </header>
                         
@@ -79,7 +81,7 @@ export default function HomePanel({
                                 Pedidos entregados
                             </h2>
                             <span className="font-bold">
-                                {totalPedidosEntregados}
+                                {dashboardData?.deliveredOrders}
                             </span>
                         </header>
                         
@@ -108,35 +110,37 @@ export default function HomePanel({
                             </thead>
 
                             <tbody className="divide-y divide-gray-200 dark:divide-white/10 text-sm">
-                                {/* {ultimasOrdenes?.length ? (
-                                    ultimasOrdenes.map((order) => (
+                                {dashboardData?.lastOrders && dashboardData.lastOrders.length > 0 ? (
+                                    dashboardData.lastOrders.map((order) => (
                                         <tr
                                             key={order.id}
                                             className="hover:bg-gray-50 dark:hover:bg-white/5 transition"
                                         >
+                                            {/* 1. ID del Pedido */}
                                             <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
                                                 #{order.id}
                                             </td>
 
+                                            {/* 2. Cliente */}
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                                                {`${order.user?.name ?? 'Sin'} ${order.user?.lastname ?? 'cliente'}`}
+                                                {order.client.name ? `${order.client.name ?? ''} ${order.client.lastname ?? ''}` : 'Sin cliente'}
                                             </td>
 
+                                            {/* 3. Total */}
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                                                ${order.total}
+                                                ${Number(order.total) ?? 0}
                                             </td>
 
+                                            {/* 4. Estado */}
                                             <td className="px-4 py-3">
-                                                <span
-                                                    className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                                                        order.state === "completed"
-                                                            ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                                                            : order.state === "pending"
-                                                            ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                                                            : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
-                                                    }`}
-                                                >
-                                                    {order.state}
+                                                <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                                                    order.currentState.name === "delivered"
+                                                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                                        : order.currentState.name === "paid"
+                                                        ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                                                        : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                                                }`}>
+                                                    {order.currentState.name}
                                                 </span>
                                             </td>
                                         </tr>
@@ -147,41 +151,20 @@ export default function HomePanel({
                                             No hay órdenes
                                         </td>
                                     </tr>
-                                )} */}
+                                )}
                             </tbody>
                         </table>
                     </section>
-                    {/* <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white col-span-1 sm:col-span-2">
-                        <header className="flex justify-between items-center">
-                            <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
-                                Últimas órdenes
-                            </h2>
-                            <Link href="\admin\orders" className="text-sm text-indigo-600 hover:text-indigo-500">
-                                Ver todos
-                            </Link>
-                        </header>
-                        {ultimasOrdenes.length > 0 && ultimasOrdenes.map((order)=>{
-                            return(
-                                <article>
-                                    {order.order_id}
-                                    <h3>
-                                        {`${order.user.name} ${order.user.lastname}`}
-                                    </h3>
-                                    {order.total}
-                                    {order.state}
-                                </article>
-                            )
-                        })}
-                    </section> */}
-                    {/* {topProductos.length > 0 && (
+                    {dashboardData?.topProducts?.length && (
                         <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white col-span-1 flex flex-col gap-3">
                             <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
                                 Top 5 productos vendidos
                             </h2>
                             <div className="flex gap-2 flex-col">
-                                {topProductos.map((product, index)=>{
+                                {dashboardData.topProducts.map((product, index)=>{
                                     return(
-                                        <Link href={`\\catalogo\\${product.name}`}>
+                                        
+                                        // <Link href={`\\catalogo\\${product.name}`}>
                                             <article>
                                                 <h3 className="font-mono">
                                                     {product.name}
@@ -190,12 +173,12 @@ export default function HomePanel({
                                                     Ranking #{index + 1}
                                                 </span>
                                             </article>
-                                        </Link>
+                                        // </Link>
                                     )
                                 })}
                             </div>
                         </section>
-                    )} */}
+                    )}
                 </ div>
             </ div>
         </div>
