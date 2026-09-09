@@ -38,6 +38,7 @@ export type OrderWithState = Prisma.OrderGetPayload<{
 export interface OrderResponse {
   success: boolean
   data?: OrderWithState[]
+  totalPages: number
   message?: string
 }
 
