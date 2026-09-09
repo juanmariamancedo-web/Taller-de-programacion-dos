@@ -1,52 +1,59 @@
+import { DashboardDataResponse } from '../domain/types/electron-env';
 import { prisma } from '../infrastructure/db/prisma';
 
 export class DashboardService {
-  async getDashboardData() {
-    const registeredClients = (await prisma.client.findMany()).length
-    const pendingOrders = (await prisma.order.findMany({
+  async getDashboardData(): Promise<DashboardDataResponse> {
+    // 1. Ejecutamos todas las consultas independientes en paralelo
+    const [
+      registeredClients,
+      pendingOrders,
+      deliveredOrders,
+      totalOrdersCount,
+      itemOrders,
+    ] = await Promise.all([
+      prisma.client.count(),
+
+      prisma.order.count({
         where: {
-            currentState: {
-                name: "pending"
-            }
-        }
-    })).length
+          currentState: {
+            name: 'pending',
+          },
+        },
+      }),
 
-    const deliveredOrders = (await prisma.order.findMany({
+      prisma.order.count({
         where: {
-            currentState: {
-                name: "delivered"
-            }
-        }
-    })).length
+          currentState: {
+            name: 'delivered',
+          },
+        },
+      }),
 
-    const orders = await prisma.order.findMany({
-        include: {
-            itemOrders: {
-                select: {
-                    unitPrice: true,
-                    amount: true
-                }
-            }
-        }
-    })
+      prisma.order.count(),
 
-    // 1. Calculamos la suma total acumulada
-    const totalRevenue = orders.reduce((accOrder, order) => {
-        const orderTotal = order.itemOrders.reduce((accItem, item) => {
-            return accItem + item.amount * Number(item.unitPrice);
-        }, 0);
+      prisma.itemOrder.findMany({
+        select: {
+          amount: true,
+          unitPrice: true,
+        },
+      }),
+    ]);
 
-        return accOrder + orderTotal;
+    const totalRevenue = itemOrders.reduce((acc, item) => {
+      return acc + item.amount * Number(item.unitPrice);
     }, 0);
 
-    const averageTicket = orders.length > 0 ? totalRevenue / orders.length : 0;
+    const averageTicket = totalOrdersCount > 0 ? totalRevenue / totalOrdersCount : 0;
 
     return {
+      success: true,
+      data: {
         registeredClients,
-        pendingOrders, 
+        pendingOrders,
         deliveredOrders,
-        averageTicket
-    }
+        averageTicket,
+      },
+    };
   }
 }
 

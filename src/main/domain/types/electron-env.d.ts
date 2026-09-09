@@ -63,6 +63,12 @@ export interface DashboardData {
   registeredClients: number
 }
 
+export interface DashboardDataResponse {
+  success: boolean
+  data?: DashboardData
+  message?: string
+}
+
 // Tipo explícito para la función de desuscripción
 export type Unsubscribe = () => void
 
@@ -71,7 +77,7 @@ export interface IElectronAPI {
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
 
-  getDashboardData: ()=> Promise<DashboardData>
+  getDashboardData: ()=> Promise<DashboardDataResponse>
   getOrders: (searchParams: SearchParams) => Promise<OrderResponse>
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
   getProvinces: () => Promise<ProvinceOption[]>

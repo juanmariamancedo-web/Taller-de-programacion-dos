@@ -1,5 +1,7 @@
 import { setCurrentTab } from "./../../store/slices/appSlice"
 import { useAppDispatch } from "./../../store/hooks"
+import { useEffect, useState } from "react"
+import { DashboardData } from "../../../../main/domain/types/electron-env"
 
 type Ordenes = {
     id: number,
@@ -12,24 +14,33 @@ type Ordenes = {
     total: number
 }
 
-export default function HomePanel({
-        totalClients,
-        totalPedidosPendientes,
-        totalPedidosEntregados,
-        // topProductos,
-        averageTicket,
-        // ultimasOrdenes, 
-    } 
-    : 
-    {
-        totalClients : number,
-        totalPedidosPendientes :  number, 
-        totalPedidosEntregados : number, 
-        // topProductos : Producto[], 
-        averageTicket : number, 
-        // ultimasOrdenes: Ordenes[],
-    }){
+export default function HomePanel(){
     const dispatch = useAppDispatch()
+    const [dashboardData, setDashboardData] = useState<DashboardData>();
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    
+
+    useEffect(()=>{
+        const fecthHomePanel = async()=>{
+            try {
+                setIsLoading(true);
+                const response = await window.electronAPI?.getDashboardData();
+                
+                if (response?.data && response) {
+                    setDashboardData(response.data || undefined);
+                } else {
+                    setError(response?.message || "");
+                }
+            } catch (err) {
+                setError('Error de comunicación con Electron');
+            } finally {
+                setIsLoading(false);
+            }
+        }
+
+        fecthHomePanel()
+    }, [])
 
     return(
         <div className="flex flex-col items-center">
@@ -44,7 +55,7 @@ export default function HomePanel({
                                 Pedidos pendientes
                             </h2>
                             <span className="font-bold">
-                                {totalPedidosPendientes}
+                                {dashboardData?.pendingOrders}
                             </span>
                         </header>
 
@@ -56,7 +67,7 @@ export default function HomePanel({
                                 Ticket medio
                             </h2>
                             <span className="font-bold">
-                                ${averageTicket}
+                                ${dashboardData?.averageTicket}
                             </span>
                         </header>
                         
@@ -67,7 +78,7 @@ export default function HomePanel({
                                 Clientes registrados
                             </h2>
                             <span className="font-bold">
-                                {totalClients}
+                                {dashboardData?.registeredClients}
                             </span>
                         </header>
                         
@@ -79,7 +90,7 @@ export default function HomePanel({
                                 Pedidos entregados
                             </h2>
                             <span className="font-bold">
-                                {totalPedidosEntregados}
+                                {dashboardData?.deliveredOrders}
                             </span>
                         </header>
                         
@@ -108,7 +119,7 @@ export default function HomePanel({
                             </thead>
 
                             <tbody className="divide-y divide-gray-200 dark:divide-white/10 text-sm">
-                                {/* {ultimasOrdenes?.length ? (
+                                {/* {dashboardData?.length ? (
                                     ultimasOrdenes.map((order) => (
                                         <tr
                                             key={order.id}
