@@ -9,6 +9,7 @@ import { registerOrderIPC } from './presentation/ipc/orders.ipc'
 import { registerProvinceIPC } from './presentation/ipc/provinces.ipc'
 import { registerUserIPC } from './presentation/ipc/users.ipc'
 import { registerClientIPC } from './presentation/ipc/clients.ipc'
+import { registerDashboardIPC } from './presentation/ipc/dashboard.ipc'
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -76,6 +77,7 @@ registerOrderIPC()
 registerProvinceIPC()
 registerUserIPC()
 registerClientIPC()
+registerDashboardIPC()
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')

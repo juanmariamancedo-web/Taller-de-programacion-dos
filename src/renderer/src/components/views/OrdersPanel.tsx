@@ -3,20 +3,26 @@ import Paginacion from "../Pagination"
 import { Sort } from "../Sort"
 import { useEffect, useState } from "react"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
+import { useAppSelector } from "../../store/hooks"
 
 export default function OrdersPage() {
     const [orders, setOrders] = useState<OrderWithState[]>();
+    const [pages, setPages] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const sort = useAppSelector(state=>state.app.sort)
+    const search = useAppSelector(state=>state.app.search)
+    const page = useAppSelector(state=>state.app.page)
 
     useEffect(() => {
         const fetchOrders = async () => {
             try {
                 setIsLoading(true);
-                const response = await window.electronAPI?.getOrders({ page: 1, sort: "", search: "" });
+                const response = await window.electronAPI?.getOrders({ page: 1, sort, search });
                 
                 if (response?.success && response) {
                     setOrders(response.data || undefined);
+                    setPages(response.totalPages)
                 } else {
                     setError(response?.message || "");
                 }
@@ -28,11 +34,7 @@ export default function OrdersPage() {
         };
 
         fetchOrders();
-    }, []);
-
-    useEffect(() => {
-        console.log(orders);
-    }, [orders]);
+    }, [sort, page, search]);
 
     return (
         <>
@@ -52,6 +54,14 @@ export default function OrdersPage() {
                                     <Sort   
                                         name="Pedido"
                                         serverArg="pedido"
+                                        className=""
+                                    />
+                                </th>
+                                {/* pedidoAsc, pedidoDesc, clientAsc, clientDesc, totalAsc, totaldesc, stateAsc, stateDesc */}
+                                <th className="px-4 py-3">
+                                    <Sort 
+                                        name="Cliente"
+                                        serverArg="client"
                                         className=""
                                     />
                                 </th>
@@ -85,7 +95,11 @@ export default function OrdersPage() {
                                             </td>
 
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                                                {/* ${order.total} */}
+                                                {order.client.name ? `${order.client.name ?? ''} ${order.client.lastname ?? ''}` : 'Sin cliente'}
+                                            </td>
+
+                                            <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                                                ${Number(order.total)}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
@@ -111,7 +125,7 @@ export default function OrdersPage() {
                         </tbody>
                     </table>
                 </div>
-                <Paginacion paginas={5} />
+                <Paginacion paginas={pages} />
             </div>
         </>
     )

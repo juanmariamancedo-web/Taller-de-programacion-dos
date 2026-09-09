@@ -32,12 +32,13 @@ export interface OrderState {
 }
 
 export type OrderWithState = Prisma.OrderGetPayload<{
-  include: { currentState: true }
+  include: { currentState: true; client: true }
 }>
 
 export interface OrderResponse {
   success: boolean
   data?: OrderWithState[]
+  totalPages: number
   message?: string
 }
 
@@ -48,6 +49,7 @@ export type UserWithRole = Prisma.UserGetPayload<{
 export interface UserResponse {
   success: boolean
   data?: UserWithRole[]
+  totalPages: number
   message?: string
 }
 
@@ -56,6 +58,7 @@ export interface ProvinceOption {
   name: string
 }
 
+// Client Types
 export interface CreateClientInput {
   name: string
   lastname: string
@@ -101,6 +104,28 @@ export interface DeleteClientResponse {
   error?: string
 }
 
+// Dashboard Types
+export interface TopProduct {
+  id: bigint
+  name: string
+  totalSold: number
+}
+
+export interface DashboardData {
+  pendingOrders: number
+  deliveredOrders: number
+  averageTicket: number
+  registeredClients: number
+  lastOrders?: OrderWithState[]
+  topProducts?: TopProduct[]
+}
+
+export interface DashboardDataResponse {
+  success: boolean
+  data?: DashboardData
+  message?: string
+}
+
 // Tipo explícito para la función de desuscripción
 export type Unsubscribe = () => void
 
@@ -108,6 +133,8 @@ export interface IElectronAPI {
   // Invokes (Promesas)
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
+
+  getDashboardData: () => Promise<DashboardDataResponse>
   getOrders: (searchParams: SearchParams) => Promise<OrderResponse>
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
   getProvinces: () => Promise<ProvinceOption[]>

@@ -15,6 +15,7 @@ const api = {
   login: (credentials: Credentials): Promise<AuthResponse> =>
     ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
+  getDashboardData: () => ipcRenderer.invoke("dashboard:getData"),
   getOrders: (params: SearchParams) => ipcRenderer.invoke('orders:getOrders', params),
   getUsers: (params: SearchParams) => ipcRenderer.invoke('users:getUsers', params),
   getProvinces: (): Promise<ProvinceOption[]> => ipcRenderer.invoke('provinces:get-all'),
