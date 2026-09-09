@@ -4,6 +4,19 @@ import { Prisma } from '../../infrastructure/db/generated/client/client'
 import { clientsService } from '../../services/clients.service'
 
 export function registerClientIPC(): void {
+  ipcMain.handle('clients:delete', async (_event, id: string) => {
+    try {
+      const data = await clientsService.deleteClient(id)
+      return { success: true, data }
+    } catch (error) {
+      console.error('Failed to delete client:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'No se pudo eliminar el cliente.'
+      }
+    }
+  })
+
   ipcMain.handle('clients:get-all', async (_event, searchParams: SearchParams) => {
     try {
       const result = await clientsService.getClients(searchParams)

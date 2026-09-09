@@ -181,7 +181,7 @@ export default function CreateClientPage() {
         ? 'border-emerald-400 bg-emerald-50/50 focus:border-emerald-500 focus:ring-emerald-500/20 dark:border-emerald-400/70 dark:bg-emerald-500/10'
         : 'border-slate-200 bg-slate-50/70 focus:border-blue-500 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04]'
 
-    return `w-full rounded-xl border px-4 py-3 pr-10 text-slate-900 outline-none transition placeholder:text-slate-400 focus:ring-4 dark:text-white ${stateClass}`
+    return `relative z-10 w-full cursor-text select-text rounded-xl border px-4 py-3 pr-10 text-slate-900 caret-blue-600 outline-none transition placeholder:text-slate-400 focus:ring-4 dark:text-white dark:caret-blue-300 ${stateClass}`
   }
 
   const fieldMessage = (field: keyof FormData) => errors[field] || (hasSubmitted && hasValue(field) ? 'Campo válido' : '')
@@ -211,7 +211,7 @@ export default function CreateClientPage() {
       {/* Formulario */}
       <form
         onSubmit={handleSubmit}
-        className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_18px_50px_-30px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-zinc-900"
+        className="relative z-0 space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_18px_50px_-30px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-zinc-900"
       >
         <div className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-900 dark:border-blue-400/20 dark:bg-blue-500/10 dark:text-blue-100">
           <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">i</span>

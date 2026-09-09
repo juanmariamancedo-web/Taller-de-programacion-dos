@@ -7,7 +7,8 @@ import {
   ProvinceOption,
   CreateClientInput,
   CreateClientResponse,
-  ClientListResponse
+  ClientListResponse,
+  DeleteClientResponse
 } from '../main/domain/types/electron-env'
 
 const api = {
@@ -21,6 +22,8 @@ const api = {
     ipcRenderer.invoke('clients:create', input),
   getClients: (params: SearchParams): Promise<ClientListResponse> =>
     ipcRenderer.invoke('clients:get-all', params),
+  deleteClient: (id: string): Promise<DeleteClientResponse> =>
+    ipcRenderer.invoke('clients:delete', id),
   logout: () => ipcRenderer.invoke('auth:logout'),
   setTheme: (theme: ThemeSource): Promise<boolean> =>
     ipcRenderer.invoke('theme:set', theme),

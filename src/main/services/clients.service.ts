@@ -2,6 +2,22 @@ import { prisma } from '../infrastructure/db/prisma'
 import { CreateClientInput, SearchParams } from '../domain/types/electron-env'
 
 export class ClientsService {
+  async deleteClient(id: string): Promise<{ id: string }> {
+    return prisma.$transaction(async (transaction) => {
+      const clientId = BigInt(id)
+      const orders = await transaction.order.count({ where: { clientId } })
+
+      if (orders > 0) {
+        throw new Error('No se puede eliminar un cliente que tiene órdenes asociadas.')
+      }
+
+      await transaction.address.deleteMany({ where: { clientId } })
+      await transaction.client.delete({ where: { id: clientId } })
+
+      return { id }
+    })
+  }
+
   async getClients(searchParams: SearchParams): Promise<{
     data: Array<{
       id: string
@@ -114,8 +130,24 @@ export class ClientsService {
         select: { id: true }
       })
 
+      const clients = await transaction.client.findMany({
+        select: { id: true },
+        orderBy: { id: 'asc' }
+      })
+      let nextClientId = 1n
+
+      for (const existingClient of clients) {
+        if (existingClient.id === nextClientId) {
+          nextClientId++
+          continue
+        }
+
+        if (existingClient.id > nextClientId) break
+      }
+
       const client = await transaction.client.create({
         data: {
+          id: nextClientId,
           name: input.name,
           lastname: input.lastname,
           cuil: input.cuil,

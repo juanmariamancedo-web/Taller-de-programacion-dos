@@ -38,6 +38,27 @@ export default function ClientsPanel() {
     loadClients()
   }, [page, search, sort])
 
+  const handleDelete = async (client: ClientListItem) => {
+    const confirmed = window.confirm(
+      `¿Deseás eliminar al cliente ${client.name} ${client.lastname}? Esta acción no se puede deshacer.`
+    )
+
+    if (!confirmed) return
+
+    try {
+      const response = await window.electronAPI?.deleteClient(client.id)
+      if (!response?.success) {
+        throw new Error(response?.error ?? 'No se pudo eliminar el cliente.')
+      }
+
+      setClients((currentClients) => currentClients.filter((currentClient) => currentClient.id !== client.id))
+      setTotal((currentTotal) => Math.max(currentTotal - 1, 0))
+    } catch (deleteError) {
+      console.error('Error al eliminar cliente:', deleteError)
+      setError(deleteError instanceof Error ? deleteError.message : 'No se pudo eliminar el cliente.')
+    }
+  }
+
   return (
     <div className="flex flex-col items-center gap-3">
       <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
@@ -76,13 +97,14 @@ export default function ClientsPanel() {
               <th className="px-4 py-3">Ciudad</th>
               <th className="px-4 py-3">Código postal</th>
               <th className="px-4 py-3">Estado</th>
+              <th className="px-4 py-3">Acción</th>
             </tr>
           </thead>
 
           <tbody className="divide-y divide-gray-200 dark:divide-white/10 text-sm">
             {loading ? (
               <tr>
-                <td colSpan={8} className="text-center py-6 text-gray-500">Cargando clientes...</td>
+                <td colSpan={9} className="text-center py-6 text-gray-500">Cargando clientes...</td>
               </tr>
             ) : clients.length ? (
               clients.map((client) => (
@@ -95,11 +117,22 @@ export default function ClientsPanel() {
                   <td className="px-4 py-3">{client.address?.city ?? 'Sin dirección'}</td>
                   <td className="px-4 py-3">{client.address?.postalCode ?? '-'}</td>
                   <td className="px-4 py-3">{client.isActive ? 'Activo' : 'Inactivo'}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(client)}
+                      title={`Eliminar a ${client.name} ${client.lastname}`}
+                      aria-label={`Eliminar a ${client.name} ${client.lastname}`}
+                      className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-lg font-bold text-rose-700 transition hover:bg-rose-200 dark:bg-rose-500/20 dark:text-rose-300 dark:hover:bg-rose-500/30"
+                    >
+                      X
+                    </button>
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={8} className="text-center py-6 text-gray-500">No hay clientes encontrados</td>
+                <td colSpan={9} className="text-center py-6 text-gray-500">No hay clientes encontrados</td>
               </tr>
             )}
           </tbody>
