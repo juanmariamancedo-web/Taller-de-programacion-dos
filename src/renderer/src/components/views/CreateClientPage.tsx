@@ -17,6 +17,7 @@ type FormData = {
 type FormErrors = Partial<Record<keyof FormData, string>>
 
 const lettersPattern = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:[ '\-][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)*$/
+const emailPattern = /^[^\s@]+@[^\s@]+\.com$/i
 // Agregamos \d para remover cualquier dígito inmediatamente en el onChange
 const invalidTextCharactersPattern = /[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ '\-]|[\d]/g
 
@@ -42,7 +43,7 @@ function validateForm(data: FormData, provinceNames: string[]): FormErrors {
 
   textFields.forEach((field) => {
     const value = data[field].trim()
-    if (value.length < 2 || value.length > 50 || !lettersPattern.test(value)) {
+    if (!value || value.length < 2 || value.length > 50 || !lettersPattern.test(value)) {
       errors[field] = 'Usa entre 2 y 50 letras, espacios o guiones.'
     }
   })
@@ -52,9 +53,11 @@ function validateForm(data: FormData, provinceNames: string[]): FormErrors {
   }
 
   if (!isValidCuil(data.cuil_cuit)) errors.cuil_cuit = 'Debe tener 11 dígitos y un CUIT/CUIL válido.'
-  if (!/^\S+@\S+\.\S+$/.test(data.email)) errors.email = 'Ingresá un email válido.'
+  const email = data.email.trim()
+  if (!email || !emailPattern.test(email)) errors.email = 'Ingresá un email válido terminado en .com.'
   if (!/^\d{4,8}$/.test(data.postcode)) errors.postcode = 'Usa entre 4 y 8 números.'
-  if (data.street.trim().length < 2 || data.street.trim().length > 80) {
+  const street = data.street.trim()
+  if (!street || street.length < 2 || street.length > 80) {
     errors.street = 'Usa entre 2 y 80 caracteres.'
   }
   if (!/^\d{1,6}$/.test(data.number)) errors.number = 'Usa entre 1 y 6 números.'
