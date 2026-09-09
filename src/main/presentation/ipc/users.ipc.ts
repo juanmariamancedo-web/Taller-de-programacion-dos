@@ -14,12 +14,12 @@ export function registerUserIPC(): void {
             )
             );
 
-            return { success: true, data };
+            return data;
         } catch (error) {
             console.error('Failed to fetch orders:', error);
             return { 
                 success: false, 
-                error: error instanceof Error ? error.message : 'Unknown error occurred' 
+                message: error instanceof Error ? error.message : 'Unknown error occurred' 
             };
         }
     });

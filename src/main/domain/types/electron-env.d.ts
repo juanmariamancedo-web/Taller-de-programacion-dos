@@ -49,6 +49,7 @@ export type UserWithRole = Prisma.UserGetPayload<{
 export interface UserResponse {
   success: boolean
   data?: UserWithRole[]
+  totalPages: number
   message?: string
 }
 
