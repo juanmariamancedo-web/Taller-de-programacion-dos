@@ -1,5 +1,5 @@
-import { setCurrentTab } from '../../store/slices/appSlice'
-import { useAppDispatch } from '../../store/hooks'
+import { setClientToEdit, setCurrentTab } from '../../store/slices/appSlice'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { useEffect, useState } from 'react'
 
 type FormData = {
@@ -15,6 +15,18 @@ type FormData = {
 }
 
 type FormErrors = Partial<Record<keyof FormData, string>>
+
+const emptyFormData: FormData = {
+  name: '',
+  lastname: '',
+  cuil_cuit: '',
+  email: '',
+  province: '',
+  city: '',
+  postcode: '',
+  street: '',
+  number: ''
+}
 
 const lettersPattern = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+(?:[ '\-][A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)*$/
 const emailPattern = /^[^\s@]+@[^\s@]+\.com$/i
@@ -83,18 +95,9 @@ function FieldStatus({ error, valid, offset }: { error?: string; valid: boolean;
 
 export default function CreateClientPage() {
   const dispatch = useAppDispatch()
+  const clientToEdit = useAppSelector((state) => state.app.clientToEdit)
 
-  const [formData, setFormData] = useState<FormData>({
-    name: '',
-    lastname: '',
-    cuil_cuit: '',
-    email: '',
-    province: '',
-    city: '',
-    postcode: '',
-    street: '',
-    number: '',
-  })
+  const [formData, setFormData] = useState<FormData>(emptyFormData)
   const [errors, setErrors] = useState<FormErrors>({})
   const [hasSubmitted, setHasSubmitted] = useState(false)
   const [provinces, setProvinces] = useState<Array<{ id: string; name: string }>>([])
@@ -119,6 +122,27 @@ export default function CreateClientPage() {
 
     loadProvinces()
   }, [])
+
+  useEffect(() => {
+    if (clientToEdit) {
+      setFormData({
+        name: clientToEdit.name,
+        lastname: clientToEdit.lastname,
+        cuil_cuit: clientToEdit.cuil,
+        email: clientToEdit.email,
+        province: clientToEdit.address?.province ?? '',
+        city: clientToEdit.address?.city ?? '',
+        postcode: clientToEdit.address?.postalCode ?? '',
+        street: clientToEdit.address?.street ?? '',
+        number: clientToEdit.address?.number?.toString() ?? ''
+      })
+    } else {
+      setFormData(emptyFormData)
+    }
+    setErrors({})
+    setHasSubmitted(false)
+    setSaveError(null)
+  }, [clientToEdit])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target
@@ -155,7 +179,7 @@ export default function CreateClientPage() {
     setSaveError(null)
 
     try {
-      const response = await window.electronAPI?.createClient({
+      const input = {
         name: formData.name.trim(),
         lastname: formData.lastname.trim(),
         cuil: formData.cuil_cuit,
@@ -165,12 +189,16 @@ export default function CreateClientPage() {
         postalCode: formData.postcode,
         street: formData.street.trim(),
         number: Number(formData.number)
-      })
+      }
+      const response = clientToEdit
+        ? await window.electronAPI?.updateClient({ id: clientToEdit.id, ...input })
+        : await window.electronAPI?.createClient(input)
 
-      if (!response?.success) throw new Error(response?.error ?? 'No se pudo guardar el cliente.')
+      if (!response?.success) throw new Error(response?.error ?? `No se pudo ${clientToEdit ? 'actualizar' : 'guardar'} el cliente.`)
+      dispatch(setClientToEdit(null))
       dispatch(setCurrentTab('clients'))
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'No se pudo guardar el cliente.')
+      setSaveError(error instanceof Error ? error.message : `No se pudo ${clientToEdit ? 'actualizar' : 'guardar'} el cliente.`)
     } finally {
       setSaving(false)
     }
@@ -195,16 +223,19 @@ export default function CreateClientPage() {
       <div className="mb-8 flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            Agregar Nuevo Cliente
+            {clientToEdit ? 'Editar Cliente' : 'Agregar Nuevo Cliente'}
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Ingresa los datos correspondientes para registrar al cliente en el sistema.
+            {clientToEdit ? 'Modificá los datos del cliente seleccionado.' : 'Ingresa los datos correspondientes para registrar al cliente en el sistema.'}
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => dispatch(setCurrentTab('clients'))}
+          onClick={() => {
+            dispatch(setClientToEdit(null))
+            dispatch(setCurrentTab('clients'))
+          }}
           className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
         >
           ← Volver
@@ -468,7 +499,7 @@ export default function CreateClientPage() {
             disabled={saving}
             className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-500/30"
           >
-            {saving ? 'Guardando...' : 'Guardar cliente'}
+            {saving ? 'Guardando...' : clientToEdit ? 'Actualizar cliente' : 'Guardar cliente'}
           </button>
         </div>
       </form>

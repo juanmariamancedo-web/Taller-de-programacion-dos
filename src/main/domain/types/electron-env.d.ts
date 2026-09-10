@@ -1,6 +1,5 @@
 import { Prisma } from '../../infrastructure/db/generated/client/client'
 
-// electron-env.d.ts
 export type ThemeSource = 'system' | 'dark' | 'light'
 export type Theme = 'dark' | 'light'
 
@@ -38,7 +37,24 @@ export type OrderWithState = Prisma.OrderGetPayload<{
 export interface OrderResponse {
   success: boolean
   data?: OrderWithState[]
-  totalPages: number
+  message?: string
+  totalPages?: number
+}
+
+export interface DashboardData {
+  registeredClients: number
+  pendingOrders: number
+  deliveredOrders: number
+  averageTicket: number
+  lastOrders: Array<Prisma.OrderGetPayload<{
+    include: { currentState: true; client: true }
+  }>>
+  topProducts: Array<{ id: bigint; name: string; totalSold: number }>
+}
+
+export interface DashboardDataResponse {
+  success: boolean
+  data?: DashboardData
   message?: string
 }
 
@@ -49,8 +65,8 @@ export type UserWithRole = Prisma.UserGetPayload<{
 export interface UserResponse {
   success: boolean
   data?: UserWithRole[]
-  totalPages: number
   message?: string
+  totalPages?: number
 }
 
 export interface ProvinceOption {
@@ -58,7 +74,6 @@ export interface ProvinceOption {
   name: string
 }
 
-// Client Types
 export interface CreateClientInput {
   name: string
   lastname: string
@@ -77,6 +92,16 @@ export interface CreateClientResponse {
   error?: string
 }
 
+export interface UpdateClientInput extends CreateClientInput {
+  id: string
+}
+
+export interface UpdateClientResponse {
+  success: boolean
+  data?: { id: string }
+  error?: string
+}
+
 export interface ClientListItem {
   id: string
   name: string
@@ -85,6 +110,8 @@ export interface ClientListItem {
   email: string
   isActive: boolean
   address?: {
+    street: string
+    number: number
     postalCode: string
     city: string
     province: string
@@ -104,45 +131,19 @@ export interface DeleteClientResponse {
   error?: string
 }
 
-// Dashboard Types
-export interface TopProduct {
-  id: bigint
-  name: string
-  totalSold: number
-}
-
-export interface DashboardData {
-  pendingOrders: number
-  deliveredOrders: number
-  averageTicket: number
-  registeredClients: number
-  lastOrders?: OrderWithState[]
-  topProducts?: TopProduct[]
-}
-
-export interface DashboardDataResponse {
-  success: boolean
-  data?: DashboardData
-  message?: string
-}
-
-// Tipo explícito para la función de desuscripción
 export type Unsubscribe = () => void
 
 export interface IElectronAPI {
-  // Invokes (Promesas)
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
-
   getDashboardData: () => Promise<DashboardDataResponse>
   getOrders: (searchParams: SearchParams) => Promise<OrderResponse>
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
   getProvinces: () => Promise<ProvinceOption[]>
   createClient: (input: CreateClientInput) => Promise<CreateClientResponse>
+  updateClient: (input: UpdateClientInput) => Promise<UpdateClientResponse>
   getClients: (searchParams: SearchParams) => Promise<ClientListResponse>
   deleteClient: (id: string) => Promise<DeleteClientResponse>
-
-  // Suscripción: recibe un callback y retorna la función de desuscripción
   onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe
   login: (credentials: Credentials) => Promise<AuthResponse>
   logout: () => Promise<{ success: boolean }>
@@ -153,7 +154,6 @@ export interface IElectronAPI {
   } | null>
 }
 
-// Extensión global del objeto Window
 declare global {
   interface Window {
     electronAPI?: IElectronAPI

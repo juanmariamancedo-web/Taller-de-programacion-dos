@@ -3,7 +3,7 @@ import Paginacion from '../Pagination'
 import Search from '../Search'
 import { Sort } from '../Sort'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
-import { setCurrentTab } from '../../store/slices/appSlice'
+import { setClientToEdit, setCurrentTab } from '../../store/slices/appSlice'
 import type { ClientListItem } from '../../../../main/domain/types/electron-env'
 
 export default function ClientsPanel() {
@@ -50,13 +50,21 @@ export default function ClientsPanel() {
     }
   }
 
+  const handleEdit = (client: ClientListItem) => {
+    dispatch(setClientToEdit(client))
+    dispatch(setCurrentTab('clients-create'))
+  }
+
   return (
     <div className="flex flex-col items-center gap-3">
       <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
         <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">Clientes</h1>
         <button
           type="button"
-          onClick={() => dispatch(setCurrentTab('clients-create'))}
+          onClick={() => {
+            dispatch(setClientToEdit(null))
+            dispatch(setCurrentTab('clients-create'))
+          }}
           className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
         >
           <span className="text-xl leading-none">+</span>
@@ -80,11 +88,12 @@ export default function ClientsPanel() {
               <th className="px-4 py-3">Código postal</th>
               <th className="px-4 py-3">Estado</th>
               <th className="px-4 py-3">Acción</th>
+              <th className="px-4 py-3">Editar</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-white/10">
             {loading ? (
-              <tr><td colSpan={9} className="py-6 text-center text-gray-500">Cargando clientes...</td></tr>
+              <tr><td colSpan={10} className="py-6 text-center text-gray-500">Cargando clientes...</td></tr>
             ) : clients.length ? clients.map((client) => (
               <tr key={client.id} className="transition hover:bg-gray-50 dark:hover:bg-white/5">
                 <td className="px-4 py-3 font-medium">#{client.id}</td>
@@ -108,9 +117,20 @@ export default function ClientsPanel() {
                     X
                   </button>
                 </td>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => handleEdit(client)}
+                      title={`Editar a ${client.name} ${client.lastname}`}
+                      aria-label={`Editar a ${client.name} ${client.lastname}`}
+                      className="rounded-lg bg-blue-100 px-3 py-1.5 font-semibold text-blue-700 transition hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
+                    >
+                      Editar
+                    </button>
+                  </td>
               </tr>
             )) : (
-              <tr><td colSpan={9} className="py-6 text-center text-gray-500">No hay clientes encontrados</td></tr>
+              <tr><td colSpan={10} className="py-6 text-center text-gray-500">No hay clientes encontrados</td></tr>
             )}
           </tbody>
         </table>

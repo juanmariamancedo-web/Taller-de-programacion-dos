@@ -1,5 +1,6 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit'
 import { Tab } from '../../../../main/domain/types/Tab'
+import type { ClientListItem } from '../../../../main/domain/types/electron-env'
 
 export interface Session {
   id: string; 
@@ -14,6 +15,7 @@ export interface AppState {
   page: number;
   session: Session | null | undefined;
   loadingSession: boolean;
+  clientToEdit: ClientListItem | null;
 }
 
 const initialState: AppState = {
@@ -23,6 +25,7 @@ const initialState: AppState = {
   page: 1,
   session: null,
   loadingSession: true, 
+  clientToEdit: null,
 }
 
 export const appSlice = createSlice({
@@ -40,6 +43,9 @@ export const appSlice = createSlice({
     },
     setPage: (state, action: PayloadAction<number>) => {
       state.page = action.payload
+    },
+    setClientToEdit: (state, action: PayloadAction<ClientListItem | null>) => {
+      state.clientToEdit = action.payload
     },
     // --- Reducers de Sesión ---
     setSession: (state, action: PayloadAction<Session | null | undefined>) => {
@@ -61,6 +67,7 @@ export const {
   setSort, 
   setCurrentTab, 
   setPage, 
+  setClientToEdit,
   setSession, 
   setLoadingSession, 
   logoutSession 

@@ -1,7 +1,78 @@
 import { prisma } from '../infrastructure/db/prisma'
-import { CreateClientInput, SearchParams } from '../domain/types/electron-env'
+import { CreateClientInput, SearchParams, UpdateClientInput } from '../domain/types/electron-env'
 
 export class ClientsService {
+  async updateClient(input: UpdateClientInput): Promise<{ id: string }> {
+    return prisma.$transaction(async (transaction) => {
+      const clientId = BigInt(input.id)
+      const duplicate = await transaction.client.findFirst({
+        where: {
+          AND: [
+            { id: { not: clientId } },
+            { OR: [{ cuil: input.cuil }, { email: input.email }] }
+          ]
+        },
+        select: { cuil: true, email: true }
+      })
+
+      if (duplicate?.cuil === input.cuil) throw new Error('Ya existe otro cliente con ese CUIL/CUIT.')
+      if (duplicate?.email === input.email) throw new Error('Ya existe otro cliente con ese email.')
+
+      const province = await transaction.province.findUnique({
+        where: { name: input.province },
+        select: { id: true }
+      })
+      if (!province) throw new Error('La provincia seleccionada no existe.')
+
+      const city = await transaction.city.findFirst({
+        where: { name: input.city, provinceId: province.id },
+        select: { id: true }
+      }) ?? await transaction.city.create({
+        data: { name: input.city, provinceId: province.id },
+        select: { id: true }
+      })
+
+      const address = await transaction.address.findFirst({
+        where: { clientId },
+        select: { id: true }
+      })
+
+      await transaction.client.update({
+        where: { id: clientId },
+        data: {
+          name: input.name,
+          lastname: input.lastname,
+          cuil: input.cuil,
+          email: input.email
+        }
+      })
+
+      if (address) {
+        await transaction.address.update({
+          where: { id: address.id },
+          data: {
+            street: input.street,
+            number: input.number,
+            postalCode: input.postalCode,
+            cityId: city.id
+          }
+        })
+      } else {
+        await transaction.address.create({
+          data: {
+            clientId,
+            street: input.street,
+            number: input.number,
+            postalCode: input.postalCode,
+            cityId: city.id
+          }
+        })
+      }
+
+      return { id: input.id }
+    })
+  }
+
   async deleteClient(id: string): Promise<{ id: string }> {
     return prisma.$transaction(async (transaction) => {
       const clientId = BigInt(id)
@@ -57,6 +128,8 @@ export class ClientsService {
             take: 1,
             select: {
               postalCode: true,
+              street: true,
+              number: true,
               city: { select: { name: true, province: { select: { name: true } } } }
             }
           }
@@ -78,6 +151,8 @@ export class ClientsService {
           ...(address
             ? {
                 address: {
+                  street: address.street,
+                  number: address.number,
                   postalCode: address.postalCode,
                   city: address.city.name,
                   province: address.city.province.name

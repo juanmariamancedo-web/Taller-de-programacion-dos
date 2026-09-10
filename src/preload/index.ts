@@ -7,6 +7,8 @@ import {
   ProvinceOption,
   CreateClientInput,
   CreateClientResponse,
+  UpdateClientInput,
+  UpdateClientResponse,
   ClientListResponse,
   DeleteClientResponse
 } from '../main/domain/types/electron-env'
@@ -21,6 +23,8 @@ const api = {
   getProvinces: (): Promise<ProvinceOption[]> => ipcRenderer.invoke('provinces:get-all'),
   createClient: (input: CreateClientInput): Promise<CreateClientResponse> =>
     ipcRenderer.invoke('clients:create', input),
+  updateClient: (input: UpdateClientInput): Promise<UpdateClientResponse> =>
+    ipcRenderer.invoke('clients:update', input),
   getClients: (params: SearchParams): Promise<ClientListResponse> =>
     ipcRenderer.invoke('clients:get-all', params),
   deleteClient: (id: string): Promise<DeleteClientResponse> =>
