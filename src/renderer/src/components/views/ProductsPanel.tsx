@@ -1,7 +1,1 @@
-export default function ProductsPanel(){
-    return(
-        <p>
-            Productos
-        </p>
-    )
-}
+export { default } from './Catalogo'
