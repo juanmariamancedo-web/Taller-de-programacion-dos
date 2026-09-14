@@ -12,25 +12,43 @@ type Product = {
 }
 
 type ProductForm = Omit<Product, 'id'>
+type FormData = Omit<ProductForm, 'price' | 'stock' | 'lowStock'> & {
+  price: string
+  stock: string
+  lowStock: string
+}
+type FormErrors = Partial<Record<keyof FormData, string>>
 
-const emptyForm: ProductForm = {
+const emptyForm: FormData = {
   name: '',
-  price: 0,
-  stock: 0,
-  lowStock: 1,
+  price: '',
+  stock: '',
+  lowStock: '',
   image: '',
   isActive: true
 }
 
 const initialProducts: Product[] = []
+const nameCharactersPattern = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]$/
+
+function sanitizeProductName(value: string): string {
+  return value
+    .split('')
+    .filter((character) => nameCharactersPattern.test(character) || character === ' ' || character === '-' || character === "'")
+    .join('')
+}
+
+function hasValidProductName(value: string): boolean {
+  return value.split('').every((character) => nameCharactersPattern.test(character) || character === ' ' || character === '-' || character === "'")
+}
 
 export default function Catalogo(): JSX.Element {
   const [products, setProducts] = useState<Product[]>(initialProducts)
-  const [form, setForm] = useState<ProductForm>(emptyForm)
+  const [form, setForm] = useState<FormData>(emptyForm)
   const [editingProductId, setEditingProductId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('name')
-  const [error, setError] = useState<string | null>(null)
+  const [errors, setErrors] = useState<FormErrors>({})
 
   const visibleProducts = useMemo<Product[]>((): Product[] => {
     const normalizedSearch = search.trim().toLowerCase()
@@ -43,33 +61,51 @@ export default function Catalogo(): JSX.Element {
       })
   }, [products, search, sort])
 
-  const updateForm = <Field extends keyof ProductForm>(
+  const updateForm = <Field extends keyof FormData>(
     field: Field,
-    value: ProductForm[Field]
+    value: FormData[Field]
   ): void => {
     setForm((currentForm) => ({ ...currentForm, [field]: value }))
+    setErrors((currentErrors) => ({ ...currentErrors, [field]: undefined }))
+  }
+
+  const validateForm = (): FormErrors => {
+    const nextErrors: FormErrors = {}
+    const name = form.name.trim()
+      if (!name || name.length < 2 || name.length > 80 || !hasValidProductName(name)) {
+      nextErrors.name = 'Usá entre 2 y 80 letras, espacios o guiones.'
+    }
+    if (!/^\d+(\.\d{1,2})?$/.test(form.price) || Number(form.price) < 0) {
+      nextErrors.price = 'Ingresá un precio válido.'
+    }
+    if (!/^\d+$/.test(form.stock)) nextErrors.stock = 'Ingresá un stock válido.'
+    if (!/^\d+$/.test(form.lowStock)) nextErrors.lowStock = 'Ingresá un stock mínimo válido.'
+    if (editingProductId === null && !form.image.trim()) nextErrors.image = 'Ingresá la imagen del producto.'
+    if (form.image.trim() && !/^https?:\/\/\S+$/i.test(form.image.trim())) nextErrors.image = 'Ingresá una URL de imagen válida.'
+    return nextErrors
   }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
-    setError(null)
+    const validationErrors = validateForm()
+    setErrors(validationErrors)
+    if (Object.keys(validationErrors).length > 0) return
 
-    if (!form.name.trim()) {
-      setError('El nombre del producto es obligatorio.')
-      return
-    }
-
-    if (form.price < 0 || form.stock < 0 || form.lowStock < 0) {
-      setError('Precio, stock y stock mínimo no pueden ser negativos.')
-      return
+    const productData: ProductForm = {
+      name: form.name.trim(),
+      price: Number(form.price),
+      stock: Number(form.stock),
+      lowStock: Number(form.lowStock),
+      image: form.image.trim(),
+      isActive: form.isActive
     }
 
     if (editingProductId === null) {
-      setProducts((currentProducts) => [...currentProducts, { ...form, id: Date.now() }])
+      setProducts((currentProducts) => [...currentProducts, { ...productData, id: Date.now() }])
     } else {
       setProducts((currentProducts) =>
         currentProducts.map((product) =>
-          product.id === editingProductId ? { ...form, id: product.id } : product
+          product.id === editingProductId ? { ...productData, id: product.id } : product
         )
       )
     }
@@ -81,13 +117,13 @@ export default function Catalogo(): JSX.Element {
     setEditingProductId(product.id)
     setForm({
       name: product.name,
-      price: product.price,
-      stock: product.stock,
-      lowStock: product.lowStock,
+      price: String(product.price),
+      stock: String(product.stock),
+      lowStock: String(product.lowStock),
       image: product.image,
       isActive: product.isActive
     })
-    setError(null)
+    setErrors({})
   }
 
   const toggleProduct = (productId: number): void => {
@@ -101,7 +137,7 @@ export default function Catalogo(): JSX.Element {
   const resetForm = (): void => {
     setForm(emptyForm)
     setEditingProductId(null)
-    setError(null)
+    setErrors({})
   }
 
   const stockClass = (product: Product): string => {
@@ -144,42 +180,45 @@ export default function Catalogo(): JSX.Element {
           <label className="flex flex-col gap-1 text-sm font-medium text-gray-700 dark:text-gray-200 sm:col-span-2">
             Nombre
             <input
-              value={form.name}
-              onChange={(event) => updateForm('name', event.target.value)}
+                value={form.name}
+                onChange={(event) => updateForm('name', sanitizeProductName(event.target.value))}
               placeholder="Nombre del producto"
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 font-normal text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
             />
+            {errors.name && <span className="text-xs text-rose-600 dark:text-rose-300">{errors.name}</span>}
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-gray-700 dark:text-gray-200">
             Precio
             <input
-              type="number"
-              min="0"
-              step="0.01"
+              type="text"
+              inputMode="decimal"
               value={form.price}
-              onChange={(event) => updateForm('price', Number(event.target.value))}
+              onChange={(event) => updateForm('price', event.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1'))}
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 font-normal text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
             />
+            {errors.price && <span className="text-xs text-rose-600 dark:text-rose-300">{errors.price}</span>}
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-gray-700 dark:text-gray-200">
             Stock
             <input
-              type="number"
-              min="0"
+              type="text"
+              inputMode="numeric"
               value={form.stock}
-              onChange={(event) => updateForm('stock', Number(event.target.value))}
+              onChange={(event) => updateForm('stock', event.target.value.replace(/\D/g, ''))}
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 font-normal text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
             />
+            {errors.stock && <span className="text-xs text-rose-600 dark:text-rose-300">{errors.stock}</span>}
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-gray-700 dark:text-gray-200">
             Stock mínimo
             <input
-              type="number"
-              min="0"
+              type="text"
+              inputMode="numeric"
               value={form.lowStock}
-              onChange={(event) => updateForm('lowStock', Number(event.target.value))}
+              onChange={(event) => updateForm('lowStock', event.target.value.replace(/\D/g, ''))}
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 font-normal text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
             />
+            {errors.lowStock && <span className="text-xs text-rose-600 dark:text-rose-300">{errors.lowStock}</span>}
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-gray-700 dark:text-gray-200 sm:col-span-2">
             Imagen
@@ -189,6 +228,7 @@ export default function Catalogo(): JSX.Element {
               placeholder="URL de la imagen"
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 font-normal text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
             />
+            {errors.image && <span className="text-xs text-rose-600 dark:text-rose-300">{errors.image}</span>}
           </label>
           <label className="flex items-center gap-2 self-end pb-2 text-sm text-gray-700 dark:text-gray-200">
             <input
@@ -200,9 +240,9 @@ export default function Catalogo(): JSX.Element {
           </label>
         </div>
 
-        {error && (
+        {Object.keys(errors).length > 0 && (
           <p role="alert" className="mt-3 text-sm text-rose-600 dark:text-rose-300">
-            {error}
+            Revisá los campos marcados antes de guardar el producto.
           </p>
         )}
         <button
