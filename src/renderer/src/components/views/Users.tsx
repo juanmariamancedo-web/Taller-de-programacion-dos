@@ -3,7 +3,8 @@ import Paginacion from "../Pagination"
 import { Sort } from "../Sort"
 import { useEffect, useState } from "react";
 import { UserWithRole } from "../../../../main/domain/types/electron-env";
-import { useAppSelector } from "../../store/hooks";
+import { useAppDispatch, useAppSelector } from "../../store/hooks";
+import { setCurrentTab } from "../../store/slices/appSlice";
 
 // model User {
 //   id        BigInt    @id @default(autoincrement())
@@ -28,6 +29,8 @@ export default function(){
     const sort = useAppSelector(state=>state.app.sort)
     const search = useAppSelector(state=>state.app.search)
     const page = useAppSelector(state=>state.app.page)
+
+    const dispatch = useAppDispatch()
 
     useEffect(() => {
         const fetchUsers = async () => {
@@ -54,9 +57,20 @@ export default function(){
     return(
         <>
             <div className="flex flex-col items-center gap-3">
-                <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold flex flex-row gap-x-4 pb-6 lg:pb-10">
-                    Usuarios
-                </h1>
+                <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
+                    <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">Usuario</h1>
+                    <button
+                        type="button"
+                        onClick={() => {
+                        // dispatch(setClientToEdit(null))
+                            dispatch(setCurrentTab('users-create'))
+                        }}
+                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                    >
+                        <span className="text-xl leading-none">+</span>
+                        Agregar usuario
+                    </button>
+                </div>
                 <Search />
                 {error && <p className="text-rose-600 dark:text-rose-300">{error}</p>}
                 {isLoading && <p className="text-gray-500">Cargando usuarios...</p>}

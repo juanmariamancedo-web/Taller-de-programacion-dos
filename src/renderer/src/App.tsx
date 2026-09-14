@@ -8,6 +8,7 @@ import CreateClientPage from './components/views/CreateClientPage' // Importamos
 import { useAppSelector } from "./store/hooks";
 import LoginPanel from './components/views/LoginPanel'
 import Users from './components/views/Users'
+import CreateUserPage from './components/views/CreateUserPage'
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
@@ -35,6 +36,8 @@ function App(): React.JSX.Element {
         return <ClientsPanel />
       case "clients-create": 
         return <CreateClientPage />
+      case "users-create":
+        return <CreateUserPage />
       default:
         return <HomePanel />
     }
