@@ -3,17 +3,23 @@ import Paginacion from "../Pagination"
 import { Sort } from "../Sort"
 import { useEffect, useState } from "react"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
+import { useAppSelector } from "../../store/hooks"
 
 export default function OrdersPage() {
     const [orders, setOrders] = useState<OrderWithState[]>();
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [pages, setPages] = useState(1)
+
+    const sort = useAppSelector(store=>store.app.sort)
+    const search = useAppSelector(store=>store.app.search)
+    const page = useAppSelector(store=>store.app.page)
 
     useEffect(() => {
         const fetchOrders = async () => {
             try {
                 setIsLoading(true);
-                const response = await window.electronAPI?.getOrders({ page: 1, sort: "", search: "" });
+                const response = await window.electronAPI?.getOrders({ page, sort, search});
                 
                 if (response?.success && response) {
                     setPages(response.totalPages ?? 1)
@@ -29,11 +35,8 @@ export default function OrdersPage() {
         };
 
         fetchOrders();
-    }, []);
+    }, [search, sort, page]);
 
-    useEffect(() => {
-        console.log(orders);
-    }, [orders]);
 
     return (
         <>
@@ -86,7 +89,7 @@ export default function OrdersPage() {
                                             </td>
 
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                                                {/* ${order.total} */}
+                                                ${Number(order.total)}
                                             </td>
                                             <td className="px-4 py-3">
                                                 <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
@@ -112,7 +115,7 @@ export default function OrdersPage() {
                         </tbody>
                     </table>
                 </div>
-                <Paginacion paginas={5} />
+                <Paginacion paginas={pages} />
             </div>
         </>
     )

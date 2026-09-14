@@ -8,8 +8,8 @@ export class UsersService {
     const limit = 5;
     
     const sortMap: Record<string, Prisma.UserOrderByWithRelationInput> = {
-          userIDAsc: { id: 'asc' },         
-          userIDDesc: { id: 'desc' },
+          idAsc: { id: 'asc' },         
+          idDesc: { id: 'desc' },
           usernameAsc: { username: "asc" },    
           usernameDesc: { username: 'desc' },
           activeAsc: { isActive: 'asc' },

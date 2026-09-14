@@ -41,6 +41,12 @@ export interface OrderResponse {
   totalPages?: number
 }
 
+export interface TopProduct {
+  id: bigint,
+  name: string, 
+  totalSold: number
+}
+
 export interface DashboardData {
   registeredClients: number
   pendingOrders: number
@@ -49,7 +55,7 @@ export interface DashboardData {
   lastOrders: Array<Prisma.OrderGetPayload<{
     include: { currentState: true; client: true }
   }>>
-  topProducts: Array<{ id: bigint; name: string; totalSold: number }>
+  topProducts: Array<TopProduct>
 }
 
 export interface DashboardDataResponse {
