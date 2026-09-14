@@ -1,9 +1,22 @@
 import { ipcMain } from 'electron'
-import { CreateClientInput, SearchParams } from '../../domain/types/electron-env'
+import { CreateClientInput, SearchParams, UpdateClientInput } from '../../domain/types/electron-env'
 import { Prisma } from '../../infrastructure/db/generated/client/client'
 import { clientsService } from '../../services/clients.service'
 
 export function registerClientIPC(): void {
+  ipcMain.handle('clients:update', async (_event, input: UpdateClientInput) => {
+    try {
+      const data = await clientsService.updateClient(input)
+      return { success: true, data }
+    } catch (error) {
+      console.error('Failed to update client:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'No se pudo actualizar el cliente.'
+      }
+    }
+  })
+
   ipcMain.handle('clients:delete', async (_event, id: string) => {
     try {
       const data = await clientsService.deleteClient(id)
