@@ -22,8 +22,8 @@ export function Sort({className, serverArg, name} : Props){
     return(
         <button onClick={toggleStock} className={className}>
             {sort ==  `${serverArg}Desc` && <>↓ </>}
+            {sort ==  `${serverArg}Asc` && <>↑ </>}
                 {name}
-            {sort ==  `${serverArg}Asc` && <> ↑</>}
         </button>
     )
 }

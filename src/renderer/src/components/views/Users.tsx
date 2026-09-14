@@ -3,6 +3,7 @@ import Paginacion from "../Pagination"
 import { Sort } from "../Sort"
 import { useEffect, useState } from "react";
 import { UserWithRole } from "../../../../main/domain/types/electron-env";
+import { useAppSelector } from "../../store/hooks";
 
 // model User {
 //   id        BigInt    @id @default(autoincrement())
@@ -22,12 +23,17 @@ export default function(){
     const [users, setUsers] = useState<UserWithRole[]>();
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [pages, setPages] = useState(1)
+    
+    const sort = useAppSelector(state=>state.app.sort)
+    const search = useAppSelector(state=>state.app.search)
+    const page = useAppSelector(state=>state.app.page)
 
     useEffect(() => {
         const fetchUsers = async () => {
             try {
                 setIsLoading(true);
-                const response = await window.electronAPI?.getUsers({ page: 1, sort: "", search: "" });
+                const response = await window.electronAPI?.getUsers({ page, sort, search });
                 
                 if (response?.success && response.data) {
                     setPages(response.totalPages ?? 1)
@@ -43,7 +49,7 @@ export default function(){
         };
 
         fetchUsers();
-    }, []);
+    }, [sort, search, page]);
 
     return(
         <>
@@ -142,7 +148,7 @@ export default function(){
                         </tbody>
                     </table>
                 </div>
-                <Paginacion paginas={5} />
+                <Paginacion paginas={pages} />
             </ div>
         </>
     )
