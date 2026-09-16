@@ -9,6 +9,7 @@ import { useAppSelector } from "./store/hooks";
 import LoginPanel from './components/views/LoginPanel'
 import Users from './components/views/Users'
 import CreateUserPage from './components/views/CreateUserPage'
+import CreateOrderPage from "./components/views/CreateOrderPage"
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
@@ -38,6 +39,8 @@ function App(): React.JSX.Element {
         return <CreateClientPage />
       case "users-create":
         return <CreateUserPage />
+      case "order-create":
+        return <CreateOrderPage />
       default:
         return <HomePanel />
     }
