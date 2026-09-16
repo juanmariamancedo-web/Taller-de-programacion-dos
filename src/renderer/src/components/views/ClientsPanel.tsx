@@ -117,18 +117,18 @@ export default function ClientsPanel() {
                         type="button"
                         onClick={() => handleSetClientStatus(client, false)}
                         title="Dar de baja"
-                        className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-lg font-bold text-rose-700 transition hover:bg-rose-200"
+                        className="rounded-lg bg-rose-100 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-200"
                       >
-                        X
+                        Baja
                       </button>
                     ) : (
                       <button
                         type="button"
                         onClick={() => handleSetClientStatus(client, true)}
                         title="Dar de alta"
-                        className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-lg font-bold text-emerald-700 transition hover:bg-emerald-200"
+                        className="rounded-lg bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-200"
                       >
-                        ✓
+                        Alta
                       </button>
                     )}
                   </div>
