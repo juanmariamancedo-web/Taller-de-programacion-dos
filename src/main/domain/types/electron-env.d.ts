@@ -75,6 +75,17 @@ export interface UserResponse {
   totalPages?: number
 }
 
+export type AddressWithCityAndClient = Prisma.AddressGetPayload<{
+    include: {city: true, client: true}
+  }>
+
+export interface AddressResponse { 
+  success: boolean,
+  data?: AddressWithCityAndClient[]
+  message?: string
+  totalPages: number
+}
+
 export interface RolesResponse {
   success: boolean, 
   data?: Prisma.UserRoleGetPayload<>
@@ -165,6 +176,7 @@ export interface IElectronAPI {
     isActive: boolean
   } | null>,
   getRoles: () => Promise<RolesResponse>
+  getAddresses: (clientId?: number | bigint, searchParams?: SearchParams) => Promise<AddressResponse>
 }
 
 declare global {

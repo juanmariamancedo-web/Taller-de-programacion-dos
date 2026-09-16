@@ -46,6 +46,8 @@ const api = {
   }, 
   getRoles: (): Promise<RolesResponse> =>
     ipcRenderer.invoke('roles:getRoles'),
+  getAddresses: (clientId?: number, searchParams?: SearchParams) =>
+    ipcRenderer.invoke('address:getAddresses', clientId, searchParams),
 }
 
 if (process.contextIsolated) {

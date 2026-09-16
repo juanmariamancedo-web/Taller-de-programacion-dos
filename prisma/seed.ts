@@ -7,6 +7,12 @@ async function main() {
 
   await seedProvinces()
 
+  // Buscar una ciudad de prueba generada en seedProvinces
+  const sampleCity = await prisma.city.findFirst()
+  if (!sampleCity) {
+    throw new Error('No se encontraron ciudades creadas por seedProvinces.')
+  }
+
   // 1. Roles
   const adminRole = await prisma.userRole.upsert({
     where: { name: 'admin' },
@@ -116,12 +122,40 @@ async function main() {
     createdClients.push(client)
   }
 
-  // 5. Órdenes
+  // 5. Direcciones (Address)
+  console.log('Cargando direcciones de prueba...')
+  const createdAddresses = []
+  for (let i = 0; i < createdClients.length; i++) {
+    const client = createdClients[i]
+    
+    // Buscar si ya tiene una dirección creada para evitar duplicados en ejecuciones repetidas
+    let address = await prisma.address.findFirst({
+      where: { clientId: client.id }
+    })
+
+    if (!address) {
+      address = await prisma.address.create({
+        data: {
+          street: `Calle Falsa ${100 + (i + 1) * 10}`,
+          number: 100 + i * 5,
+          floor: i % 2 === 0 ? `${i + 1}` : null,
+          apartment: i % 2 === 0 ? 'A' : null,
+          postalCode: `3400`,
+          cityId: sampleCity.id,
+          clientId: client.id
+        }
+      })
+    }
+    createdAddresses.push(address)
+  }
+
+  // 6. Órdenes
   const ordersData = [
     {
       currentStateId: statesMap['created'],
       sellerId: adminUser.id,
       clientId: createdClients[0].id,
+      shippingAddressId: createdAddresses[0].id,
       trackingNumber: null,
       total: 150.5
     },
@@ -129,6 +163,7 @@ async function main() {
       currentStateId: statesMap['pending'],
       sellerId: adminUser.id,
       clientId: createdClients[1].id,
+      shippingAddressId: createdAddresses[1].id,
       trackingNumber: 'TRK-1002-B',
       total: 89.99
     },
@@ -136,6 +171,7 @@ async function main() {
       currentStateId: statesMap['paid'],
       sellerId: adminUser.id,
       clientId: createdClients[2].id,
+      shippingAddressId: createdAddresses[2].id,
       trackingNumber: 'TRK-1003-C',
       total: 320.0
     },
@@ -143,6 +179,7 @@ async function main() {
       currentStateId: statesMap['dispatched'],
       sellerId: adminUser.id,
       clientId: createdClients[3].id,
+      shippingAddressId: null, // Ejemplo sin dirección asignada (retira en local)
       trackingNumber: 'TRK-1004-D',
       total: 45.1
     },
@@ -150,6 +187,7 @@ async function main() {
       currentStateId: statesMap['delivered'],
       sellerId: adminUser.id,
       clientId: createdClients[4].id,
+      shippingAddressId: createdAddresses[4].id,
       trackingNumber: 'TRK-1005-E',
       total: 500.0
     }
