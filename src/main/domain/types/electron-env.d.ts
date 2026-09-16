@@ -42,8 +42,8 @@ export interface OrderResponse {
 }
 
 export interface TopProduct {
-  id: bigint,
-  name: string, 
+  id: bigint
+  name: string
   totalSold: number
 }
 
@@ -75,9 +75,20 @@ export interface UserResponse {
   totalPages?: number
 }
 
+export type AddressWithCityAndClient = Prisma.AddressGetPayload<{
+  include: { city: true; client: true }
+}>
+
+export interface AddressResponse {
+  success: boolean
+  data?: AddressWithCityAndClient[]
+  message?: string
+  totalPages: number
+}
+
 export interface RolesResponse {
-  success: boolean, 
-  data?: Prisma.UserRoleGetPayload<>
+  success: boolean
+  data?: Prisma.UserRoleGetPayload<{}>
   message?: string
 }
 
@@ -143,6 +154,16 @@ export interface DeleteClientResponse {
   error?: string
 }
 
+export type Product = Prisma.ProductGetPayload<{}>
+export type ItemOrder = Prisma.ItemOrderGetPayload<{}>
+
+export interface ProductsResponse {
+  success: boolean
+  data?: Product[]
+  message?: string
+  totalPages: number
+}
+
 export interface ToggleClientStatusInput {
   id: string
   isActive: boolean
@@ -175,8 +196,10 @@ export interface IElectronAPI {
     id: bigint
     username: string
     isActive: boolean
-  } | null>,
+  } | null>
   getRoles: () => Promise<RolesResponse>
+  getAddresses: (clientId?: number | bigint, searchParams?: SearchParams) => Promise<AddressResponse>
+  getProducts: (searchParams: SearchParams) => Promise<ProductsResponse>
 }
 
 declare global {

@@ -3,13 +3,16 @@ import Paginacion from "../Pagination"
 import { Sort } from "../Sort"
 import { useEffect, useState } from "react"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
-import { useAppSelector } from "../../store/hooks"
+import { useAppDispatch, useAppSelector } from "../../store/hooks"
+import { setCurrentTab } from "../../store/slices/appSlice"
 
 export default function OrdersPage() {
     const [orders, setOrders] = useState<OrderWithState[]>();
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [pages, setPages] = useState(1)
+
+    const dispatch = useAppDispatch()
 
     const sort = useAppSelector(store=>store.app.sort)
     const search = useAppSelector(store=>store.app.search)
@@ -41,9 +44,20 @@ export default function OrdersPage() {
     return (
         <>
             <div className="flex flex-col items-center gap-3">
-                <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold flex flex-row gap-x-4 pb-6 lg:pb-10">
-                    Ordenes
-                </h1>
+                <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
+                    <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">Ordenes</h1>
+                    <button
+                        type="button"
+                        onClick={() => {
+                        // dispatch(setClientToEdit(null))
+                            dispatch(setCurrentTab("order-create"))
+                        }}
+                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                    >
+                        <span className="text-xl leading-none">+</span>
+                        Agregar Orden
+                    </button>
+                </div>
                 <Search />
                 {error && <p className="text-rose-600 dark:text-rose-300">{error}</p>}
                 {isLoading && <p className="text-gray-500">Cargando órdenes...</p>}
@@ -56,6 +70,13 @@ export default function OrdersPage() {
                                     <Sort   
                                         name="Pedido"
                                         serverArg="pedido"
+                                        className=""
+                                    />
+                                </th>
+                                <th className="px-4 py-3">
+                                    <Sort 
+                                        name="Cliente"
+                                        serverArg="client"
                                         className=""
                                     />
                                 </th>
@@ -87,7 +108,9 @@ export default function OrdersPage() {
                                             <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
                                                 #{order.id}
                                             </td>
-
+                                            <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                                                {`${order.client.name} ${order.client.lastname}`} 
+                                            </td>
                                             <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
                                                 ${Number(order.total)}
                                             </td>

@@ -13,14 +13,16 @@ import {
   DeleteClientResponse,
   ToggleClientStatusInput,
   ToggleClientStatusResponse,
-  RolesResponse
+  RolesResponse,
+  ProductsResponse,
+  Unsubscribe
 } from '../main/domain/types/electron-env'
 
 const api = {
   login: (credentials: Credentials): Promise<AuthResponse> =>
     ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
-  getDashboardData: () => ipcRenderer.invoke("dashboard:getData"),
+  getDashboardData: () => ipcRenderer.invoke('dashboard:getData'),
   getOrders: (params: SearchParams) => ipcRenderer.invoke('orders:getOrders', params),
   getUsers: (params: SearchParams) => ipcRenderer.invoke('users:getUsers', params),
   getProvinces: (): Promise<ProvinceOption[]> => ipcRenderer.invoke('provinces:get-all'),
@@ -40,16 +42,24 @@ const api = {
 
   getInitialTheme: (): Promise<'dark' | 'light'> => ipcRenderer.invoke('theme:get-initial'),
 
-  onThemeChanged: (callback: (isDark: boolean) => void) => {
+  onThemeChanged: (callback: (isDark: boolean) => void): Unsubscribe => {
     const subscription = (
       _event: Electron.IpcRendererEvent,
       isDark: boolean
     ): void => callback(isDark)
 
     ipcRenderer.on('theme-changed', subscription)
+
+    return () => {
+      ipcRenderer.removeListener('theme-changed', subscription)
+    }
   }, 
   getRoles: (): Promise<RolesResponse> =>
     ipcRenderer.invoke('roles:getRoles'),
+  getAddresses: (clientId?: number, searchParams?: SearchParams) =>
+    ipcRenderer.invoke('address:getAddresses', clientId, searchParams),
+  getProducts: (params: SearchParams): Promise<ProductsResponse> =>
+    ipcRenderer.invoke('products:getProducts', params),
 }
 
 if (process.contextIsolated) {

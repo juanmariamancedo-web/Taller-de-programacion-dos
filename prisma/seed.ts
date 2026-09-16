@@ -7,6 +7,12 @@ async function main() {
 
   await seedProvinces()
 
+  // Buscar una ciudad de prueba generada en seedProvinces
+  const sampleCity = await prisma.city.findFirst()
+  if (!sampleCity) {
+    throw new Error('No se encontraron ciudades creadas por seedProvinces.')
+  }
+
   // 1. Roles
   const adminRole = await prisma.userRole.upsert({
     where: { name: 'admin' },
@@ -42,7 +48,94 @@ async function main() {
     }
   })
 
-  // 3. Estados de Orden
+  // 3. Categorías de Productos
+  console.log('Cargando categorías...')
+  const categoriesData = [
+    { name: 'Electrónica', description: 'Artículos de tecnología y gadgetry' },
+    { name: 'Repuestos', description: 'Componentes y repuestos automotores' },
+    { name: 'Herramientas', description: 'Equipamiento y herramientas de taller' }
+  ]
+
+  const createdCategories = []
+  for (const cat of categoriesData) {
+    let category = await prisma.category.findFirst({
+      where: { name: cat.name }
+    })
+
+    if (!category) {
+      category = await prisma.category.create({
+        data: cat
+      })
+    }
+
+    createdCategories.push(category)
+  }
+
+  // 4. Productos
+  console.log('Cargando productos de prueba...')
+  const productsData = [
+    {
+      name: 'Escáner Diagnóstico OBD2',
+      price: 45000.0,
+      stock: 15,
+      lowStock: 3,
+      image: 'https://via.placeholder.com/150',
+      isActive: true,
+      categoryId: createdCategories[0].id
+    },
+    {
+      name: 'Interface J2534 Pass-Thru',
+      price: 180000.0,
+      stock: 5,
+      lowStock: 2,
+      image: 'https://via.placeholder.com/150',
+      isActive: true,
+      categoryId: createdCategories[0].id
+    },
+    {
+      name: 'Sensor MAP Volkswagen 1.6',
+      price: 12500.5,
+      stock: 25,
+      lowStock: 5,
+      image: 'https://via.placeholder.com/150',
+      isActive: true,
+      categoryId: createdCategories[1].id
+    },
+    {
+      name: 'Kit Inyectores Bosch 0280',
+      price: 68000.0,
+      stock: 8,
+      lowStock: 2,
+      image: 'https://via.placeholder.com/150',
+      isActive: true,
+      categoryId: createdCategories[1].id
+    },
+    {
+      name: 'Soldadora Inverter MIG/MAG 170A',
+      price: 245000.0,
+      stock: 4,
+      lowStock: 1,
+      image: 'https://via.placeholder.com/150',
+      isActive: true,
+      categoryId: createdCategories[2].id
+    }
+  ]
+
+  const createdProducts = []
+  for (const productData of productsData) {
+    let product = await prisma.product.findFirst({
+      where: { name: productData.name }
+    })
+
+    if (!product) {
+      product = await prisma.product.create({
+        data: productData
+      })
+    }
+    createdProducts.push(product)
+  }
+
+  // 5. Estados de Orden
   const orderStatesList = [
     'created',
     'pending',
@@ -66,7 +159,7 @@ async function main() {
     statesMap[name] = state.id
   }
 
-  // 4. Clientes
+  // 6. Clientes
   const clientsData = [
     {
       name: 'Juan',
@@ -116,46 +209,127 @@ async function main() {
     createdClients.push(client)
   }
 
-  // 5. Órdenes
+  // 7. Direcciones (Address)
+  console.log('Cargando direcciones de prueba...')
+  const createdAddresses = []
+  for (let i = 0; i < createdClients.length; i++) {
+    const client = createdClients[i]
+
+    let address = await prisma.address.findFirst({
+      where: { clientId: client.id }
+    })
+
+    if (!address) {
+      address = await prisma.address.create({
+        data: {
+          street: `Calle Falsa ${100 + (i + 1) * 10}`,
+          number: 100 + i * 5,
+          floor: i % 2 === 0 ? `${i + 1}` : null,
+          apartment: i % 2 === 0 ? 'A' : null,
+          postalCode: `3400`,
+          cityId: sampleCity.id,
+          clientId: client.id
+        }
+      })
+    }
+    createdAddresses.push(address)
+  }
+
+ // 8. Órdenes con Items de Productos
   const ordersData = [
     {
       currentStateId: statesMap['created'],
       sellerId: adminUser.id,
       clientId: createdClients[0].id,
+      shippingAddressId: createdAddresses[0].id,
       trackingNumber: null,
-      total: 150.5
+      total: 57500.5,
+      itemOrders: {
+        create: [
+          {
+            productId: createdProducts[0].id,
+            unitPrice: 45000.0,
+            amount: 45000.0
+          },
+          {
+            productId: createdProducts[2].id,
+            unitPrice: 12500.5,
+            amount: 12500.5
+          }
+        ]
+      }
     },
     {
       currentStateId: statesMap['pending'],
       sellerId: adminUser.id,
       clientId: createdClients[1].id,
+      shippingAddressId: createdAddresses[1].id,
       trackingNumber: 'TRK-1002-B',
-      total: 89.99
+      total: 136000.0,
+      itemOrders: {
+        create: [
+          {
+            productId: createdProducts[3].id,
+            unitPrice: 68000.0,
+            amount: 136000.0
+          }
+        ]
+      }
     },
     {
       currentStateId: statesMap['paid'],
       sellerId: adminUser.id,
       clientId: createdClients[2].id,
+      shippingAddressId: createdAddresses[2].id,
       trackingNumber: 'TRK-1003-C',
-      total: 320.0
+      total: 180000.0,
+      itemOrders: {
+        create: [
+          {
+            productId: createdProducts[1].id,
+            unitPrice: 180000.0,
+            amount: 180000.0
+          }
+        ]
+      }
     },
     {
       currentStateId: statesMap['dispatched'],
       sellerId: adminUser.id,
       clientId: createdClients[3].id,
+      shippingAddressId: null,
       trackingNumber: 'TRK-1004-D',
-      total: 45.1
+      total: 25001.0,
+      itemOrders: {
+        create: [
+          {
+            productId: createdProducts[2].id,
+            unitPrice: 12500.5,
+            amount: 25001.0
+          }
+        ]
+      }
     },
     {
       currentStateId: statesMap['delivered'],
       sellerId: adminUser.id,
       clientId: createdClients[4].id,
+      shippingAddressId: createdAddresses[4].id,
       trackingNumber: 'TRK-1005-E',
-      total: 500.0
+      total: 245000.0,
+      itemOrders: {
+        create: [
+          {
+            productId: createdProducts[4].id,
+            unitPrice: 245000.0,
+            amount: 245000.0
+          }
+        ]
+      }
     }
   ]
 
-  console.log('Cargando órdenes de prueba...')
+  console.log('Cargando órdenes con ítems de prueba...')
   for (const order of ordersData) {
     await prisma.order.create({
       data: order
