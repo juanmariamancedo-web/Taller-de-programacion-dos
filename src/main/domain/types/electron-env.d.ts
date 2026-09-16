@@ -143,6 +143,17 @@ export interface DeleteClientResponse {
   error?: string
 }
 
+export interface ToggleClientStatusInput {
+  id: string
+  isActive: boolean
+}
+
+export interface ToggleClientStatusResponse {
+  success: boolean
+  data?: { id: string; isActive: boolean }
+  error?: string
+}
+
 export type Unsubscribe = () => void
 
 export interface IElectronAPI {
@@ -156,6 +167,7 @@ export interface IElectronAPI {
   updateClient: (input: UpdateClientInput) => Promise<UpdateClientResponse>
   getClients: (searchParams: SearchParams) => Promise<ClientListResponse>
   deleteClient: (id: string) => Promise<DeleteClientResponse>
+  setClientStatus: (input: ToggleClientStatusInput) => Promise<ToggleClientStatusResponse>
   onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe
   login: (credentials: Credentials) => Promise<AuthResponse>
   logout: () => Promise<{ success: boolean }>

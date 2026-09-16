@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react'
+import { FormEvent, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 
 type Product = {
@@ -49,6 +49,7 @@ export default function Catalogo(): JSX.Element {
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('name')
   const [errors, setErrors] = useState<FormErrors>({})
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const visibleProducts = useMemo<Product[]>((): Product[] => {
     const normalizedSearch = search.trim().toLowerCase()
@@ -72,7 +73,7 @@ export default function Catalogo(): JSX.Element {
   const validateForm = (): FormErrors => {
     const nextErrors: FormErrors = {}
     const name = form.name.trim()
-      if (!name || name.length < 2 || name.length > 80 || !hasValidProductName(name)) {
+    if (!name || name.length < 2 || name.length > 80 || !hasValidProductName(name)) {
       nextErrors.name = 'Usá entre 2 y 80 letras, espacios o guiones.'
     }
     if (!/^\d+(\.\d{1,2})?$/.test(form.price) || Number(form.price) < 0) {
@@ -81,8 +82,37 @@ export default function Catalogo(): JSX.Element {
     if (!/^\d+$/.test(form.stock)) nextErrors.stock = 'Ingresá un stock válido.'
     if (!/^\d+$/.test(form.lowStock)) nextErrors.lowStock = 'Ingresá un stock mínimo válido.'
     if (editingProductId === null && !form.image.trim()) nextErrors.image = 'Ingresá la imagen del producto.'
-    if (form.image.trim() && !/^https?:\/\/\S+$/i.test(form.image.trim())) nextErrors.image = 'Ingresá una URL de imagen válida.'
+    if (
+      form.image.trim() &&
+      !/^https?:\/\/\S+$/i.test(form.image.trim()) &&
+      !/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(form.image.trim())
+    ) {
+      nextErrors.image = 'Ingresá una URL o una imagen válida.'
+    }
     return nextErrors
+  }
+
+  const handleImageSelection = (event: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      setErrors((currentErrors) => ({
+        ...currentErrors,
+        image: 'Seleccioná un archivo de imagen válido.'
+      }))
+      event.target.value = ''
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        updateForm('image', reader.result)
+      }
+    }
+    reader.readAsDataURL(file)
+    event.target.value = ''
   }
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
@@ -222,12 +252,28 @@ export default function Catalogo(): JSX.Element {
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-gray-700 dark:text-gray-200 sm:col-span-2">
             Imagen
-            <input
-              value={form.image}
-              onChange={(event) => updateForm('image', event.target.value)}
-              placeholder="URL de la imagen"
-              className="rounded-lg border border-gray-300 bg-white px-3 py-2 font-normal text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
-            />
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                value={form.image}
+                onChange={(event) => updateForm('image', event.target.value)}
+                placeholder="URL de la imagen o seleccioná un archivo"
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 font-normal text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200 dark:border-white/10 dark:bg-white/5 dark:text-gray-200 dark:hover:bg-white/10"
+              >
+                Explorar archivos
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageSelection}
+              />
+            </div>
             {errors.image && <span className="text-xs text-rose-600 dark:text-rose-300">{errors.image}</span>}
           </label>
           <label className="flex items-center gap-2 self-end pb-2 text-sm text-gray-700 dark:text-gray-200">

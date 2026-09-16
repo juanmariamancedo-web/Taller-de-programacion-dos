@@ -74,14 +74,19 @@ export class ClientsService {
   }
 
   async deleteClient(id: string): Promise<{ id: string }> {
+    return this.setClientStatus(id, false)
+  }
+
+  async setClientStatus(id: string, isActive: boolean): Promise<{ id: string; isActive: boolean }> {
     return prisma.$transaction(async (transaction) => {
       const clientId = BigInt(id)
-      await transaction.client.update({
+      const client = await transaction.client.update({
         where: { id: clientId },
-        data: { isActive: false }
+        data: { isActive },
+        select: { id: true, isActive: true }
       })
 
-      return { id }
+      return { id: client.id.toString(), isActive: client.isActive }
     })
   }
 

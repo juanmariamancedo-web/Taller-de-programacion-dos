@@ -11,6 +11,8 @@ import {
   UpdateClientResponse,
   ClientListResponse,
   DeleteClientResponse,
+  ToggleClientStatusInput,
+  ToggleClientStatusResponse,
   RolesResponse
 } from '../main/domain/types/electron-env'
 
@@ -30,6 +32,8 @@ const api = {
     ipcRenderer.invoke('clients:get-all', params),
   deleteClient: (id: string): Promise<DeleteClientResponse> =>
     ipcRenderer.invoke('clients:delete', id),
+  setClientStatus: (input: ToggleClientStatusInput): Promise<ToggleClientStatusResponse> =>
+    ipcRenderer.invoke('clients:set-status', input),
   logout: () => ipcRenderer.invoke('auth:logout'),
   setTheme: (theme: ThemeSource): Promise<boolean> =>
     ipcRenderer.invoke('theme:set', theme),

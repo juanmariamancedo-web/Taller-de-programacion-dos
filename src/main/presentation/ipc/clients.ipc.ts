@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { CreateClientInput, SearchParams, UpdateClientInput } from '../../domain/types/electron-env'
+import { CreateClientInput, SearchParams, ToggleClientStatusInput, UpdateClientInput } from '../../domain/types/electron-env'
 import { Prisma } from '../../infrastructure/db/generated/client/client'
 import { clientsService } from '../../services/clients.service'
 
@@ -39,6 +39,19 @@ export function registerClientIPC(): void {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'No se pudieron cargar los clientes.'
+      }
+    }
+  })
+
+  ipcMain.handle('clients:set-status', async (_event, input: ToggleClientStatusInput) => {
+    try {
+      const data = await clientsService.setClientStatus(input.id, input.isActive)
+      return { success: true, data }
+    } catch (error) {
+      console.error('Failed to update client status:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'No se pudo actualizar el estado del cliente.'
       }
     }
   })
