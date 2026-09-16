@@ -1,50 +1,121 @@
 import { useEffect, useState } from 'react'
 import { useAppDispatch } from '../../store/hooks'
 import { setCurrentTab } from '../../store/slices/appSlice'
-import type { ClientListItem } from '../../../../main/domain/types/electron-env'
 import OrderSuccess from '../SuccessCreateOrder'
 import { useSeletedAddressOnOrder } from '../../hooks/useSeletedAddressOnOrder'
 import useSeletedUserOnOrder from '../../hooks/useSeletedUserOnOrder'
+import { ItemOrder } from '../ItemOrder'
+
+// Tipado local para los ítems del formulario si no vienen guardados aún en la BD
+export interface FormOrderItem {
+  id: string
+  productId: number
+  description: string
+  quantity: number
+  unitPrice: number
+}
+
 
 export default function OrderForm() {
   const [success, setSuccess] = useState(false)
   const dispatch = useAppDispatch()
 
   const [formData, setFormData] = useState({
-    clientId: 0,
-    shippingAddressId: 0,
+    clientId: -1,
+    shippingAddressId: -1,
   })
 
-  // Clientes
-  const {clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients} = useSeletedUserOnOrder()
+  // Inicializado con un ítem por defecto para evitar crash por `undefined` al iterar
+  const [items, setItems] = useState<FormOrderItem[]>([])
 
-  // Direcciones
-  const {addresses, searchTermAddress, setSearchTermAddress, isOpenAddress, setIsOpenAddress} = useSeletedAddressOnOrder(formData);
+  // Clientes y Direcciones (Hooks)
+  const { clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients } = useSeletedUserOnOrder()
+  const { addresses, searchTermAddress, setSearchTermAddress, isOpenAddress, setIsOpenAddress } = useSeletedAddressOnOrder(formData)
+
+  const handleAddItem = () => {
+    if(!formData.shippingAddressId){
+      return alert("Debe de seleccionar una direccion para el envio")
+    }
+
+    setItems((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), productId: 0, description: '', quantity: 1, unitPrice: 0 }
+    ])
+  }
+
+  const handleRemoveItem = (id: string) => {
+    if (items.length === 1) return
+    setItems((prev) => prev.filter((item) => item.id !== id))
+  }
+
+  const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) => {
+    setItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item))
+    )
+  }
+
+  // Cómputo del Total
+  const totalAmount = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
+
+  const [errors, setErrors] = useState({
+    clientId: "",
+    shippingAddressId: "",
+    items: ""
+  })
+
+  function checkErrors(): boolean {
+    const currentErrors = {
+      clientId: '',
+      shippingAddressId: '',
+      items: '',
+    }
+
+    let hasErrors = false
+
+    if (items.length === 0) {
+      currentErrors.items = 'Debe agregar al menos un item'
+      hasErrors = true
+    }
+
+    if (formData.clientId === -1) {
+      currentErrors.clientId = 'Debe seleccionar un cliente'
+      hasErrors = true
+    }
+
+    if (formData.shippingAddressId === -1) {
+      currentErrors.shippingAddressId = 'Debe seleccionar una dirección'
+      hasErrors = true
+    }
+
+    setErrors(currentErrors)
+    return hasErrors
+  }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSuccess(true)
+
+    if(!checkErrors()){
+      setSuccess(true)
+    }
   }
 
   const inputClass =
     'w-full rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:text-white'
 
   function onReset() {
-    setFormData({
-      clientId: 0,
-      shippingAddressId: 0,
-    })
-    setSearchTermClients("")
-    setSearchTermAddress("")
+    setFormData({ clientId: 0, shippingAddressId: 0 })
+    setItems([{ id: crypto.randomUUID(), productId: 0, description: '', quantity: 1, unitPrice: 0 }])
+    setSearchTermClients('')
+    setSearchTermAddress('')
     setSuccess(false)
   }
 
   function onNavigateBack() {
-    dispatch(setCurrentTab("orders"))
+    dispatch(setCurrentTab('orders'))
   }
 
   if (success) {
-    return <OrderSuccess onReset={onReset} clientName={""} orderId={11} onNavigateBack={onNavigateBack} />
+    return <OrderSuccess onReset={onReset} clientName={''} orderId={11} onNavigateBack={onNavigateBack} />
   }
 
   return (
@@ -66,7 +137,6 @@ export default function OrderForm() {
         </button>
       </div>
 
-      {/* Formulario */}
       <form
         onSubmit={handleSubmit}
         className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-[0_18px_50px_-30px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-zinc-900"
@@ -77,9 +147,8 @@ export default function OrderForm() {
             <label htmlFor="clientSearch" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
               Cliente
             </label>
-
             <div className="relative">
-              <input
+             <input
                 id="clientSearch"
                 type="text"
                 className={inputClass}
@@ -87,46 +156,33 @@ export default function OrderForm() {
                 value={searchTermClients}
                 onChange={(e) => setSearchTermClients(e.target.value)}
                 onFocus={() => setIsOpenClients(true)}
+                onBlur={() => {
+                  // Retrasamos el cierre para permitir el evento click de la lista
+                  setTimeout(() => setIsOpenClients(false), 200)
+                }}
               />
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400">
-                <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">
-                  <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
-                </svg>
-              </div>
+              {errors.clientId && <p className="text-rose-600 dark:text-rose-300">{errors.clientId}</p>}
             </div>
-
             {isOpenClients && (
               <ul className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 text-slate-900 dark:text-white">
                 {clients.length > 0 ? (
-                  clients.map((client) => {
-                    const isSelected = Number(formData.clientId) === Number(client.id);
-                    return (
-                      <li
-                        key={String(client.id)}
-                        onClick={() => {
-                          setFormData((prev) => ({
-                            ...prev,
-                            clientId: Number(client.id),
-                            shippingAddressId: 0 // Resetea la dirección al cambiar de cliente
-                          }));
-                          setSearchTermClients(`${client.name} ${client.lastname}`);
-                          setSearchTermAddress(""); // Resetea el input de dirección
-                          setIsOpenClients(false);
-                        }}
-                        className={`flex cursor-pointer items-center justify-between px-4 py-2 text-sm transition-colors hover:bg-slate-100 dark:hover:bg-zinc-800 ${
-                          isSelected ? 'bg-slate-50 font-semibold text-blue-600 dark:bg-zinc-800/60 dark:text-blue-400' : ''
-                        }`}
-                      >
-                        <span>{`${client.name} ${client.lastname}`}</span>
-                        <span className="text-xs text-slate-400">#{String(client.id)}</span>
-                      </li>
-                    );
-                  })
+                  clients.map((client) => (
+                    <li
+                      key={String(client.id)}
+                      onClick={() => {
+                        setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
+                        setSearchTermClients(`${client.name} ${client.lastname}`)
+                        setSearchTermAddress('')
+                        setIsOpenClients(false)
+                      }}
+                      className="flex cursor-pointer items-center justify-between px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-zinc-800"
+                    >
+                      <span>{`${client.name} ${client.lastname}`}</span>
+                      <span className="text-xs text-slate-400">#{String(client.id)}</span>
+                    </li>
+                  ))
                 ) : (
-                  <li className="px-4 py-3 text-center text-sm text-slate-500 dark:text-slate-400">
-                    No se encontraron clientes
-                  </li>
+                  <li className="px-4 py-3 text-center text-sm text-slate-500 dark:text-slate-400">No se encontraron clientes</li>
                 )}
               </ul>
             )}
@@ -137,60 +193,40 @@ export default function OrderForm() {
             <label htmlFor="addressSearch" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
               Dirección de Envío
             </label>
-
             <div className="relative">
               <input
                 id="addressSearch"
                 type="text"
                 disabled={!formData.clientId}
                 className={`${inputClass} ${!formData.clientId ? 'cursor-not-allowed opacity-60' : ''}`}
-                placeholder={formData.clientId ? "Buscar dirección..." : "Selecciona un cliente primero"}
+                placeholder={formData.clientId ? 'Buscar dirección...' : 'Selecciona un cliente primero'}
                 value={searchTermAddress}
                 onChange={(e) => setSearchTermAddress(e.target.value)}
                 onFocus={() => formData.clientId && setIsOpenAddress(true)}
+                onBlur={() => {
+                  // Retrasamos el cierre para permitir el evento click de la lista
+                  setTimeout(() => setIsOpenAddress(false), 200)
+                }}
               />
-
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400">
-                <svg className="h-4 w-4 fill-current" viewBox="0 0 20 20">
-                  <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
-                </svg>
-              </div>
+              {errors.shippingAddressId && <p className="text-rose-600 dark:text-rose-300">{errors.shippingAddressId}</p>}
             </div>
-
             {isOpenAddress && formData.clientId > 0 && (
               <ul className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 text-slate-900 dark:text-white">
                 {addresses.length > 0 ? (
-                  addresses.map((ubic) => {
-                    const isSelected = Number(formData.shippingAddressId) === Number(ubic.id);
-                    const labelAddress = `${ubic.street} ${ubic.number}${ubic.city?.name ? `, ${ubic.city.name}` : ''}`;
-
-                    return (
-                      <li
-                        key={String(ubic.id)}
-                        onClick={() => {
-                          setFormData((prev) => ({
-                            ...prev,
-                            shippingAddressId: Number(ubic.id)
-                          }));
-                          setSearchTermAddress(labelAddress);
-                          setIsOpenAddress(false);
-                        }}
-                        className={`flex cursor-pointer items-center justify-between px-4 py-2 text-sm transition-colors hover:bg-slate-100 dark:hover:bg-zinc-800 ${
-                          isSelected ? 'bg-slate-50 font-semibold text-blue-600 dark:bg-zinc-800/60 dark:text-blue-400' : ''
-                        }`}
-                      >
-                        <div className="flex flex-col">
-                          <span>{`${ubic.street} ${ubic.number}`}</span>
-                          {ubic.city?.name && (
-                            <span className="text-xs text-slate-400 dark:text-zinc-400">
-                              {ubic.city.name}
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-xs text-slate-400">#{String(ubic.id)}</span>
-                      </li>
-                    );
-                  })
+                  addresses.map((ubic) => (
+                    <li
+                      key={String(ubic.id)}
+                      onClick={() => {
+                        setFormData((prev) => ({ ...prev, shippingAddressId: Number(ubic.id) }))
+                        setSearchTermAddress(`${ubic.street} ${ubic.number}${ubic.city?.name ? `, ${ubic.city.name}` : ''}`)
+                        setIsOpenAddress(false)
+                      }}
+                      className="flex cursor-pointer items-center justify-between px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-zinc-800"
+                    >
+                      <span>{`${ubic.street} ${ubic.number}`}</span>
+                      <span className="text-xs text-slate-400">#{String(ubic.id)}</span>
+                    </li>
+                  ))
                 ) : (
                   <li className="px-4 py-3 text-center text-sm text-slate-500 dark:text-slate-400">
                     No se encontraron direcciones para este cliente
@@ -201,7 +237,62 @@ export default function OrderForm() {
           </div>
         </div>
 
-        {/* Botones */}
+        {/* --- Tabla / Detalle de Productos --- */}
+        <div className="mt-8">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Items de la Orden</h2>
+            <button
+              type="button"
+              onClick={handleAddItem}
+              className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
+            >
+              + Agregar Ítem
+            </button>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-white/10">
+              {errors.items && (
+                <div className="bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600 dark:bg-rose-950/30 dark:text-rose-300">
+                  {errors.items}
+                </div>
+              )}
+            <table className="w-full text-left text-sm text-slate-600 dark:text-slate-300">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500 dark:bg-white/[0.02] dark:text-slate-400">
+                <tr>
+                  <th className="px-4 py-3">Producto</th>
+                  <th className="w-28 px-4 py-3">Cantidad</th>
+                  <th className="w-36 px-4 py-3">Precio Unit.</th>
+                  <th className="w-32 px-4 py-3 text-right">Subtotal</th>
+                  <th className="w-12 px-4 py-3 text-center"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-white/10">
+                {items.length > 0 &&
+                  items.map((item) => (
+                    <ItemOrder
+                      key={item.id}
+                      item={item}
+                      isOnlyItem={items.length === 1}
+                      onUpdateItem={handleUpdateItem}
+                      onRemoveItem={handleRemoveItem}
+                    />
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Resumen de Total */}
+          <div className="mt-4 flex justify-end">
+            <div className="flex items-center gap-4 text-base font-bold text-slate-900 dark:text-white">
+              <span>Total:</span>
+              <span className="text-xl text-blue-600 dark:text-blue-400">
+                ${totalAmount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Botones de formulario */}
         <div className="flex justify-end gap-4 border-t border-slate-200 pt-4 dark:border-white/10">
           <button
             type="button"

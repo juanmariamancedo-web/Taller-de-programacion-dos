@@ -154,6 +154,17 @@ export interface DeleteClientResponse {
   error?: string
 }
 
+export type Product = Prisma.ProductGetPayload<{}>
+export type ItemOrder = Prisma.ItemOrderGetPayload<{}>
+
+
+export interface ProductsResponse { 
+  success: boolean,
+  data?: Product[]
+  message?: string
+  totalPages: number
+}
+
 export type Unsubscribe = () => void
 
 export interface IElectronAPI {
@@ -177,6 +188,7 @@ export interface IElectronAPI {
   } | null>,
   getRoles: () => Promise<RolesResponse>
   getAddresses: (clientId?: number | bigint, searchParams?: SearchParams) => Promise<AddressResponse>
+  getProducts: (searchParams: SearchParams) => Promise<ProductsResponse>
 }
 
 declare global {

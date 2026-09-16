@@ -11,7 +11,8 @@ import {
   UpdateClientResponse,
   ClientListResponse,
   DeleteClientResponse,
-  RolesResponse
+  RolesResponse,
+  ProductsResponse
 } from '../main/domain/types/electron-env'
 
 const api = {
@@ -48,6 +49,8 @@ const api = {
     ipcRenderer.invoke('roles:getRoles'),
   getAddresses: (clientId?: number, searchParams?: SearchParams) =>
     ipcRenderer.invoke('address:getAddresses', clientId, searchParams),
+   getProducts: (params: SearchParams): Promise<ProductsResponse> =>
+    ipcRenderer.invoke('products:getProducts', params),
 }
 
 if (process.contextIsolated) {
