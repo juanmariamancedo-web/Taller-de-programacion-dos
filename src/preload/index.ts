@@ -10,7 +10,8 @@ import {
   UpdateClientInput,
   UpdateClientResponse,
   ClientListResponse,
-  DeleteClientResponse
+  DeleteClientResponse,
+  RolesResponse
 } from '../main/domain/types/electron-env'
 
 const api = {
@@ -42,7 +43,9 @@ const api = {
     ): void => callback(isDark)
 
     ipcRenderer.on('theme-changed', subscription)
-  }
+  }, 
+  getRoles: (): Promise<RolesResponse> =>
+    ipcRenderer.invoke('roles:getRoles'),
 }
 
 if (process.contextIsolated) {
