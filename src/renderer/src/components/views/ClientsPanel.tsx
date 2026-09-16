@@ -34,19 +34,23 @@ export default function ClientsPanel() {
     loadClients()
   }, [page, search, sort])
 
-  const handleDeactivate = async (client: ClientListItem) => {
-    if (!client.isActive) return
-    if (!window.confirm(`¿Deseás dar de baja al cliente ${client.name} ${client.lastname}?`)) return
+  const handleSetClientStatus = async (client: ClientListItem, isActive: boolean) => {
+    const actionText = isActive ? 'dar de alta' : 'dar de baja'
+    const confirmationMessage = isActive
+      ? `¿Deseás dar de alta al cliente ${client.name} ${client.lastname}?`
+      : `¿Deseás dar de baja al cliente ${client.name} ${client.lastname}?`
+
+    if (!window.confirm(confirmationMessage)) return
 
     try {
-      const response = await window.electronAPI?.deleteClient(client.id)
-      if (!response?.success) throw new Error(response?.error ?? 'No se pudo dar de baja al cliente.')
+      const response = await window.electronAPI?.setClientStatus({ id: client.id, isActive })
+      if (!response?.success) throw new Error(response?.error ?? `No se pudo ${actionText} al cliente.`)
       setClients((currentClients) => currentClients.map((currentClient) =>
-        currentClient.id === client.id ? { ...currentClient, isActive: false } : currentClient
+        currentClient.id === client.id ? { ...currentClient, isActive } : currentClient
       ))
-    } catch (deactivateError) {
-      console.error('Error al dar de baja al cliente:', deactivateError)
-      setError(deactivateError instanceof Error ? deactivateError.message : 'No se pudo dar de baja al cliente.')
+    } catch (statusError) {
+      console.error(`Error al ${actionText} al cliente:`, statusError)
+      setError(statusError instanceof Error ? statusError.message : `No se pudo ${actionText} al cliente.`)
     }
   }
 
@@ -107,15 +111,27 @@ export default function ClientsPanel() {
                   {client.isActive ? 'Activo' : 'Inactivo'}
                 </td>
                 <td className="px-4 py-3">
-                  <button
-                    type="button"
-                    onClick={() => handleDeactivate(client)}
-                    disabled={!client.isActive}
-                    title={client.isActive ? 'Dar de baja' : 'Cliente inactivo'}
-                    className="flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-lg font-bold text-rose-700 transition hover:bg-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    X
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {client.isActive ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSetClientStatus(client, false)}
+                        title="Dar de baja"
+                        className="rounded-lg bg-rose-100 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-200"
+                      >
+                        Baja
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleSetClientStatus(client, true)}
+                        title="Dar de alta"
+                        className="rounded-lg bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-200"
+                      >
+                        Alta
+                      </button>
+                    )}
+                  </div>
                 </td>
                   <td className="px-4 py-3">
                     <button

@@ -42,8 +42,8 @@ export interface OrderResponse {
 }
 
 export interface TopProduct {
-  id: bigint,
-  name: string, 
+  id: bigint
+  name: string
   totalSold: number
 }
 
@@ -76,19 +76,19 @@ export interface UserResponse {
 }
 
 export type AddressWithCityAndClient = Prisma.AddressGetPayload<{
-    include: {city: true, client: true}
-  }>
+  include: { city: true; client: true }
+}>
 
-export interface AddressResponse { 
-  success: boolean,
+export interface AddressResponse {
+  success: boolean
   data?: AddressWithCityAndClient[]
   message?: string
   totalPages: number
 }
 
 export interface RolesResponse {
-  success: boolean, 
-  data?: Prisma.UserRoleGetPayload<>
+  success: boolean
+  data?: Prisma.UserRoleGetPayload<{}>
   message?: string
 }
 
@@ -157,12 +157,22 @@ export interface DeleteClientResponse {
 export type Product = Prisma.ProductGetPayload<{}>
 export type ItemOrder = Prisma.ItemOrderGetPayload<{}>
 
-
-export interface ProductsResponse { 
-  success: boolean,
+export interface ProductsResponse {
+  success: boolean
   data?: Product[]
   message?: string
   totalPages: number
+}
+
+export interface ToggleClientStatusInput {
+  id: string
+  isActive: boolean
+}
+
+export interface ToggleClientStatusResponse {
+  success: boolean
+  data?: { id: string; isActive: boolean }
+  error?: string
 }
 
 export type Unsubscribe = () => void
@@ -178,6 +188,7 @@ export interface IElectronAPI {
   updateClient: (input: UpdateClientInput) => Promise<UpdateClientResponse>
   getClients: (searchParams: SearchParams) => Promise<ClientListResponse>
   deleteClient: (id: string) => Promise<DeleteClientResponse>
+  setClientStatus: (input: ToggleClientStatusInput) => Promise<ToggleClientStatusResponse>
   onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe
   login: (credentials: Credentials) => Promise<AuthResponse>
   logout: () => Promise<{ success: boolean }>
@@ -185,7 +196,7 @@ export interface IElectronAPI {
     id: bigint
     username: string
     isActive: boolean
-  } | null>,
+  } | null>
   getRoles: () => Promise<RolesResponse>
   getAddresses: (clientId?: number | bigint, searchParams?: SearchParams) => Promise<AddressResponse>
   getProducts: (searchParams: SearchParams) => Promise<ProductsResponse>
