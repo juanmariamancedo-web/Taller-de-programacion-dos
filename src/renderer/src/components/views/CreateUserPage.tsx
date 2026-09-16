@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAppDispatch } from '../../store/hooks'
 import { setCurrentTab } from '../../store/slices/appSlice'
 import UserSuccess from '../UserSucces'
+import { Prisma } from '../../../../main/infrastructure/db/generated/client/client'
 
 export default function UserForm() {
     const [success, setSuccess] = useState(false)
@@ -22,6 +23,23 @@ export default function UserForm() {
         passwordRepeat: '',
         isActive: ''
     })
+
+    const [roles, setRoles] = useState<Prisma.UserRoleGetPayload<{}>[]>([])
+
+    useEffect(() => {
+        async function fetchRoles() {
+            try {
+                const response = await window.electronAPI?.getRoles()
+                if (response?.success) {
+                    setRoles(response.data)
+                }
+            } catch (error) {
+                console.error('Error al cargar los roles:', error)
+            }
+        }
+
+        fetchRoles()
+    }, [])
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value, type } = e.target
@@ -151,9 +169,24 @@ export default function UserForm() {
                     <label htmlFor="roleId" className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">
                         Rol
                     </label>
-                    <select id="roleId" name="roleId" value={formData.roleId} onChange={handleChange} className={inputClass}>
-                        <option value={1}>Operador</option>
-                        <option value={2}>Administrador</option>
+                    <select
+                        id="roleId"
+                        name="roleId"
+                        value={formData.roleId}
+                        onChange={handleChange}
+                        className={inputClass}
+                        >
+                        {roles.length > 0 &&
+                            roles.map((rol) => (
+                                <option
+                                    key={String(rol.id)}
+                                    value={Number(rol.id)}
+                                    className="bg-white text-slate-900 dark:bg-zinc-900 dark:text-white"
+                                >
+                                    {rol.name}
+                                </option>
+                            ))
+                        }
                     </select>
                 </div>
 

@@ -75,6 +75,12 @@ export interface UserResponse {
   totalPages?: number
 }
 
+export interface RolesResponse {
+  success: boolean, 
+  data?: Prisma.UserRoleGetPayload<>
+  message?: string
+}
+
 export interface ProvinceOption {
   id: string
   name: string
@@ -157,7 +163,8 @@ export interface IElectronAPI {
     id: bigint
     username: string
     isActive: boolean
-  } | null>
+  } | null>,
+  getRoles: () => Promise<RolesResponse>
 }
 
 declare global {
