@@ -182,7 +182,7 @@ export interface IElectronAPI {
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
   getDashboardData: () => Promise<DashboardDataResponse>
-  getOrders: (searchParams: SearchParams) => Promise<OrderResponse>
+  getOrders: (searchParams: SearchParams, userId?: number) => Promise<OrderResponse>
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
   getProvinces: () => Promise<ProvinceOption[]>
   createClient: (input: CreateClientInput) => Promise<CreateClientResponse>

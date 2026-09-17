@@ -140,7 +140,7 @@ export default function Profile() {
                 <button
                     type="button"
                     className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
-                    onClick={() => dispatch(setCurrentTab('users'))}
+                    onClick={() => dispatch(setCurrentTab("dashboard"))}
                 >
                     ← Volver
                 </button>

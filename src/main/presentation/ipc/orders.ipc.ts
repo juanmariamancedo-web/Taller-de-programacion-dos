@@ -1,11 +1,10 @@
 import { ipcMain } from 'electron';
 import { ordersService } from '../../services/orders.service';
-import { SearchParams } from '../../domain/types/electron-env';
 
 export function registerOrderIPC(): void {
-    ipcMain.handle('orders:getOrders', async (_event, searchParams: SearchParams) => {
+    ipcMain.handle('orders:getOrders', async (event, searchParams, userId) => {
         try {
-            const rawData = await ordersService.getOrders(searchParams);
+            const rawData = await ordersService.getOrders(searchParams, userId);
             
             // Convierte Decimal, BigInt y Date a tipos primitivos JSON planos (string/number)
             const data = JSON.parse(
