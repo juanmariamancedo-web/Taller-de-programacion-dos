@@ -5,6 +5,7 @@ import { useEffect, useState } from "react"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
 import { useAppDispatch, useAppSelector } from "../../store/hooks"
 import { setCurrentTab } from "../../store/slices/appSlice"
+import { OrderResponse } from "../../../../main/domain/types/electron-env"
 
 export default function OrdersPage() {
     const [orders, setOrders] = useState<OrderWithState[]>();
@@ -23,7 +24,10 @@ export default function OrdersPage() {
         const fetchOrders = async () => {
             try {
                 setIsLoading(true);
-                const response = await window.electronAPI?.getOrders({ page, sort, search});
+                const sellerId  = session && (session.roleId == 3)? parseInt(session.id) : undefined
+                console.log(sellerId)
+
+                const response = await window.electronAPI?.getOrders({ page, sort, search}, sellerId);
                 
                 if (response?.success && response) {
                     setPages(response.totalPages ?? 1)
