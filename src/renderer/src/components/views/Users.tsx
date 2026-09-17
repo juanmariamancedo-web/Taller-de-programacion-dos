@@ -107,6 +107,9 @@ export default function(){
                                         className=""
                                     />
                                 </th>
+                                <th>
+                                    Editar
+                                </th>
                             </tr>
                         </thead>
 
@@ -147,6 +150,17 @@ export default function(){
                                                         }`}>
                                                             {user.role.name}
                                                         </span>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <button
+                                                            type="button"
+                                                            // onClick={() => handleEdit(client)}
+                                                            // title={`Editar a ${client.name} ${client.lastname}`}
+                                                            // aria-label={`Editar a ${client.name} ${client.lastname}`}
+                                                            className="rounded-lg bg-blue-100 px-3 py-1.5 font-semibold text-blue-700 transition hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
+                                                            >
+                                                            Editar
+                                                        </button>
                                                     </td>
                                                 </tr>
                                         )

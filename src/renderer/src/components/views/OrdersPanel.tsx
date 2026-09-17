@@ -5,6 +5,7 @@ import { useEffect, useState } from "react"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
 import { useAppDispatch, useAppSelector } from "../../store/hooks"
 import { setCurrentTab } from "../../store/slices/appSlice"
+import { OrderResponse } from "../../../../main/domain/types/electron-env"
 
 export default function OrdersPage() {
     const [orders, setOrders] = useState<OrderWithState[]>();
@@ -23,7 +24,10 @@ export default function OrdersPage() {
         const fetchOrders = async () => {
             try {
                 setIsLoading(true);
-                const response = await window.electronAPI?.getOrders({ page, sort, search});
+                const sellerId  = session && (session.roleId == 3)? parseInt(session.id) : undefined
+                console.log(sellerId)
+
+                const response = await window.electronAPI?.getOrders({ page, sort, search}, sellerId);
                 
                 if (response?.success && response) {
                     setPages(response.totalPages ?? 1)
@@ -103,6 +107,11 @@ export default function OrdersPage() {
                                         className=""
                                     />
                                 </th>
+                                {session && session.roleId != 3 && //los vendedores no pueden editar las ordenes, una vez emetidas
+                                    <th>
+                                        Editar
+                                    </th>
+                                }
                             </tr>
                         </thead>
 
@@ -134,6 +143,19 @@ export default function OrdersPage() {
                                                     {order.currentState.name}
                                                 </span>
                                             </td>
+                                            {session && session.roleId != 3 && //los vendedores no pueden editar las ordenes, una vez emetidas
+                                                <td className="px-4 py-3">
+                                                    <button
+                                                        type="button"
+                                                        // onClick={() => handleEdit(client)}
+                                                        // title={`Editar a ${client.name} ${client.lastname}`}
+                                                        // aria-label={`Editar a ${client.name} ${client.lastname}`}
+                                                        className="rounded-lg bg-blue-100 px-3 py-1.5 font-semibold text-blue-700 transition hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
+                                                        >
+                                                        Editar
+                                                    </button>
+                                                </td>
+                                            }
                                         </tr>
                                     )
                                 })

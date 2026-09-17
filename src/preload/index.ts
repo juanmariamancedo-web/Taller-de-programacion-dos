@@ -23,7 +23,7 @@ const api = {
     ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
   getDashboardData: () => ipcRenderer.invoke('dashboard:getData'),
-  getOrders: (params: SearchParams) => ipcRenderer.invoke('orders:getOrders', params),
+  getOrders: (searchParams, userId) => ipcRenderer.invoke('orders:getOrders', searchParams, userId),
   getUsers: (params: SearchParams) => ipcRenderer.invoke('users:getUsers', params),
   getProvinces: (): Promise<ProvinceOption[]> => ipcRenderer.invoke('provinces:get-all'),
   createClient: (input: CreateClientInput): Promise<CreateClientResponse> =>

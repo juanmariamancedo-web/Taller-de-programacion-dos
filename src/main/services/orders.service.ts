@@ -3,7 +3,7 @@ import { SearchParams } from '../domain/types/electron-env';
 import { Prisma } from '../infrastructure/db/generated/client/client';
 
 export class OrdersService {
-  async getOrders(searchParams?: SearchParams) {
+  async getOrders(searchParams?: SearchParams, userId?: number) {
     const page = searchParams?.page ?? 1;
     const limit = 5;
 
@@ -24,16 +24,20 @@ export class OrdersService {
 
     const search = searchParams?.search?.trim();
 
-    const where: Prisma.OrderWhereInput = search
-      ? {
-          client: {
-            name: {
-              contains: search,
-              mode: 'insensitive',
-            },
+    // Normalización y casteo seguro por si IPC envía string
+    const parsedUserId = userId !== undefined && userId !== null ? Number(userId) : undefined;
+
+    const where: Prisma.OrderWhereInput = {
+      ...(parsedUserId !== undefined && !Number.isNaN(parsedUserId) && { sellerId: parsedUserId }),
+      ...(search && {
+        client: {
+          name: {
+            contains: search,
+            mode: 'insensitive',
           },
-        }
-    : {};
+        },
+      }),
+    };
 
     const [totalOrders, orders] = await prisma.$transaction([
       prisma.order.count({ where }),
@@ -44,20 +48,19 @@ export class OrdersService {
         orderBy,
         include: {
           currentState: { select: { name: true } },
-          client: true
-        }
-      })
+          client: true,
+        },
+      }),
     ]);
 
-    // Cálculo del número de páginas
     const totalPages = Math.ceil(totalOrders / limit);
 
     return {
       success: true,
       data: orders,
-      totalPages
+      totalPages,
     };
   }
 }
 
-export const ordersService = new OrdersService()
+export const ordersService = new OrdersService();
