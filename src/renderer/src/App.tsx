@@ -10,6 +10,7 @@ import LoginPanel from './components/views/LoginPanel'
 import Users from './components/views/Users'
 import CreateUserPage from './components/views/CreateUserPage'
 import CreateOrderPage from "./components/views/CreateOrderPage"
+import Profile from './components/views/Profile'
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
@@ -52,6 +53,8 @@ function App(): React.JSX.Element {
         if(roleId == 1 || roleId == 3){ // debe ser admin o vendedor
           return <CreateOrderPage />
         }
+      case "profile":
+        return <Profile />
       default:
         return <HomePanel />
     }

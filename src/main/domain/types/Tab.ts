@@ -1,2 +1,2 @@
 //Paneles posibles
-export type Tab = 'dashboard' | 'clients' |'clients-create'| 'settings' | "products" | "orders" | "users" | "users-create" | "order-create";
+export type Tab = 'dashboard' | 'clients' |'clients-create'| 'settings' | "products" | "orders" | "users" | "users-create" | "order-create" | "profile"
