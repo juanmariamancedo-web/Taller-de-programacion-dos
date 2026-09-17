@@ -2,7 +2,6 @@ import { setCurrentTab } from "./../../store/slices/appSlice"
 import { useAppDispatch } from "./../../store/hooks"
 import { useEffect, useState } from "react"
 import { OrderWithState, TopProduct } from "../../../../main/domain/types/electron-env";
-import { Product } from "../../../../main/infrastructure/db/generated/client/client";
 
 export default function HomePanel(){
     const dispatch = useAppDispatch()
@@ -15,31 +14,30 @@ export default function HomePanel(){
     const [lastOrders, setLastOrders] = useState<OrderWithState[]>()
     const [topProducts, setTopProducts] = useState<TopProduct[]>([])
 
-
     useEffect(()=>{
         const fetchUsers = async () => {
-        try {
-            setIsLoading(true);
-            const response = await window.electronAPI?.getDashboardData();
-            
-            if (response?.success && response.data) {
-                setAverageTicket(response.data.averageTicket)
-                setTotalClients(response.data.registeredClients)
-                setTotalPedidosPendientes(response.data.pendingOrders)
-                setTotalPedidosEntregados(response.data.deliveredOrders)
-                setLastOrders(response.data.lastOrders)
-                setTopProducts(response.data.topProducts)
-            } else {
-                setError(response?.message || "");
+            try {
+                setIsLoading(true);
+                const response = await window.electronAPI?.getDashboardData();
+                
+                if (response?.success && response.data) {
+                    setAverageTicket(response.data.averageTicket)
+                    setTotalClients(response.data.registeredClients)
+                    setTotalPedidosPendientes(response.data.pendingOrders)
+                    setTotalPedidosEntregados(response.data.deliveredOrders)
+                    setLastOrders(response.data.lastOrders)
+                    setTopProducts(response.data.topProducts)
+                } else {
+                    setError(response?.message || "");
+                }
+            } catch (err) {
+                setError('Error de comunicación con Electron');
+            } finally {
+                setIsLoading(false);
             }
-        } catch (err) {
-            setError('Error de comunicación con Electron');
-        } finally {
-            setIsLoading(false);
-        }
-    };
+        };
 
-    fetchUsers();
+        fetchUsers();
     }, [])
 
     return(
@@ -48,55 +46,49 @@ export default function HomePanel(){
                 Dashboard
             </h1>
             <div className="flex flex-col gap-3">
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                    <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white">
-                        <header>
-                            <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
-                                Pedidos pendientes
-                            </h2>
-                            <span className="font-bold">
-                                {totalPedidosPendientes}
-                            </span>
-                        </header>
-
+               <div className="grid grid-cols-1 sm:grid-cols-4 sm:grid-rows-2 gap-3">
+                    {/* Card 1 */}
+                    <section className="row-span-2 grid grid-rows-subgrid justify-items-center rounded-xl bg-black/5 p-4 text-base text-gray-900 sm:text-sm dark:bg-white/5 dark:text-white">
+                        <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
+                            Pedidos pendientes
+                        </h2>
+                        <span className="font-bold text-2xl self-end">
+                            {totalPedidosPendientes}
+                        </span>
                     </section>
 
-                    <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white">
-                        <header>
-                            <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
-                                Ticket medio
-                            </h2>
-                            <span className="font-bold">
-                                ${averageTicket}
-                            </span>
-                        </header>
-                        
-                    </section>
-                    <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white">
-                        <header>
-                            <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
-                                Clientes registrados
-                            </h2>
-                            <span className="font-bold">
-                                {totalClients}
-                            </span>
-                        </header>
-                        
+                    {/* Card 2 */}
+                    <section className="row-span-2 grid grid-rows-subgrid justify-items-center rounded-xl bg-black/5 p-4 text-base text-gray-900 sm:text-sm dark:bg-white/5 dark:text-white">
+                        <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
+                            Ticket medio
+                        </h2>
+                        <span className="font-bold text-2xl self-end">
+                            ${averageTicket.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                        </span>
                     </section>
 
-                    <section className="rounded-xl bg-black/5 px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 dark:bg-white/5 dark:text-white">
-                        <header>
-                            <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
-                                Pedidos entregados
-                            </h2>
-                            <span className="font-bold">
-                                {totalPedidosEntregados}
-                            </span>
-                        </header>
-                        
+                    {/* Card 3 */}
+                    <section className="row-span-2 grid grid-rows-subgrid justify-items-center rounded-xl bg-black/5 p-4 text-base text-gray-900 sm:text-sm dark:bg-white/5 dark:text-white">
+                        <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
+                            Clientes registrados
+                        </h2>
+                        <span className="font-bold text-2xl self-end">
+                            {totalClients}
+                        </span>
+                    </section>
+
+                    {/* Card 4 */}
+                    <section className="row-span-2 grid grid-rows-subgrid justify-items-center rounded-xl bg-black/5 p-4 text-base text-gray-900 sm:text-sm dark:bg-white/5 dark:text-white">
+                        <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
+                            Pedidos entregados
+                        </h2>
+                        <span className="font-bold text-2xl self-end">
+                            {totalPedidosEntregados}
+                        </span>
                     </section>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {/* Sección Últimos Pedidos */}
                     <section className="col-span-1 sm:col-span-2 flex flex-col">
                         <div className="flex items-center justify-between mb-4">
                             <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
@@ -162,6 +154,8 @@ export default function HomePanel(){
                             </tbody>
                         </table>
                     </section>
+
+                    {/* Sección Top Productos */}
                     <section className="col-span-1 flex flex-col">
                         <div className="flex items-center justify-between mb-4">
                             <h2 className="text-xl lg:text-2xl text-balance text-black dark:text-white font-bold">
@@ -177,39 +171,35 @@ export default function HomePanel(){
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-white/10 text-sm">
-                                {topProducts.length > 0?
-                                    (
-                                        topProducts.map((product, index)=>{
-                                            return(
-                                                <tr>
-                                                    <td>
-                                                        #{index}
-                                                    </td>
-                                                    <td>
-                                                        {product.name}
-                                                    </td>
-                                                    <td>
-                                                        ${product.totalSold}
-                                                    </td>
-                                                </tr>
-                                            )
-                                        })
-                                    ) 
-                                
-                                    :
-                                    (
-                                        <tr>
-                                            <td colSpan={4} className="text-center py-6 text-gray-500">
-                                                No hay órdenes
+                                {topProducts.length > 0 ? (
+                                    topProducts.map((product, index) => (
+                                        <tr 
+                                            key={product.id ?? index} 
+                                            className="hover:bg-gray-50 dark:hover:bg-white/5 transition"
+                                        >
+                                            <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
+                                                #{index + 1}
+                                            </td>
+                                            <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                                                {product.name}
+                                            </td>
+                                            <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
+                                                ${product.totalSold}
                                             </td>
                                         </tr>
-                                    )
-                                }
+                                    ))
+                                ) : (
+                                    <tr>
+                                        <td colSpan={3} className="text-center py-6 text-gray-500">
+                                            No hay productos
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </section>
-                </ div>
-            </ div>
+                </div>
+            </div>
         </div>
     )
 }
