@@ -5,6 +5,7 @@ import { NavItem } from "../../../../main/domain/types/NavItem";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { setCurrentTab } from "../../store/slices/appSlice";
 import LoginOut from "./Logout";
+import ProfileIcon from "../icons/ProfileIcon";
 
 interface Props {
     navItems: NavItem[]
@@ -81,11 +82,20 @@ export function Header({navItems}: Props){
                             <div className="flex flex-col lg:flex-row items-center justify-center gap-3">
                                 <div className="flex flex-row items-center justify-center gap-2">
                                     {session &&
-                                        <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
-                                            <SwitchOpen setOpen={setOpen}>
-                                                <LoginOut />
-                                            </SwitchOpen>
-                                        </li>
+                                        <>
+                                            <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
+                                                <SwitchOpen setOpen={setOpen}>
+                                                    <LoginOut />
+                                                </SwitchOpen>
+                                            </li>
+                                            <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center"
+                                                onClick={()=>dispatch(setCurrentTab("profile"))}
+                                            >
+                                                <SwitchOpen setOpen={setOpen}>
+                                                    <ProfileIcon />
+                                                </SwitchOpen>
+                                            </li>
+                                        </>
                                     }
                                     <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
                                         <SwitchOpen setOpen={setOpen}>
