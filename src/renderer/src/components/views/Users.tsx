@@ -96,7 +96,7 @@ export default function(){
                                 <th className="px-4 py-3">
                                     <Sort 
                                         name="Activo"
-                                        serverArg="activo"
+                                        serverArg="active"
                                         className=""
                                     />
                                 </th>
