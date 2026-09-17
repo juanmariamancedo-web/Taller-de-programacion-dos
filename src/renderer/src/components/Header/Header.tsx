@@ -5,10 +5,6 @@ import { NavItem } from "../../../../main/domain/types/NavItem";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { setCurrentTab } from "../../store/slices/appSlice";
 import LoginOut from "./Logout";
-// import LoginOut from "./LoginOut";
-// import ProfileIcon from "../icons/ProfileIcon";
-// import TogglePanel from "./TogglePanel";
-
 
 interface Props {
     navItems: NavItem[]
@@ -33,7 +29,7 @@ export function Header({navItems}: Props){
     }
 
     return (
-        <header className="z-10 fixed w-full h-14 flex justify-center items-center">
+        <header className="z-30 fixed w-full h-14 flex justify-center items-center">
             <nav className="w-full h-full relative">
                 <div className="absolute inset-0 flex justify-center items-center lg:hidden ">
                     <div className="container p-3">
@@ -43,15 +39,15 @@ export function Header({navItems}: Props){
                     </div>
                 </div>
                 <div className={`${open? "translate-x-full": ""} 
-                                bg-neutral-200/50 dark:bg-black/50
-                                backdrop-blur-2xl lg:backdrop-blur-0 dark:text-white
+                                bg-neutral-200/90 dark:bg-neutral-900/90
+                                backdrop-blur-2xl dark:text-white
                                 lg:bg-transparent lg:dark:bg-transparent lg:transition-none
                                 z-20 lg:z-auto
                                 fixed inset-y-0 -left-full right-full 
                                 lg:absolute lg:inset-0
-                                transition-transform duration-1000 
+                                transition-transform duration-300
                                 `}>
-                    <div className="obsolute w-full h-14 flex justify-center items-center lg:hidden">
+                    <div className="w-full h-14 flex justify-center items-center lg:hidden">
                         <div className="container p-3 flex items-center">
                             <button onClick={toggleOpen} className="z-10 bg-neutral-200/50 dark:bg-black/50 hover:bg-black/10 dark:hover:bg-white/10 rounded-full px-3 py-1 dark:text-white">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" fill="none" strokeLinecap="round" strokeLinejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg>
@@ -60,19 +56,19 @@ export function Header({navItems}: Props){
                     </div>
                     <div className="absolute inset-0 flex justify-center items-center lg:h-14 p-3">
                         <ul className={`flex flex-col lg:flex-row items-center justify-between gap-5 container
-                                        lg:border lg:border-black rounded-full 
-                                        px-3 py-1
-                                        lg:bg-neutral-200/50 lg:dark:bg-black/50  
-                                        lg:backdrop-blur-2xl dark:text-white 
-                                        flex-grow-0`}>
-                            <div className="flex flex-col lg:flex-row items-center justify-center gap-3"> 
+                                        lg:border lg:border-black/10 lg:dark:border-white/15 rounded-full 
+                                        px-4 py-1.5
+                                        lg:bg-neutral-100/90 lg:dark:bg-neutral-900/90 
+                                        lg:backdrop-blur-xl dark:text-white 
+                                        flex-grow-0 shadow-lg`}>
+                            <div className="flex flex-col lg:flex-row items-center justify-center gap-1"> 
                                 {navItems.length >= 1 && 
                                     navItems.map((item)=>{
                                         return(
-                                            <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
+                                            <li key={item.id} className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
                                                 <SwitchOpen setOpen={setOpen}>
-                                                    <button onClick={()=> dispatch(setCurrentTab(item.id))}>
-                                                        <span className={`${currentTab == item.id && `text-bold`} `}>
+                                                    <button onClick={()=> dispatch(setCurrentTab(item.id))} className="px-3 py-1">
+                                                        <span className={`${currentTab === item.id ? "font-bold text-blue-600 dark:text-blue-400" : "font-medium"}`}>
                                                             {item.label}
                                                         </span>
                                                     </button>
@@ -83,14 +79,7 @@ export function Header({navItems}: Props){
                                 }
                             </div>
                             <div className="flex flex-col lg:flex-row items-center justify-center gap-3">
-                                <div className="flex flex-row items-center justify-center gap-3">
-                                    {/* <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
-                                        <SwitchOpen setOpen={setOpen}>
-                                            <Link className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center cursor-pointer" href="/registro-de-clientes">
-                                                <CreateUser className="" />
-                                            </Link>
-                                        </SwitchOpen>
-                                    </li> */}
+                                <div className="flex flex-row items-center justify-center gap-2">
                                     {session &&
                                         <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
                                             <SwitchOpen setOpen={setOpen}>
@@ -103,14 +92,6 @@ export function Header({navItems}: Props){
                                             <ButtonOfDarkMode />
                                         </SwitchOpen>
                                     </li>
-
-                                    {/* {props.auth.user && (
-                                        <li>
-                                            <Link href="/perfil">
-                                                <ProfileIcon />
-                                            </Link>
-                                        </li>
-                                    )} */}
                                 </div>
                             </div>
                         </ul>
@@ -120,4 +101,3 @@ export function Header({navItems}: Props){
         </header>
     )
 }
-

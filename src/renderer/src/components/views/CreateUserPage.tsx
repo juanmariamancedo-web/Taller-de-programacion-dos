@@ -30,8 +30,8 @@ export default function UserForm() {
         async function fetchRoles() {
             try {
                 const response = await window.electronAPI?.getRoles()
-                if (response?.success) {
-                    setRoles(response.data)
+                if (response?.data) {
+                    setRoles(Array.isArray(response.data) ? response.data : [response.data]);
                 }
             } catch (error) {
                 console.error('Error al cargar los roles:', error)
@@ -245,6 +245,7 @@ export default function UserForm() {
                     <button
                         type="button"
                         className="rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/5"
+                        onClick={onNavigateBack}
                     >
                         Cancelar
                     </button>

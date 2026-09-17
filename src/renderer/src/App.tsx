@@ -4,7 +4,7 @@ import ProductsPanel from './components/views/ProductsPanel'
 import { NavItem } from '../../main/domain/types/NavItem'
 import OrdersPanel from './components/views/OrdersPanel'
 import ClientsPanel from './components/views/ClientsPanel'
-import CreateClientPage from './components/views/CreateClientPage' // Importamos la vista del formulario
+import CreateClientPage from './components/views/CreateClientPage'
 import { useAppSelector } from "./store/hooks";
 import LoginPanel from './components/views/LoginPanel'
 import Users from './components/views/Users'
@@ -17,7 +17,7 @@ function App(): React.JSX.Element {
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Inicio'},
     { id: 'clients', label: 'Clientes'},
-    { id: 'settings', label: 'Ajustes'},
+    // { id: 'settings', label: 'Ajustes'},
     { id: 'products', label: 'Productos'},
     { id: 'orders', label: 'Ordenes'},
     { id: 'users', label: 'Usuarios'}
@@ -47,14 +47,18 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <div className="min-h-screen flex flex-col justify-between gap-10">
+    <div className="relative min-h-screen flex flex-col justify-between">
+      {/* Fondo arreglado con fixed para cubrir toda la pantalla en todo momento */}
       <div
-          className="absolute top-0 bottom-0 z-[-2] min-h-screen w-full bg-neutral-100 dark:bg-neutral-950
-          bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(217,216,255,0.5),rgba(255,255,255,0.9))]
-          dark:bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.3),rgba(255,255,255,0))]"
+        className="fixed inset-0 z-[-1] bg-neutral-100 dark:bg-neutral-950
+        bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(217,216,255,0.5),rgba(255,255,255,0.9))]
+        dark:bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.3),rgba(255,255,255,0))]"
       ></div>
+
       <Header navItems={navItems} />
-      <main className="container mx-auto pt-14 px-4 min-h-screen flex flex-col">
+
+      {/* Margen pt-20/pt-24 para despegar el título y contenido del Header */}
+      <main className="container mx-auto pt-24 pb-10 px-4 flex-1 flex flex-col">
         <LoginPanel>
           {renderPanel()}
         </LoginPanel>
