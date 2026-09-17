@@ -13,15 +13,20 @@ import CreateOrderPage from "./components/views/CreateOrderPage"
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
+  const roleId = useAppSelector((state) => state.app.session?.roleId)
 
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Inicio'},
     { id: 'clients', label: 'Clientes'},
     // { id: 'settings', label: 'Ajustes'},
     { id: 'products', label: 'Productos'},
-    { id: 'orders', label: 'Ordenes'},
-    { id: 'users', label: 'Usuarios'}
+    { id: 'orders', label: 'Ordenes'} 
   ]
+
+  if(roleId == 1){
+    navItems.push({ id: 'users', label: 'Usuarios'})
+  }
+
 
   const renderPanel = () => {
     switch(currentTab){
@@ -32,15 +37,21 @@ function App(): React.JSX.Element {
       case "orders":
         return <OrdersPanel />
       case "users":
-        return <Users />
+        if(roleId == 1){
+          return <Users />
+        }
       case "clients":
         return <ClientsPanel />
       case "clients-create": 
-        return <CreateClientPage />
+        if(roleId == 1){
+          return <CreateClientPage />
+        }
       case "users-create":
         return <CreateUserPage />
       case "order-create":
-        return <CreateOrderPage />
+        if(roleId == 1 || roleId == 3){ // debe ser admin o vendedor
+          return <CreateOrderPage />
+        }
       default:
         return <HomePanel />
     }

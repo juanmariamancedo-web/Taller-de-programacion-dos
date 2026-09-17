@@ -31,7 +31,12 @@ async function main() {
     update: {},
     create: { name: 'seller' }
   })
-
+  
+  await prisma.userRole.upsert({
+    where: { name: 'operator' },
+    update: {},
+    create: { name: 'operator' }
+  })
   // 2. Usuario Admin
   const hashedPassword = await bcrypt.hash('123456', 10)
 

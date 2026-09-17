@@ -6,6 +6,7 @@ export interface Session {
   id: string; 
   username: string;
   isActive: boolean;
+  roleId: number;
 }
 
 export interface AppState {

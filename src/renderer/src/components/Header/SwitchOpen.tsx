@@ -1,6 +1,6 @@
 import { useState, useEffect, JSX } from "react"
 import { useAppDispatch } from "../../store/hooks"
-import { setSearch, setSort } from "../../store/slices/appSlice"
+import { setPage, setSearch, setSort } from "../../store/slices/appSlice"
 
 export default function SwitchOpen({children, setOpen}: {children: JSX.Element, setOpen: React.Dispatch<React.SetStateAction<boolean>>}){
     const dispatch = useAppDispatch()
@@ -24,6 +24,7 @@ export default function SwitchOpen({children, setOpen}: {children: JSX.Element, 
         if(small) setOpen(false)
         dispatch(setSearch(""))
         dispatch(setSort("idDesc"))
+        dispatch(setPage(1))
     }}>
         {children}
     </div>)

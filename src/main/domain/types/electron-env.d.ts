@@ -15,6 +15,7 @@ export interface AuthResponse {
     id: string
     username: string
     isActive: boolean
+    roleId?: number
   }
   message?: string
 }

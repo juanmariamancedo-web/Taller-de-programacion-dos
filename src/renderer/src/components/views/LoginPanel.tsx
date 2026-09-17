@@ -15,6 +15,10 @@ export default function LoginPanel({ children }: Props) {
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
 
+  // useEffect(()=>{
+  //   console.log(session)
+  // }, [session])
+
   // Helper para normalizar el id a string antes de mandar a Redux
   const handleSetSession = (activeSession: any) => {
     if (activeSession) {
