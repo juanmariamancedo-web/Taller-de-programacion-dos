@@ -68,8 +68,8 @@ export default function OrdersPage() {
                             <tr className="text-left text-sm font-semibold text-gray-700 dark:text-gray-200">
                                 <th className="px-4 py-3">
                                     <Sort   
-                                        name="Pedido"
-                                        serverArg="pedido"
+                                        name="ID"
+                                        serverArg="id"
                                         className=""
                                     />
                                 </th>

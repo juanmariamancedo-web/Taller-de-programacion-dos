@@ -8,8 +8,8 @@ export class OrdersService {
     const limit = 5;
 
     const sortMap: Record<string, Prisma.OrderOrderByWithRelationInput> = {
-      pedidoAsc: { id: 'asc' },         
-      pedidoDesc: { id: 'desc' },
+      idAsc: { id: 'asc' },         
+      idDesc: { id: 'desc' },
       clientAsc: { client: { name: 'asc' } },    
       clientDesc: { client: { name: 'desc' } },
       totalAsc: { total: 'asc' },
