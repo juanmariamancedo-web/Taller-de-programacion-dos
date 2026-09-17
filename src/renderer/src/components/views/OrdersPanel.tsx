@@ -17,6 +17,7 @@ export default function OrdersPage() {
     const sort = useAppSelector(store=>store.app.sort)
     const search = useAppSelector(store=>store.app.search)
     const page = useAppSelector(store=>store.app.page)
+    const session = useAppSelector(store => store.app.session)
 
     useEffect(() => {
         const fetchOrders = async () => {
@@ -45,18 +46,26 @@ export default function OrdersPage() {
         <>
             <div className="flex flex-col items-center gap-3">
                 <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
-                    <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">Ordenes</h1>
-                    <button
-                        type="button"
-                        onClick={() => {
-                        // dispatch(setClientToEdit(null))
-                            dispatch(setCurrentTab("order-create"))
-                        }}
-                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
-                    >
-                        <span className="text-xl leading-none">+</span>
-                        Agregar Orden
-                    </button>
+                    <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">
+                        {session && (session.roleId == 3) ? (//Cambia el titulo segun el vendedor o no
+                                <>Mis Ordenes</>
+                            ):
+                                <>Ordenes</>
+                        }
+                    </h1>
+                    {session && (session.roleId == 1 || session.roleId == 3) && ( //debe ser vendedor o admin
+                        <button
+                            type="button"
+                            onClick={() => {
+                            // dispatch(setClientToEdit(null))
+                                dispatch(setCurrentTab("order-create"))
+                            }}
+                            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                        >
+                            <span className="text-xl leading-none">+</span>
+                            Agregar Orden
+                        </button>
+                    )}
                 </div>
                 <Search />
                 {error && <p className="text-rose-600 dark:text-rose-300">{error}</p>}

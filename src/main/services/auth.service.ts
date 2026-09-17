@@ -11,7 +11,7 @@ export class AuthService {
     // Buscar usuario en la BD usando el ID guardado
     const user = await prisma.user.findUnique({
       where: { id: Number(userId) },
-      select: { id: true, username: true, isActive: true }
+      select: { id: true, username: true, isActive: true, roleId: true}
     });
 
     return user;
@@ -52,7 +52,8 @@ export class AuthService {
         user: {
           id: `${user.id}`,
           username: user.username,
-          isActive: user.isActive
+          isActive: user.isActive,
+          roleId: Number(user.roleId)
         }
       };
     } catch (error) {
