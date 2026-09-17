@@ -14,44 +14,44 @@ async function main() {
   }
 
   // 1. Roles
-  const adminRole = await prisma.userRole.upsert({
-    where: { name: 'admin' },
-    update: {},
-    create: { name: 'admin' }
-  })
+  const rolesData = ['admin', 'supervisor', 'seller', 'operator']
+  const rolesMap: Record<string, bigint> = {}
 
-  await prisma.userRole.upsert({
-    where: { name: 'supervisor' },
-    update: {},
-    create: { name: 'supervisor' }
-  })
+  for (const roleName of rolesData) {
+    const role = await prisma.userRole.upsert({
+      where: { name: roleName },
+      update: {},
+      create: { name: roleName }
+    })
+    rolesMap[roleName] = role.id
+  }
 
-  await prisma.userRole.upsert({
-    where: { name: 'seller' },
-    update: {},
-    create: { name: 'seller' }
-  })
-  
-  await prisma.userRole.upsert({
-    where: { name: 'operator' },
-    update: {},
-    create: { name: 'operator' }
-  })
-  // 2. Usuario Admin
-  const hashedPassword = await bcrypt.hash('123456', 10)
+  // 2. Usuarios por tipo
+  console.log('Cargando usuarios...')
+  const defaultPassword = await bcrypt.hash('123456', 10)
 
-  const adminUser = await prisma.user.upsert({
-    where: { username: 'admin' },
-    update: {},
-    create: {
-      username: 'admin',
-      password: hashedPassword,
-      isActive: true,
-      role: {
-        connect: { id: adminRole.id }
+  const usersData = [
+    { username: 'admin', roleId: rolesMap['admin'] },
+    { username: 'supervisor', roleId: rolesMap['supervisor'] },
+    { username: 'seller', roleId: rolesMap['seller'] },
+    { username: 'operator', roleId: rolesMap['operator'] }
+  ]
+
+  const createdUsers: Record<string, any> = {}
+
+  for (const userData of usersData) {
+    const user = await prisma.user.upsert({
+      where: { username: userData.username },
+      update: {},
+      create: {
+        username: userData.username,
+        password: defaultPassword,
+        isActive: true,
+        roleId: userData.roleId
       }
-    }
-  })
+    })
+    createdUsers[userData.username] = user
+  }
 
   // 3. Categorías de Productos
   console.log('Cargando categorías...')
@@ -240,11 +240,13 @@ async function main() {
     createdAddresses.push(address)
   }
 
- // 8. Órdenes con Items de Productos
+  // 8. Órdenes vinculadas al usuario 'seller'
+  const sellerUser = createdUsers['seller']
+
   const ordersData = [
     {
       currentStateId: statesMap['created'],
-      sellerId: adminUser.id,
+      sellerId: sellerUser.id,
       clientId: createdClients[0].id,
       shippingAddressId: createdAddresses[0].id,
       trackingNumber: null,
@@ -266,7 +268,7 @@ async function main() {
     },
     {
       currentStateId: statesMap['pending'],
-      sellerId: adminUser.id,
+      sellerId: sellerUser.id,
       clientId: createdClients[1].id,
       shippingAddressId: createdAddresses[1].id,
       trackingNumber: 'TRK-1002-B',
@@ -283,7 +285,7 @@ async function main() {
     },
     {
       currentStateId: statesMap['paid'],
-      sellerId: adminUser.id,
+      sellerId: sellerUser.id,
       clientId: createdClients[2].id,
       shippingAddressId: createdAddresses[2].id,
       trackingNumber: 'TRK-1003-C',
@@ -300,7 +302,7 @@ async function main() {
     },
     {
       currentStateId: statesMap['dispatched'],
-      sellerId: adminUser.id,
+      sellerId: sellerUser.id,
       clientId: createdClients[3].id,
       shippingAddressId: null,
       trackingNumber: 'TRK-1004-D',
@@ -317,7 +319,7 @@ async function main() {
     },
     {
       currentStateId: statesMap['delivered'],
-      sellerId: adminUser.id,
+      sellerId: sellerUser.id,
       clientId: createdClients[4].id,
       shippingAddressId: createdAddresses[4].id,
       trackingNumber: 'TRK-1005-E',
@@ -334,7 +336,7 @@ async function main() {
     }
   ]
 
-  console.log('Cargando órdenes con ítems de prueba...')
+  console.log('Cargando órdenes de prueba para seller...')
   for (const order of ordersData) {
     await prisma.order.create({
       data: order
