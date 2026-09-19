@@ -1,5 +1,7 @@
 import { FormEvent, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
+import { useAppSelector } from '../../store/hooks'
+import { Sort } from '../Sort'
 
 type Product = {
   id: number
@@ -47,18 +49,29 @@ export default function Catalogo(): JSX.Element {
   const [form, setForm] = useState<FormData>(emptyForm)
   const [editingProductId, setEditingProductId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState('name')
   const [errors, setErrors] = useState<FormErrors>({})
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const sort = useAppSelector((state) => state.app.sort)
 
   const visibleProducts = useMemo<Product[]>((): Product[] => {
     const normalizedSearch = search.trim().toLowerCase()
-    return products
+    const primarySort = sort.replace(/Asc|Desc$/, '')
+    const direction = sort.endsWith('Asc') ? 1 : -1
+
+    return [...products]
       .filter((product) => product.name.toLowerCase().includes(normalizedSearch))
       .sort((firstProduct, secondProduct) => {
-        if (sort === 'stock') return firstProduct.stock - secondProduct.stock
-        if (sort === 'state') return Number(secondProduct.isActive) - Number(firstProduct.isActive)
-        return firstProduct.name.localeCompare(secondProduct.name)
+        switch (primarySort) {
+          case 'stock':
+            return (firstProduct.stock - secondProduct.stock) * direction
+          case 'price':
+            return (firstProduct.price - secondProduct.price) * direction
+          case 'isActive':
+            return (Number(firstProduct.isActive) - Number(secondProduct.isActive)) * direction
+          case 'name':
+          default:
+            return firstProduct.name.localeCompare(secondProduct.name) * direction
+        }
       })
   }, [products, search, sort])
 
@@ -306,15 +319,6 @@ export default function Catalogo(): JSX.Element {
           placeholder="Buscar por nombre"
           className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
         />
-        <select
-          value={sort}
-          onChange={(event) => setSort(event.target.value)}
-          className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
-        >
-          <option value="name">Ordenar por nombre</option>
-          <option value="stock">Ordenar por stock</option>
-          <option value="state">Ordenar por estado</option>
-        </select>
       </div>
 
       <div className="w-full overflow-x-auto rounded-xl border border-gray-200 dark:border-white/10">
@@ -322,10 +326,10 @@ export default function Catalogo(): JSX.Element {
           <thead className="bg-gray-100 dark:bg-white/10">
             <tr className="text-left font-semibold text-gray-700 dark:text-gray-200">
               <th className="px-4 py-3">Imagen</th>
-              <th className="px-4 py-3">Nombre</th>
-              <th className="px-4 py-3">Precio</th>
-              <th className="px-4 py-3">Stock</th>
-              <th className="px-4 py-3">Estado</th>
+              <th className="px-4 py-3"><Sort className="" serverArg="name" name="Nombre" /></th>
+              <th className="px-4 py-3"><Sort className="" serverArg="price" name="Precio" /></th>
+              <th className="px-4 py-3"><Sort className="" serverArg="stock" name="Stock" /></th>
+              <th className="px-4 py-3"><Sort className="" serverArg="isActive" name="Estado" /></th>
               <th className="px-4 py-3">Acciones</th>
             </tr>
           </thead>
