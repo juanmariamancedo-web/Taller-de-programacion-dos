@@ -14,6 +14,8 @@ export default function ClientsPanel() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const session = useAppSelector(store => store.app.session)
+  
   useEffect(() => {
     const loadClients = async () => {
       setLoading(true)
@@ -91,8 +93,12 @@ export default function ClientsPanel() {
               <th className="px-4 py-3">Ciudad</th>
               <th className="px-4 py-3">Código postal</th>
               <th className="px-4 py-3">Estado</th>
-              <th className="px-4 py-3">Acción</th>
-              <th className="px-4 py-3">Editar</th>
+                {session && session.roleId == 1 && //los vendedores no pueden editar las ordenes, una vez emetidas                
+                  <>
+                    <th className="px-4 py-3">Acción</th>
+                    <th className="px-4 py-3">Editar</th>
+                  </>
+                }
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-white/10">
@@ -111,6 +117,7 @@ export default function ClientsPanel() {
                   {client.isActive ? 'Activo' : 'Inactivo'}
                 </td>
                 <td className="px-4 py-3">
+                {session && session.roleId == 1 && //los vendedores no pueden editar las ordenes, una vez emetidas                
                   <div className="flex items-center gap-2">
                     {client.isActive ? (
                       <button
@@ -132,7 +139,9 @@ export default function ClientsPanel() {
                       </button>
                     )}
                   </div>
+                }
                 </td>
+                {session && session.roleId == 1 && //los vendedores no pueden editar las ordenes, una vez emetidas                
                   <td className="px-4 py-3">
                     <button
                       type="button"
@@ -144,6 +153,7 @@ export default function ClientsPanel() {
                       Editar
                     </button>
                   </td>
+                }
               </tr>
             )) : (
               <tr><td colSpan={10} className="py-6 text-center text-gray-500">No hay clientes encontrados</td></tr>
