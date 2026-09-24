@@ -45,9 +45,10 @@ function App(): React.JSX.Element {
       case "clients":
         return <ClientsPanel />
       case "clients-create": 
-        if(roleId == 1){
+        if(roleId == 1 || roleId == 3){
           return <CreateClientPage />
         }
+        return <ClientsPanel />
       case "users-create":
         return <CreateUserPage />
       case "order-create":

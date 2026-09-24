@@ -3,6 +3,8 @@ import {
   ThemeSource,
   Credentials,
   AuthResponse,
+  CreateUserInput,
+  CreateUserResponse,
   SearchParams,
   ProvinceOption,
   CreateClientInput,
@@ -25,6 +27,8 @@ const api = {
   getDashboardData: () => ipcRenderer.invoke('dashboard:getData'),
   getOrders: (searchParams, userId) => ipcRenderer.invoke('orders:getOrders', searchParams, userId),
   getUsers: (params: SearchParams) => ipcRenderer.invoke('users:getUsers', params),
+  createUser: (input: CreateUserInput): Promise<CreateUserResponse> =>
+    ipcRenderer.invoke('users:create', input),
   getProvinces: (): Promise<ProvinceOption[]> => ipcRenderer.invoke('provinces:get-all'),
   createClient: (input: CreateClientInput): Promise<CreateClientResponse> =>
     ipcRenderer.invoke('clients:create', input),

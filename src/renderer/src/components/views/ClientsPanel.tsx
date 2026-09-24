@@ -15,6 +15,8 @@ export default function ClientsPanel() {
   const [error, setError] = useState<string | null>(null)
 
   const session = useAppSelector(store => store.app.session)
+  const canManageClients = session?.roleId == 1 || session?.roleId == 3
+  const canChangeClientStatus = session?.roleId == 1
   
   useEffect(() => {
     const loadClients = async () => {
@@ -65,7 +67,7 @@ export default function ClientsPanel() {
     <div className="flex flex-col items-center gap-3">
       <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
         <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">Clientes</h1>
-        {session && (session.roleId == 1 || session.roleId == 3) && (
+        {canManageClients && (
           <button
             type="button"
             onClick={() => {
@@ -95,12 +97,8 @@ export default function ClientsPanel() {
               <th className="px-4 py-3">Ciudad</th>
               <th className="px-4 py-3">Código postal</th>
               <th className="px-4 py-3">Estado</th>
-                {session && session.roleId == 1 && //los vendedores no pueden editar las ordenes, una vez emetidas                
-                  <>
-                    <th className="px-4 py-3">Acción</th>
-                    <th className="px-4 py-3">Editar</th>
-                  </>
-                }
+                {canChangeClientStatus && <th className="px-4 py-3">Acción</th>}
+                {canManageClients && <th className="px-4 py-3">Editar</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-white/10">
@@ -118,9 +116,8 @@ export default function ClientsPanel() {
                 <td className={`px-4 py-3 font-semibold ${client.isActive ? 'text-emerald-600' : 'text-slate-500'}`}>
                   {client.isActive ? 'Activo' : 'Inactivo'}
                 </td>
-                <td className="px-4 py-3">
-                {session && session.roleId == 1 && //los vendedores no pueden editar las ordenes, una vez emetidas                
-                  <div className="flex items-center gap-2">
+                {canChangeClientStatus && (
+                  <td className="px-4 py-3">
                     {client.isActive ? (
                       <button
                         type="button"
@@ -140,10 +137,9 @@ export default function ClientsPanel() {
                         Alta
                       </button>
                     )}
-                  </div>
-                }
-                </td>
-                {session && session.roleId == 1 && //los vendedores no pueden editar las ordenes, una vez emetidas                
+                  </td>
+                )}
+                {canManageClients && (
                   <td className="px-4 py-3">
                     <button
                       type="button"
@@ -155,7 +151,7 @@ export default function ClientsPanel() {
                       Editar
                     </button>
                   </td>
-                }
+                )}
               </tr>
             )) : (
               <tr><td colSpan={10} className="py-6 text-center text-gray-500">No hay clientes encontrados</td></tr>

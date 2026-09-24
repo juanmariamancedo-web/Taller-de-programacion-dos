@@ -1,8 +1,24 @@
 import { prisma } from '../infrastructure/db/prisma';
-import { SearchParams } from '../domain/types/electron-env';
+import bcrypt from 'bcryptjs';
+import { CreateUserInput, SearchParams } from '../domain/types/electron-env';
 import { Prisma } from '../infrastructure/db/generated/client/client';
 
 export class UsersService {
+  async createUser(input: CreateUserInput): Promise<{ id: string }> {
+    const password = await bcrypt.hash(input.password, 10);
+    const user = await prisma.user.create({
+      data: {
+        username: input.username.trim(),
+        roleId: BigInt(input.roleId),
+        password,
+        isActive: input.isActive
+      },
+      select: { id: true }
+    });
+
+    return { id: user.id.toString() };
+  }
+
   async getUsers(searchParams?: SearchParams) {
     const page = searchParams?.page ?? 1;
     const limit = 5;
