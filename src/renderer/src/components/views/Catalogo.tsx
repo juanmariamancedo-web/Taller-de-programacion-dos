@@ -59,7 +59,9 @@ export default function Catalogo(): JSX.Element {
   const sort = useAppSelector((state) => state.app.sort)
   const session = useAppSelector((state) => state.app.session)
   const canManageProducts = session?.roleName === 'admin' || session?.roleName === 'seller'
+  const canEditProducts = session?.roleName === 'admin'
   const canAdjustStock = session?.roleName === 'supervisor'
+  const productTableColumnCount = canEditProducts ? 6 : 5
 
   useEffect(() => {
     let cancelled = false
@@ -446,19 +448,19 @@ export default function Catalogo(): JSX.Element {
               <th className="px-4 py-3"><Sort className="" serverArg="price" name="Precio" /></th>
               <th className="px-4 py-3"><Sort className="" serverArg="stock" name="Stock" /></th>
               <th className="px-4 py-3"><Sort className="" serverArg="isActive" name="Estado" /></th>
-              <th className="px-4 py-3">Acciones</th>
+              {canEditProducts && <th className="px-4 py-3">Acciones</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-white/10">
             {loadingProducts ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-gray-500">
+                <td colSpan={productTableColumnCount} className="py-8 text-center text-gray-500">
                   Cargando productos...
                 </td>
               </tr>
             ) : productLoadError ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-rose-600 dark:text-rose-300">
+                <td colSpan={productTableColumnCount} className="py-8 text-center text-rose-600 dark:text-rose-300">
                   {productLoadError}
                 </td>
               </tr>
@@ -513,29 +515,31 @@ export default function Catalogo(): JSX.Element {
                   >
                     {product.isActive ? 'Activo' : 'Inactivo'}
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => editProduct(product)}
-                        className="rounded-lg bg-blue-100 px-3 py-1.5 font-semibold text-blue-700 hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => toggleProduct(product.id)}
-                        className="rounded-lg bg-gray-100 px-3 py-1.5 font-semibold text-gray-700 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-200"
-                      >
-                        {product.isActive ? 'Desactivar' : 'Activar'}
-                      </button>
-                    </div>
-                  </td>
+                  {canEditProducts && (
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => editProduct(product)}
+                          className="rounded-lg bg-blue-100 px-3 py-1.5 font-semibold text-blue-700 hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleProduct(product.id)}
+                          className="rounded-lg bg-gray-100 px-3 py-1.5 font-semibold text-gray-700 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-200"
+                        >
+                          {product.isActive ? 'Desactivar' : 'Activar'}
+                        </button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-gray-500">
+                <td colSpan={productTableColumnCount} className="py-8 text-center text-gray-500">
                   No hay productos encontrados
                 </td>
               </tr>
