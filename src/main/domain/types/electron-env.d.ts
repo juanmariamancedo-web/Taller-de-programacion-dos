@@ -16,6 +16,7 @@ export interface AuthResponse {
     username: string
     isActive: boolean
     roleId?: number
+    roleName?: string
   }
   message?: string
 }
@@ -197,6 +198,8 @@ export interface IElectronAPI {
     id: bigint
     username: string
     isActive: boolean
+    roleId: number
+    roleName: string
   } | null>
   getRoles: () => Promise<RolesResponse>
   getAddresses: (clientId?: number | bigint, searchParams?: SearchParams) => Promise<AddressResponse>

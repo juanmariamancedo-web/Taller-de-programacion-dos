@@ -123,6 +123,33 @@ async function main() {
       image: 'https://via.placeholder.com/150',
       isActive: true,
       categoryId: createdCategories[2].id
+    },
+    {
+      name: 'Multímetro Digital Profesional',
+      price: 32000.0,
+      stock: 12,
+      lowStock: 3,
+      image: 'https://via.placeholder.com/150',
+      isActive: true,
+      categoryId: createdCategories[2].id
+    },
+    {
+      name: 'Batería 12V 75Ah',
+      price: 155000.0,
+      stock: 7,
+      lowStock: 2,
+      image: 'https://via.placeholder.com/150',
+      isActive: true,
+      categoryId: createdCategories[1].id
+    },
+    {
+      name: 'Cargador Inteligente de Baterías',
+      price: 89000.0,
+      stock: 6,
+      lowStock: 2,
+      image: 'https://via.placeholder.com/150',
+      isActive: true,
+      categoryId: createdCategories[0].id
     }
   ]
 
