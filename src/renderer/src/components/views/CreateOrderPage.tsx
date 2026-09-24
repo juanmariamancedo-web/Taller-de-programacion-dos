@@ -223,15 +223,20 @@ export default function OrderForm() {
                   addresses.map((ubic) => (
                     <li
                       key={String(ubic.id)}
-                      onClick={() => {
-                        setFormData((prev) => ({ ...prev, shippingAddressId: Number(ubic.id) }))
-                        setSearchTermAddress(`${ubic.street} ${ubic.number}${ubic.city?.name ? `, ${ubic.city.name}` : ''}`)
-                        setIsOpenAddress(false)
-                      }}
-                      className="flex cursor-pointer items-center justify-between px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-zinc-800"
                     >
-                      <span>{`${ubic.street} ${ubic.number}`}</span>
-                      <span className="text-xs text-slate-400">#{String(ubic.id)}</span>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          setFormData((prev) => ({ ...prev, shippingAddressId: Number(ubic.id) }))
+                          setSearchTermAddress(`${ubic.street} ${ubic.number}${ubic.city?.name ? `, ${ubic.city.name}` : ''}`)
+                          setIsOpenAddress(false)
+                        }}
+                        className="flex w-full items-center justify-between px-4 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-zinc-800"
+                      >
+                        <span>{`${ubic.street} ${ubic.number}`}</span>
+                        <span className="text-xs text-slate-400">#{String(ubic.id)}</span>
+                      </button>
                     </li>
                   ))
                 ) : (
