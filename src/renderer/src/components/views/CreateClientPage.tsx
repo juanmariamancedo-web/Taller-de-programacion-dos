@@ -437,11 +437,11 @@ export default function CreateClientPage() {
                 className={`${inputClass('province')} appearance-none cursor-pointer`}
                 aria-invalid={Boolean(errors.province)}
               >
-                <option value="" disabled>
+                <option value="" disabled className="bg-white text-slate-900 dark:bg-zinc-900 dark:text-white">
                   {loadingProvinces ? 'Cargando provincias...' : 'Seleccioná una provincia'}
                 </option>
                 {provinces.map((province) => (
-                  <option key={province.id} value={province.name}>
+                  <option key={province.id} value={province.name} className="bg-white text-slate-900 dark:bg-zinc-900 dark:text-white">
                     {province.name}
                   </option>
                 ))}

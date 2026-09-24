@@ -65,17 +65,19 @@ export default function ClientsPanel() {
     <div className="flex flex-col items-center gap-3">
       <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
         <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">Clientes</h1>
-        <button
-          type="button"
-          onClick={() => {
-            dispatch(setClientToEdit(null))
-            dispatch(setCurrentTab('clients-create'))
-          }}
-          className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
-        >
-          <span className="text-xl leading-none">+</span>
-          Agregar cliente
-        </button>
+        {session && (session.roleId == 1 || session.roleId == 3) && (
+          <button
+            type="button"
+            onClick={() => {
+              dispatch(setClientToEdit(null))
+              dispatch(setCurrentTab('clients-create'))
+            }}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+          >
+            <span className="text-xl leading-none">+</span>
+            Agregar cliente
+          </button>
+        )}
       </div>
 
       <div className="min-w-full"><Search /></div>
