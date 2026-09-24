@@ -114,6 +114,13 @@ export default function OrderForm() {
     dispatch(setCurrentTab('orders'))
   }
 
+  function handleClientSelect(client: (typeof clients)[number]) {
+    setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
+    setSearchTermClients(`${client.name} ${client.lastname}`)
+    setSearchTermAddress('')
+    setIsOpenClients(false)
+  }
+
   if (success) {
     return <OrderSuccess onReset={onReset} clientName={''} orderId={11} onNavigateBack={onNavigateBack} />
   }
@@ -169,16 +176,16 @@ export default function OrderForm() {
                   clients.map((client) => (
                     <li
                       key={String(client.id)}
-                      onClick={() => {
-                        setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
-                        setSearchTermClients(`${client.name} ${client.lastname}`)
-                        setSearchTermAddress('')
-                        setIsOpenClients(false)
-                      }}
-                      className="flex cursor-pointer items-center justify-between px-4 py-2 text-sm hover:bg-slate-100 dark:hover:bg-zinc-800"
                     >
-                      <span>{`${client.name} ${client.lastname}`}</span>
-                      <span className="text-xs text-slate-400">#{String(client.id)}</span>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => handleClientSelect(client)}
+                        className="flex w-full items-center justify-between px-4 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-zinc-800"
+                      >
+                        <span>{`${client.name} ${client.lastname}`}</span>
+                        <span className="text-xs text-slate-400">#{String(client.id)}</span>
+                      </button>
                     </li>
                   ))
                 ) : (
