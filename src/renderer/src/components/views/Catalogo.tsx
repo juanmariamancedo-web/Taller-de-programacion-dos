@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useRef, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { useAppSelector } from '../../store/hooks'
 import { Sort } from '../Sort'
@@ -50,8 +50,75 @@ export default function Catalogo(): JSX.Element {
   const [editingProductId, setEditingProductId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   const [errors, setErrors] = useState<FormErrors>({})
+  const [stockDrafts, setStockDrafts] = useState<Record<number, number>>({})
+  const [loadingProducts, setLoadingProducts] = useState(true)
+  const [productLoadError, setProductLoadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const sort = useAppSelector((state) => state.app.sort)
+  const session = useAppSelector((state) => state.app.session)
+  const canManageProducts = session?.roleName === 'admin' || session?.roleName === 'seller'
+  const canAdjustStock = session?.roleName === 'supervisor'
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadProducts = async (): Promise<void> => {
+      setLoadingProducts(true)
+      setProductLoadError(null)
+
+      try {
+        const firstResponse = await window.electronAPI?.getProducts({
+          search: '',
+          page: 1,
+          sort: 'nameAsc'
+        })
+
+        if (!firstResponse?.success) {
+          throw new Error(firstResponse?.message ?? 'No se pudieron cargar los productos.')
+        }
+
+        const totalPages = firstResponse.totalPages ?? 1
+        const remainingResponses = await Promise.all(
+          Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) =>
+            window.electronAPI?.getProducts({
+              search: '',
+              page: index + 2,
+              sort: 'nameAsc'
+            })
+          )
+        )
+
+        const responses = [firstResponse, ...remainingResponses]
+        const loadedProducts: Product[] = responses.flatMap((response) =>
+          response?.success && response.data
+            ? response.data.map((product) => ({
+                id: Number(product.id),
+                name: product.name,
+                price: Number(product.price),
+                stock: Number(product.stock),
+                lowStock: Number(product.lowStock),
+                image: product.image,
+                isActive: product.isActive
+              }))
+            : []
+        )
+
+        if (!cancelled) setProducts(loadedProducts)
+      } catch (error) {
+        if (!cancelled) {
+          setProductLoadError(error instanceof Error ? error.message : 'No se pudieron cargar los productos.')
+        }
+      } finally {
+        if (!cancelled) setLoadingProducts(false)
+      }
+    }
+
+    loadProducts()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const visibleProducts = useMemo<Product[]>((): Product[] => {
     const normalizedSearch = search.trim().toLowerCase()
@@ -177,6 +244,29 @@ export default function Catalogo(): JSX.Element {
     )
   }
 
+  const getStockValue = (product: Product): number => stockDrafts[product.id] ?? product.stock
+
+  const changeStock = (product: Product, amount: number): void => {
+    setStockDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [product.id]: Math.max(0, getStockValue(product) + amount)
+    }))
+  }
+
+  const saveStock = (product: Product): void => {
+    const stock = getStockValue(product)
+    setProducts((currentProducts) =>
+      currentProducts.map((currentProduct) =>
+        currentProduct.id === product.id ? { ...currentProduct, stock } : currentProduct
+      )
+    )
+    setStockDrafts((currentDrafts) => {
+      const nextDrafts = { ...currentDrafts }
+      delete nextDrafts[product.id]
+      return nextDrafts
+    })
+  }
+
   const resetForm = (): void => {
     setForm(emptyForm)
     setEditingProductId(null)
@@ -184,9 +274,10 @@ export default function Catalogo(): JSX.Element {
   }
 
   const stockClass = (product: Product): string => {
-    if (product.stock === 0)
+    const stock = getStockValue(product)
+    if (stock === 0)
       return 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
-    if (product.stock <= product.lowStock)
+    if (stock <= product.lowStock)
       return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
     return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
   }
@@ -200,7 +291,7 @@ export default function Catalogo(): JSX.Element {
         </p>
       </div>
 
-      <form
+      {canManageProducts && <form
         onSubmit={handleSubmit}
         className="w-full rounded-xl border border-gray-200 bg-white/70 p-5 shadow-sm dark:border-white/10 dark:bg-white/5"
       >
@@ -310,7 +401,7 @@ export default function Catalogo(): JSX.Element {
         >
           {editingProductId === null ? 'Crear producto' : 'Guardar cambios'}
         </button>
-      </form>
+      </form>}
 
       <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <input
@@ -334,7 +425,19 @@ export default function Catalogo(): JSX.Element {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-white/10">
-            {visibleProducts.length ? (
+            {loadingProducts ? (
+              <tr>
+                <td colSpan={6} className="py-8 text-center text-gray-500">
+                  Cargando productos...
+                </td>
+              </tr>
+            ) : productLoadError ? (
+              <tr>
+                <td colSpan={6} className="py-8 text-center text-rose-600 dark:text-rose-300">
+                  {productLoadError}
+                </td>
+              </tr>
+            ) : visibleProducts.length ? (
               visibleProducts.map((product) => (
                 <tr key={product.id} className="transition hover:bg-gray-50 dark:hover:bg-white/5">
                   <td className="px-4 py-3">
@@ -354,8 +457,35 @@ export default function Catalogo(): JSX.Element {
                     <span
                       className={`rounded-full px-2 py-1 text-xs font-semibold ${stockClass(product)}`}
                     >
-                      {product.stock === 0 ? 'Sin stock' : product.stock}
+                      {getStockValue(product) === 0 ? 'Sin stock' : getStockValue(product)}
                     </span>
+                    {canAdjustStock && (
+                      <div className="mt-2 flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => changeStock(product, 1)}
+                          aria-label={`Aumentar stock de ${product.name}`}
+                          className="rounded-md bg-emerald-100 px-2 py-1 font-bold text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => changeStock(product, -1)}
+                          aria-label={`Disminuir stock de ${product.name}`}
+                          className="rounded-md bg-rose-100 px-2 py-1 font-bold text-rose-700 hover:bg-rose-200 dark:bg-rose-500/20 dark:text-rose-300"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => saveStock(product)}
+                          className="rounded-md bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
+                        >
+                          Guardar stock
+                        </button>
+                      </div>
+                    )}
                   </td>
                   <td
                     className={`px-4 py-3 font-semibold ${product.isActive ? 'text-emerald-600' : 'text-slate-500'}`}

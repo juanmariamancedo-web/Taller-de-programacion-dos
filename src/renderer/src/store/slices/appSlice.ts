@@ -7,6 +7,7 @@ export interface Session {
   username: string;
   isActive: boolean;
   roleId: number;
+  roleName: string;
 }
 
 export interface AppState {
