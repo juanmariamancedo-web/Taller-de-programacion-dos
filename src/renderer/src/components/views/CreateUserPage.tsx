@@ -13,7 +13,7 @@ export default function UserForm() {
         roleId: 0,
         password: '',
         passwordRepeat: '',
-        isActive: false
+        isActive: true
     })
 
     const [errors, setErrors] = useState({
@@ -23,6 +23,7 @@ export default function UserForm() {
         passwordRepeat: '',
         isActive: ''
     })
+    const [saveError, setSaveError] = useState('')
 
     const [roles, setRoles] = useState<Prisma.UserRoleGetPayload<{}>[]>([])
 
@@ -80,22 +81,42 @@ export default function UserForm() {
         nuevosErrores = true
         }
 
+        if (!formData.roleId) {
+        newErrors.roleId = 'Seleccioná un rol'
+        nuevosErrores = true
+        }
+
         if(nuevosErrores){
             setErrors(newErrors)
-        }else{
-            setSuccess(true)
         }
 
         // Devuelve true si NO hay errores
         return !Object.values(newErrors).some((err) => err !== '')
     }
 
-    function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault()
+        setSaveError('')
 
         const isValid = checkErrors()
         if (isValid) {
-        // Proceder con el guardado
+            try {
+                const response = await window.electronAPI?.createUser({
+                    username: formData.username,
+                    roleId: formData.roleId,
+                    password: formData.password,
+                    isActive: formData.isActive
+                })
+
+                if (!response?.success) {
+                    setSaveError(response?.error ?? 'No se pudo crear el usuario.')
+                    return
+                }
+
+                setSuccess(true)
+            } catch (error) {
+                setSaveError(error instanceof Error ? error.message : 'Error de comunicación con Electron.')
+            }
         }
     }
 
@@ -108,7 +129,7 @@ export default function UserForm() {
             roleId: 0,
             password: '',
             passwordRepeat: '',
-            isActive: false
+            isActive: true
         })
 
         setSuccess(false)
@@ -188,6 +209,7 @@ export default function UserForm() {
                             ))
                         }
                     </select>
+                    {errors.roleId && <p className="mt-1 text-xs text-red-500">{errors.roleId}</p>}
                 </div>
 
                 {/* Contraseña */}
@@ -239,6 +261,8 @@ export default function UserForm() {
                         Usuario activo
                     </label>
                 </div>
+
+                {saveError && <p className="text-sm text-red-500">{saveError}</p>}
 
                 {/* Botones */}
                 <div className="flex justify-end gap-4 border-t border-slate-200 pt-4 dark:border-white/10">

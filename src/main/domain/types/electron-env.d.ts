@@ -8,6 +8,19 @@ export interface Credentials {
   password: string
 }
 
+export interface CreateUserInput {
+  username: string
+  roleId: number
+  password: string
+  isActive: boolean
+}
+
+export interface CreateUserResponse {
+  success: boolean
+  data?: { id: string }
+  error?: string
+}
+
 export interface AuthResponse {
   success: boolean
   token?: string
@@ -185,6 +198,7 @@ export interface IElectronAPI {
   getDashboardData: () => Promise<DashboardDataResponse>
   getOrders: (searchParams: SearchParams, userId?: number) => Promise<OrderResponse>
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
+  createUser: (input: CreateUserInput) => Promise<CreateUserResponse>
   getProvinces: () => Promise<ProvinceOption[]>
   createClient: (input: CreateClientInput) => Promise<CreateClientResponse>
   updateClient: (input: UpdateClientInput) => Promise<UpdateClientResponse>

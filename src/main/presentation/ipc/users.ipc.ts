@@ -3,6 +3,19 @@ import { usersService } from '../../services/users.service';
 import { SearchParams } from '../../domain/types/electron-env';
 
 export function registerUserIPC(): void {
+    ipcMain.handle('users:create', async (_event, input) => {
+        try {
+            const data = await usersService.createUser(input)
+            return { success: true, data }
+        } catch (error) {
+            console.error('Failed to create user:', error)
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'No se pudo crear el usuario.'
+            }
+        }
+    });
+
     ipcMain.handle('users:getUsers', async (_event, searchParams: SearchParams) => {
         try {
             const rawData = await usersService.getUsers(searchParams);
