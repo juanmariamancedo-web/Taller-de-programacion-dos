@@ -31,6 +31,7 @@ const emptyForm: FormData = {
 }
 
 const initialProducts: Product[] = []
+const STOCK_STORAGE_KEY = 'catalogo-product-stock'
 const nameCharactersPattern = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]$/
 
 function sanitizeProductName(value: string): string {
@@ -50,7 +51,8 @@ export default function Catalogo(): JSX.Element {
   const [editingProductId, setEditingProductId] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   const [errors, setErrors] = useState<FormErrors>({})
-  const [stockDrafts, setStockDrafts] = useState<Record<number, number>>({})
+  const [stockDrafts, setStockDrafts] = useState<Record<number, string>>({})
+  const [editingStockId, setEditingStockId] = useState<number | null>(null)
   const [loadingProducts, setLoadingProducts] = useState(true)
   const [productLoadError, setProductLoadError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -89,13 +91,16 @@ export default function Catalogo(): JSX.Element {
         )
 
         const responses = [firstResponse, ...remainingResponses]
+        const savedStocks = JSON.parse(localStorage.getItem(STOCK_STORAGE_KEY) ?? '{}') as Record<string, number>
         const loadedProducts: Product[] = responses.flatMap((response) =>
           response?.success && response.data
             ? response.data.map((product) => ({
                 id: Number(product.id),
                 name: product.name,
                 price: Number(product.price),
-                stock: Number(product.stock),
+                stock: Number.isInteger(savedStocks[String(product.id)])
+                  ? savedStocks[String(product.id)]
+                  : Number(product.stock),
                 lowStock: Number(product.lowStock),
                 image: product.image,
                 isActive: product.isActive
@@ -244,17 +249,31 @@ export default function Catalogo(): JSX.Element {
     )
   }
 
-  const getStockValue = (product: Product): number => stockDrafts[product.id] ?? product.stock
+  const getStockValue = (product: Product): number => {
+    const draft = stockDrafts[product.id]
+    return draft !== undefined && /^\d+$/.test(draft) ? Number(draft) : product.stock
+  }
 
-  const changeStock = (product: Product, amount: number): void => {
+  const startStockEdit = (product: Product): void => {
+    setEditingStockId(product.id)
     setStockDrafts((currentDrafts) => ({
       ...currentDrafts,
-      [product.id]: Math.max(0, getStockValue(product) + amount)
+      [product.id]: String(product.stock)
+    }))
+  }
+
+  const updateStockDraft = (productId: number, value: string): void => {
+    setStockDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [productId]: value.replace(/\D/g, '')
     }))
   }
 
   const saveStock = (product: Product): void => {
-    const stock = getStockValue(product)
+    const draft = stockDrafts[product.id]
+    if (draft === undefined || !/^\d+$/.test(draft)) return
+
+    const stock = Number(draft)
     setProducts((currentProducts) =>
       currentProducts.map((currentProduct) =>
         currentProduct.id === product.id ? { ...currentProduct, stock } : currentProduct
@@ -265,6 +284,12 @@ export default function Catalogo(): JSX.Element {
       delete nextDrafts[product.id]
       return nextDrafts
     })
+    const savedStocks = JSON.parse(localStorage.getItem(STOCK_STORAGE_KEY) ?? '{}') as Record<string, number>
+    localStorage.setItem(
+      STOCK_STORAGE_KEY,
+      JSON.stringify({ ...savedStocks, [product.id]: stock })
+    )
+    setEditingStockId(null)
   }
 
   const resetForm = (): void => {
@@ -454,35 +479,31 @@ export default function Catalogo(): JSX.Element {
                   <td className="px-4 py-3 font-medium">{product.name}</td>
                   <td className="px-4 py-3">${product.price.toFixed(2)}</td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full px-2 py-1 text-xs font-semibold ${stockClass(product)}`}
-                    >
-                      {getStockValue(product) === 0 ? 'Sin stock' : getStockValue(product)}
-                    </span>
+                    {editingStockId === product.id ? (
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={stockDrafts[product.id] ?? ''}
+                        onChange={(event) => updateStockDraft(product.id, event.target.value)}
+                        aria-label={`Nuevo stock de ${product.name}`}
+                        className="w-24 rounded-md border border-blue-300 bg-white px-2 py-1 text-sm text-gray-900 outline-none focus:border-blue-500 dark:border-blue-400/50 dark:bg-zinc-900 dark:text-white"
+                      />
+                    ) : (
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs font-semibold ${stockClass(product)}`}
+                      >
+                        {getStockValue(product) === 0 ? 'Sin stock' : getStockValue(product)}
+                      </span>
+                    )}
                     {canAdjustStock && (
                       <div className="mt-2 flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={() => changeStock(product, 1)}
-                          aria-label={`Aumentar stock de ${product.name}`}
-                          className="rounded-md bg-emerald-100 px-2 py-1 font-bold text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300"
-                        >
-                          ↑
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => changeStock(product, -1)}
-                          aria-label={`Disminuir stock de ${product.name}`}
-                          className="rounded-md bg-rose-100 px-2 py-1 font-bold text-rose-700 hover:bg-rose-200 dark:bg-rose-500/20 dark:text-rose-300"
-                        >
-                          ↓
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => saveStock(product)}
+                          onClick={() => editingStockId === product.id ? saveStock(product) : startStockEdit(product)}
                           className="rounded-md bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
                         >
-                          Guardar stock
+                          {editingStockId === product.id ? 'Guardar' : 'Cambiar'}
                         </button>
                       </div>
                     )}
