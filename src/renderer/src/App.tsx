@@ -14,6 +14,7 @@ import Profile from './components/views/Profile'
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
+  const session = useAppSelector((state) => state.app.session)
   const roleId = useAppSelector((state) => state.app.session?.roleId)
 
   const navItems: NavItem[] = [
@@ -69,10 +70,10 @@ function App(): React.JSX.Element {
         dark:bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.3),rgba(255,255,255,0))]"
       ></div>
 
-      <Header navItems={navItems} />
+      {session && <Header navItems={navItems} />}
 
       {/* Margen pt-20/pt-24 para despegar el título y contenido del Header */}
-      <main className="container mx-auto pt-24 pb-10 px-4 flex-1 flex flex-col">
+      <main className={`container mx-auto ${session ? 'pt-24' : 'pt-0'} pb-10 px-4 flex-1 flex flex-col`}>
         <LoginPanel>
           {renderPanel()}
         </LoginPanel>

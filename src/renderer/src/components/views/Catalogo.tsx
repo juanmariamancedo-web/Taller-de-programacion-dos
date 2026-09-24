@@ -32,7 +32,7 @@ const emptyForm: FormData = {
 
 const initialProducts: Product[] = []
 const STOCK_STORAGE_KEY = 'catalogo-product-stock'
-const nameCharactersPattern = /^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]$/
+const nameCharactersPattern = /^[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ]$/
 
 function sanitizeProductName(value: string): string {
   return value
@@ -161,7 +161,7 @@ export default function Catalogo(): JSX.Element {
     const nextErrors: FormErrors = {}
     const name = form.name.trim()
     if (!name || name.length < 2 || name.length > 80 || !hasValidProductName(name)) {
-      nextErrors.name = 'Usá entre 2 y 80 letras, espacios o guiones.'
+      nextErrors.name = 'Usá entre 2 y 80 letras, números, espacios o guiones.'
     }
     if (!/^\d+(\.\d{1,2})?$/.test(form.price) || Number(form.price) < 0) {
       nextErrors.price = 'Ingresá un precio válido.'
