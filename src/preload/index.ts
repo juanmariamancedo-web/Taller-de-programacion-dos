@@ -17,6 +17,12 @@ import {
   ToggleClientStatusResponse,
   RolesResponse,
   ProductsResponse,
+  ProductCategoriesResponse,
+  ProductInput,
+  ProductMutationResponse,
+  ProductStockInput,
+  ProductStatusInput,
+  UpdateProductInput,
   Unsubscribe
 } from '../main/domain/types/electron-env'
 
@@ -64,6 +70,16 @@ const api = {
     ipcRenderer.invoke('address:getAddresses', clientId, searchParams),
   getProducts: (params: SearchParams): Promise<ProductsResponse> =>
     ipcRenderer.invoke('products:getProducts', params),
+  getProductCategories: (): Promise<ProductCategoriesResponse> =>
+    ipcRenderer.invoke('products:get-categories'),
+  createProduct: (input: ProductInput): Promise<ProductMutationResponse> =>
+    ipcRenderer.invoke('products:create', input),
+  updateProduct: (input: UpdateProductInput): Promise<ProductMutationResponse> =>
+    ipcRenderer.invoke('products:update', input),
+  setProductStatus: (input: ProductStatusInput): Promise<ProductMutationResponse> =>
+    ipcRenderer.invoke('products:set-status', input),
+  updateProductStock: (input: ProductStockInput): Promise<ProductMutationResponse> =>
+    ipcRenderer.invoke('products:update-stock', input),
 }
 
 if (process.contextIsolated) {

@@ -38,6 +38,7 @@ export interface SearchParams {
   search: string
   page: number
   sort: string
+  includeInactive?: boolean
 }
 
 export interface OrderState {
@@ -174,9 +175,63 @@ export type ItemOrder = Prisma.ItemOrderGetPayload<{}>
 
 export interface ProductsResponse {
   success: boolean
-  data?: Product[]
+  data?: ProductListItem[]
   message?: string
   totalPages: number
+  totalCount: number
+  currentPage: number
+}
+
+export interface ProductListItem {
+  id: string
+  name: string
+  price: number
+  stock: number
+  lowStock: number
+  image: string
+  isActive: boolean
+  categoryId: string
+}
+
+export interface ProductCategory {
+  id: string
+  name: string
+}
+
+export interface ProductInput {
+  name: string
+  price: number
+  stock: number
+  lowStock: number
+  image: string
+  isActive: boolean
+  categoryId: string
+}
+
+export interface UpdateProductInput extends ProductInput {
+  id: string
+}
+
+export interface ProductMutationResponse {
+  success: boolean
+  data?: { id: string }
+  message?: string
+}
+
+export interface ProductStatusInput {
+  id: string
+  isActive: boolean
+}
+
+export interface ProductStockInput {
+  id: string
+  stock: number
+}
+
+export interface ProductCategoriesResponse {
+  success: boolean
+  data?: ProductCategory[]
+  message?: string
 }
 
 export interface ToggleClientStatusInput {
@@ -218,6 +273,11 @@ export interface IElectronAPI {
   getRoles: () => Promise<RolesResponse>
   getAddresses: (clientId?: number | bigint, searchParams?: SearchParams) => Promise<AddressResponse>
   getProducts: (searchParams: SearchParams) => Promise<ProductsResponse>
+  getProductCategories: () => Promise<ProductCategoriesResponse>
+  createProduct: (input: ProductInput) => Promise<ProductMutationResponse>
+  updateProduct: (input: UpdateProductInput) => Promise<ProductMutationResponse>
+  setProductStatus: (input: ProductStatusInput) => Promise<ProductMutationResponse>
+  updateProductStock: (input: ProductStockInput) => Promise<ProductMutationResponse>
 }
 
 declare global {

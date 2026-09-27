@@ -1,16 +1,18 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
+import type { ProductCategory } from '../../../../main/domain/types/electron-env'
 import { useAppSelector } from '../../store/hooks'
 import { Sort } from '../Sort'
 
 type Product = {
-  id: number
+  id: string
   name: string
   price: number
   stock: number
   lowStock: number
   image: string
   isActive: boolean
+  categoryId: string
 }
 
 type ProductForm = Omit<Product, 'id'>
@@ -27,12 +29,53 @@ const emptyForm: FormData = {
   stock: '',
   lowStock: '',
   image: '',
-  isActive: true
+  isActive: true,
+  categoryId: ''
 }
 
-const initialProducts: Product[] = []
-const STOCK_STORAGE_KEY = 'catalogo-product-stock'
 const nameCharactersPattern = /^[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ]$/
+
+async function fetchProducts(includeInactive: boolean): Promise<Product[]> {
+  const api = window.electronAPI
+  if (!api) throw new Error('No se pudo conectar con la base de datos.')
+
+  const firstResponse = await api.getProducts({
+    search: '',
+    page: 1,
+    sort: 'nameAsc',
+    includeInactive
+  })
+
+  if (!firstResponse.success) {
+    throw new Error(firstResponse.message ?? 'No se pudieron cargar los productos.')
+  }
+
+  const remainingResponses = await Promise.all(
+    Array.from({ length: Math.max(0, firstResponse.totalPages - 1) }, (_, index) =>
+      api.getProducts({
+        search: '',
+        page: index + 2,
+        sort: 'nameAsc',
+        includeInactive
+      })
+    )
+  )
+
+  return [firstResponse, ...remainingResponses].flatMap((response) =>
+    response.success && response.data
+      ? response.data.map((product) => ({
+          id: product.id,
+          name: product.name,
+          price: Number(product.price),
+          stock: Number(product.stock),
+          lowStock: Number(product.lowStock),
+          image: product.image,
+          isActive: product.isActive,
+          categoryId: product.categoryId
+        }))
+      : []
+  )
+}
 
 function sanitizeProductName(value: string): string {
   return value
@@ -46,15 +89,18 @@ function hasValidProductName(value: string): boolean {
 }
 
 export default function Catalogo(): JSX.Element {
-  const [products, setProducts] = useState<Product[]>(initialProducts)
+  const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<ProductCategory[]>([])
   const [form, setForm] = useState<FormData>(emptyForm)
-  const [editingProductId, setEditingProductId] = useState<number | null>(null)
+  const [editingProductId, setEditingProductId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [errors, setErrors] = useState<FormErrors>({})
-  const [stockDrafts, setStockDrafts] = useState<Record<number, string>>({})
-  const [editingStockId, setEditingStockId] = useState<number | null>(null)
+  const [stockDrafts, setStockDrafts] = useState<Record<string, string>>({})
+  const [editingStockId, setEditingStockId] = useState<string | null>(null)
   const [loadingProducts, setLoadingProducts] = useState(true)
   const [productLoadError, setProductLoadError] = useState<string | null>(null)
+  const [productActionError, setProductActionError] = useState<string | null>(null)
+  const [savingProduct, setSavingProduct] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const sort = useAppSelector((state) => state.app.sort)
   const session = useAppSelector((state) => state.app.session)
@@ -71,45 +117,7 @@ export default function Catalogo(): JSX.Element {
       setProductLoadError(null)
 
       try {
-        const firstResponse = await window.electronAPI?.getProducts({
-          search: '',
-          page: 1,
-          sort: 'nameAsc'
-        })
-
-        if (!firstResponse?.success) {
-          throw new Error(firstResponse?.message ?? 'No se pudieron cargar los productos.')
-        }
-
-        const totalPages = firstResponse.totalPages ?? 1
-        const remainingResponses = await Promise.all(
-          Array.from({ length: Math.max(0, totalPages - 1) }, (_, index) =>
-            window.electronAPI?.getProducts({
-              search: '',
-              page: index + 2,
-              sort: 'nameAsc'
-            })
-          )
-        )
-
-        const responses = [firstResponse, ...remainingResponses]
-        const savedStocks = JSON.parse(localStorage.getItem(STOCK_STORAGE_KEY) ?? '{}') as Record<string, number>
-        const loadedProducts: Product[] = responses.flatMap((response) =>
-          response?.success && response.data
-            ? response.data.map((product) => ({
-                id: Number(product.id),
-                name: product.name,
-                price: Number(product.price),
-                stock: Number.isInteger(savedStocks[String(product.id)])
-                  ? savedStocks[String(product.id)]
-                  : Number(product.stock),
-                lowStock: Number(product.lowStock),
-                image: product.image,
-                isActive: product.isActive
-              }))
-            : []
-        )
-
+        const loadedProducts = await fetchProducts(canManageProducts)
         if (!cancelled) setProducts(loadedProducts)
       } catch (error) {
         if (!cancelled) {
@@ -125,7 +133,38 @@ export default function Catalogo(): JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [canManageProducts])
+
+  useEffect(() => {
+    if (!canManageProducts) return
+
+    let cancelled = false
+    const loadCategories = async (): Promise<void> => {
+      try {
+        const response = await window.electronAPI?.getProductCategories()
+        if (!response?.success) {
+          throw new Error(response?.message ?? 'No se pudieron cargar las categorías.')
+        }
+        const loadedCategories = response.data ?? []
+        if (!cancelled) {
+          setCategories(loadedCategories)
+          setForm((currentForm) => ({
+            ...currentForm,
+            categoryId: currentForm.categoryId || loadedCategories[0]?.id || ''
+          }))
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setProductActionError(error instanceof Error ? error.message : 'No se pudieron cargar las categorías.')
+        }
+      }
+    }
+
+    void loadCategories()
+    return () => {
+      cancelled = true
+    }
+  }, [canManageProducts])
 
   const visibleProducts = useMemo<Product[]>((): Product[] => {
     const normalizedSearch = search.trim().toLowerCase()
@@ -168,6 +207,7 @@ export default function Catalogo(): JSX.Element {
     }
     if (!/^\d+$/.test(form.stock)) nextErrors.stock = 'Ingresá un stock válido.'
     if (!/^\d+$/.test(form.lowStock)) nextErrors.lowStock = 'Ingresá un stock mínimo válido.'
+    if (!form.categoryId) nextErrors.categoryId = 'Seleccioná una categoría.'
     if (editingProductId === null && !form.image.trim()) nextErrors.image = 'Ingresá la imagen del producto.'
     if (
       form.image.trim() &&
@@ -202,7 +242,7 @@ export default function Catalogo(): JSX.Element {
     event.target.value = ''
   }
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
     const validationErrors = validateForm()
     setErrors(validationErrors)
@@ -214,20 +254,27 @@ export default function Catalogo(): JSX.Element {
       stock: Number(form.stock),
       lowStock: Number(form.lowStock),
       image: form.image.trim(),
-      isActive: form.isActive
+      isActive: form.isActive,
+      categoryId: form.categoryId
     }
 
-    if (editingProductId === null) {
-      setProducts((currentProducts) => [...currentProducts, { ...productData, id: Date.now() }])
-    } else {
-      setProducts((currentProducts) =>
-        currentProducts.map((product) =>
-          product.id === editingProductId ? { ...productData, id: product.id } : product
-        )
-      )
-    }
+    setSavingProduct(true)
+    setProductActionError(null)
+    try {
+      const response = editingProductId === null
+        ? await window.electronAPI?.createProduct(productData)
+        : await window.electronAPI?.updateProduct({ ...productData, id: editingProductId })
+      if (!response?.success) {
+        throw new Error(response?.message ?? 'No se pudo guardar el producto.')
+      }
 
-    resetForm()
+      setProducts(await fetchProducts(canManageProducts))
+      resetForm()
+    } catch (error) {
+      setProductActionError(error instanceof Error ? error.message : 'No se pudo guardar el producto.')
+    } finally {
+      setSavingProduct(false)
+    }
   }
 
   const editProduct = (product: Product): void => {
@@ -238,17 +285,26 @@ export default function Catalogo(): JSX.Element {
       stock: String(product.stock),
       lowStock: String(product.lowStock),
       image: product.image,
-      isActive: product.isActive
+      isActive: product.isActive,
+      categoryId: product.categoryId
     })
     setErrors({})
   }
 
-  const toggleProduct = (productId: number): void => {
-    setProducts((currentProducts) =>
-      currentProducts.map((product) =>
-        product.id === productId ? { ...product, isActive: !product.isActive } : product
-      )
-    )
+  const toggleProduct = async (product: Product): Promise<void> => {
+    setProductActionError(null)
+    try {
+      const response = await window.electronAPI?.setProductStatus({
+        id: product.id,
+        isActive: !product.isActive
+      })
+      if (!response?.success) {
+        throw new Error(response?.message ?? 'No se pudo cambiar el estado del producto.')
+      }
+      setProducts(await fetchProducts(canManageProducts))
+    } catch (error) {
+      setProductActionError(error instanceof Error ? error.message : 'No se pudo cambiar el estado del producto.')
+    }
   }
 
   const getStockValue = (product: Product): number => {
@@ -264,38 +320,40 @@ export default function Catalogo(): JSX.Element {
     }))
   }
 
-  const updateStockDraft = (productId: number, value: string): void => {
+  const updateStockDraft = (productId: string, value: string): void => {
     setStockDrafts((currentDrafts) => ({
       ...currentDrafts,
       [productId]: value.replace(/\D/g, '')
     }))
   }
 
-  const saveStock = (product: Product): void => {
+  const saveStock = async (product: Product): Promise<void> => {
     const draft = stockDrafts[product.id]
     if (draft === undefined || !/^\d+$/.test(draft)) return
 
     const stock = Number(draft)
-    setProducts((currentProducts) =>
-      currentProducts.map((currentProduct) =>
+    setProductActionError(null)
+    try {
+      const response = await window.electronAPI?.updateProductStock({ id: product.id, stock })
+      if (!response?.success) {
+        throw new Error(response?.message ?? 'No se pudo actualizar el stock.')
+      }
+      setProducts((currentProducts) => currentProducts.map((currentProduct) =>
         currentProduct.id === product.id ? { ...currentProduct, stock } : currentProduct
-      )
-    )
-    setStockDrafts((currentDrafts) => {
-      const nextDrafts = { ...currentDrafts }
-      delete nextDrafts[product.id]
-      return nextDrafts
-    })
-    const savedStocks = JSON.parse(localStorage.getItem(STOCK_STORAGE_KEY) ?? '{}') as Record<string, number>
-    localStorage.setItem(
-      STOCK_STORAGE_KEY,
-      JSON.stringify({ ...savedStocks, [product.id]: stock })
-    )
-    setEditingStockId(null)
+      ))
+      setStockDrafts((currentDrafts) => {
+        const nextDrafts = { ...currentDrafts }
+        delete nextDrafts[product.id]
+        return nextDrafts
+      })
+      setEditingStockId(null)
+    } catch (error) {
+      setProductActionError(error instanceof Error ? error.message : 'No se pudo actualizar el stock.')
+    }
   }
 
   const resetForm = (): void => {
-    setForm(emptyForm)
+    setForm({ ...emptyForm, categoryId: categories[0]?.id ?? '' })
     setEditingProductId(null)
     setErrors({})
   }
@@ -317,6 +375,11 @@ export default function Catalogo(): JSX.Element {
           Administrá el catálogo y el inventario.
         </p>
       </div>
+      {productActionError && (
+        <p role="alert" className="w-full text-sm text-rose-600 dark:text-rose-300">
+          {productActionError}
+        </p>
+      )}
 
       {canManageProducts && <form
         onSubmit={handleSubmit}
@@ -347,6 +410,23 @@ export default function Catalogo(): JSX.Element {
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 font-normal text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
             />
             {errors.name && <span className="text-xs text-rose-600 dark:text-rose-300">{errors.name}</span>}
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-gray-700 dark:text-gray-200">
+            Categoría
+            <select
+              value={form.categoryId}
+              onChange={(event) => updateForm('categoryId', event.target.value)}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-2 font-normal text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
+            >
+              <option value="">Seleccioná una categoría</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>{category.name}</option>
+              ))}
+            </select>
+            {errors.categoryId && <span className="text-xs text-rose-600 dark:text-rose-300">{errors.categoryId}</span>}
+            {categories.length === 0 && (
+              <span className="text-xs text-amber-600 dark:text-amber-300">No hay categorías disponibles para crear productos.</span>
+            )}
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-gray-700 dark:text-gray-200">
             Precio
@@ -424,9 +504,10 @@ export default function Catalogo(): JSX.Element {
         )}
         <button
           type="submit"
-          className="mt-4 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+          disabled={savingProduct || categories.length === 0}
+          className="mt-4 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {editingProductId === null ? 'Crear producto' : 'Guardar cambios'}
+          {savingProduct ? 'Guardando...' : editingProductId === null ? 'Crear producto' : 'Guardar cambios'}
         </button>
       </form>}
 
@@ -527,7 +608,7 @@ export default function Catalogo(): JSX.Element {
                         </button>
                         <button
                           type="button"
-                          onClick={() => toggleProduct(product.id)}
+                          onClick={() => toggleProduct(product)}
                           className="rounded-lg bg-gray-100 px-3 py-1.5 font-semibold text-gray-700 hover:bg-gray-200 dark:bg-white/10 dark:text-gray-200"
                         >
                           {product.isActive ? 'Desactivar' : 'Activar'}
