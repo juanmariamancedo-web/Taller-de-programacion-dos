@@ -69,6 +69,20 @@ export class ProductsService {
           name: { contains: search, mode: 'insensitive' },
         }),
       };
+      const orderByOptions: Record<string, Prisma.ProductOrderByWithRelationInput> = {
+        nameAsc: { name: 'asc' },
+        nameDesc: { name: 'desc' },
+        priceAsc: { price: 'asc' },
+        priceDesc: { price: 'desc' },
+        stockAsc: { stock: 'asc' },
+        stockDesc: { stock: 'desc' },
+        isActiveAsc: { isActive: 'asc' },
+        isActiveDesc: { isActive: 'desc' }
+      }
+      const orderBy: Prisma.ProductOrderByWithRelationInput[] = [
+        orderByOptions[searchParams?.sort ?? ''] ?? { name: 'asc' },
+        { id: 'asc' }
+      ]
 
       const [products, totalCount] = await prisma.$transaction([
         prisma.product.findMany({
@@ -78,7 +92,7 @@ export class ProductsService {
           include: {
             category: true, // Incluye la relación con la categoría si es necesaria en el frontend
           },
-          orderBy: { name: 'asc' },
+          orderBy,
         }),
         prisma.product.count({ where }),
       ]);

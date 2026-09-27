@@ -1,7 +1,9 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { ProductCategory } from '../../../../main/domain/types/electron-env'
-import { useAppSelector } from '../../store/hooks'
+import Paginacion from '../Pagination'
+import { useAppDispatch, useAppSelector } from '../../store/hooks'
+import { setPage } from '../../store/slices/appSlice'
 import { Sort } from '../Sort'
 
 type Product = {
@@ -35,46 +37,46 @@ const emptyForm: FormData = {
 
 const nameCharactersPattern = /^[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ]$/
 
-async function fetchProducts(includeInactive: boolean): Promise<Product[]> {
+type ProductPage = {
+  products: Product[]
+  totalCount: number
+  totalPages: number
+}
+
+async function fetchProducts(
+  search: string,
+  page: number,
+  sort: string,
+  includeInactive: boolean
+): Promise<ProductPage> {
   const api = window.electronAPI
   if (!api) throw new Error('No se pudo conectar con la base de datos.')
 
-  const firstResponse = await api.getProducts({
-    search: '',
-    page: 1,
-    sort: 'nameAsc',
+  const response = await api.getProducts({
+    search,
+    page,
+    sort,
     includeInactive
   })
 
-  if (!firstResponse.success) {
-    throw new Error(firstResponse.message ?? 'No se pudieron cargar los productos.')
+  if (!response.success) {
+    throw new Error(response.message ?? 'No se pudieron cargar los productos.')
   }
 
-  const remainingResponses = await Promise.all(
-    Array.from({ length: Math.max(0, firstResponse.totalPages - 1) }, (_, index) =>
-      api.getProducts({
-        search: '',
-        page: index + 2,
-        sort: 'nameAsc',
-        includeInactive
-      })
-    )
-  )
-
-  return [firstResponse, ...remainingResponses].flatMap((response) =>
-    response.success && response.data
-      ? response.data.map((product) => ({
-          id: product.id,
-          name: product.name,
-          price: Number(product.price),
-          stock: Number(product.stock),
-          lowStock: Number(product.lowStock),
-          image: product.image,
-          isActive: product.isActive,
-          categoryId: product.categoryId
-        }))
-      : []
-  )
+  return {
+    products: (response.data ?? []).map((product) => ({
+      id: product.id,
+      name: product.name,
+      price: Number(product.price),
+      stock: Number(product.stock),
+      lowStock: Number(product.lowStock),
+      image: product.image,
+      isActive: product.isActive,
+      categoryId: product.categoryId
+    })),
+    totalCount: response.totalCount,
+    totalPages: response.totalPages
+  }
 }
 
 function sanitizeProductName(value: string): string {
@@ -90,6 +92,7 @@ function hasValidProductName(value: string): boolean {
 
 export default function Catalogo(): JSX.Element {
   const [products, setProducts] = useState<Product[]>([])
+  const [totalProducts, setTotalProducts] = useState(0)
   const [categories, setCategories] = useState<ProductCategory[]>([])
   const [form, setForm] = useState<FormData>(emptyForm)
   const [editingProductId, setEditingProductId] = useState<string | null>(null)
@@ -102,12 +105,23 @@ export default function Catalogo(): JSX.Element {
   const [productActionError, setProductActionError] = useState<string | null>(null)
   const [savingProduct, setSavingProduct] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const sort = useAppSelector((state) => state.app.sort)
+  const { page, sort } = useAppSelector((state) => state.app)
+  const dispatch = useAppDispatch()
   const session = useAppSelector((state) => state.app.session)
   const canManageProducts = session?.roleName === 'admin' || session?.roleName === 'supervisor'
   const canEditProducts = canManageProducts
   const canAdjustStock = session?.roleName === 'admin' || session?.roleName === 'seller'
   const productTableColumnCount = canEditProducts ? 6 : 5
+
+  const reloadCurrentPage = async (): Promise<void> => {
+    const loadedPage = await fetchProducts(search, page, sort, canManageProducts)
+    setTotalProducts(loadedPage.totalCount)
+    if (page > loadedPage.totalPages) {
+      dispatch(setPage(loadedPage.totalPages))
+      return
+    }
+    setProducts(loadedPage.products)
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -117,8 +131,15 @@ export default function Catalogo(): JSX.Element {
       setProductLoadError(null)
 
       try {
-        const loadedProducts = await fetchProducts(canManageProducts)
-        if (!cancelled) setProducts(loadedProducts)
+        const loadedPage = await fetchProducts(search, page, sort, canManageProducts)
+        if (!cancelled) {
+          setTotalProducts(loadedPage.totalCount)
+          if (page > loadedPage.totalPages) {
+            dispatch(setPage(loadedPage.totalPages))
+          } else {
+            setProducts(loadedPage.products)
+          }
+        }
       } catch (error) {
         if (!cancelled) {
           setProductLoadError(error instanceof Error ? error.message : 'No se pudieron cargar los productos.')
@@ -133,7 +154,7 @@ export default function Catalogo(): JSX.Element {
     return () => {
       cancelled = true
     }
-  }, [canManageProducts])
+  }, [canManageProducts, dispatch, page, search, sort])
 
   useEffect(() => {
     if (!canManageProducts) return
@@ -165,28 +186,6 @@ export default function Catalogo(): JSX.Element {
       cancelled = true
     }
   }, [canManageProducts])
-
-  const visibleProducts = useMemo<Product[]>((): Product[] => {
-    const normalizedSearch = search.trim().toLowerCase()
-    const primarySort = sort.replace(/Asc|Desc$/, '')
-    const direction = sort.endsWith('Asc') ? 1 : -1
-
-    return [...products]
-      .filter((product) => product.name.toLowerCase().includes(normalizedSearch))
-      .sort((firstProduct, secondProduct) => {
-        switch (primarySort) {
-          case 'stock':
-            return (firstProduct.stock - secondProduct.stock) * direction
-          case 'price':
-            return (firstProduct.price - secondProduct.price) * direction
-          case 'isActive':
-            return (Number(firstProduct.isActive) - Number(secondProduct.isActive)) * direction
-          case 'name':
-          default:
-            return firstProduct.name.localeCompare(secondProduct.name) * direction
-        }
-      })
-  }, [products, search, sort])
 
   const updateForm = <Field extends keyof FormData>(
     field: Field,
@@ -268,7 +267,7 @@ export default function Catalogo(): JSX.Element {
         throw new Error(response?.message ?? 'No se pudo guardar el producto.')
       }
 
-      setProducts(await fetchProducts(canManageProducts))
+      await reloadCurrentPage()
       resetForm()
     } catch (error) {
       setProductActionError(error instanceof Error ? error.message : 'No se pudo guardar el producto.')
@@ -301,7 +300,7 @@ export default function Catalogo(): JSX.Element {
       if (!response?.success) {
         throw new Error(response?.message ?? 'No se pudo cambiar el estado del producto.')
       }
-      setProducts(await fetchProducts(canManageProducts))
+      await reloadCurrentPage()
     } catch (error) {
       setProductActionError(error instanceof Error ? error.message : 'No se pudo cambiar el estado del producto.')
     }
@@ -514,7 +513,10 @@ export default function Catalogo(): JSX.Element {
       <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <input
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={(event) => {
+            setSearch(event.target.value)
+            dispatch(setPage(1))
+          }}
           placeholder="Buscar por nombre"
           className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-white/5 dark:text-white"
         />
@@ -545,8 +547,8 @@ export default function Catalogo(): JSX.Element {
                   {productLoadError}
                 </td>
               </tr>
-            ) : visibleProducts.length ? (
-              visibleProducts.map((product) => (
+            ) : products.length ? (
+              products.map((product) => (
                 <tr key={product.id} className="transition hover:bg-gray-50 dark:hover:bg-white/5">
                   <td className="px-4 py-3">
                     {product.image ? (
@@ -628,6 +630,7 @@ export default function Catalogo(): JSX.Element {
           </tbody>
         </table>
       </div>
+      <Paginacion paginas={Math.ceil(totalProducts / 5)} />
     </div>
   )
 }
