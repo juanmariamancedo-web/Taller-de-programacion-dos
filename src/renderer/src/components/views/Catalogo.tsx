@@ -58,8 +58,8 @@ export default function Catalogo(): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const sort = useAppSelector((state) => state.app.sort)
   const session = useAppSelector((state) => state.app.session)
-  const canManageProducts = session?.roleName === 'admin'
-  const canEditProducts = session?.roleName === 'admin'
+  const canManageProducts = session?.roleName === 'admin' || session?.roleName === 'supervisor'
+  const canEditProducts = canManageProducts
   const canAdjustStock = session?.roleName === 'admin' || session?.roleName === 'seller'
   const productTableColumnCount = canEditProducts ? 6 : 5
 
