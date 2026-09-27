@@ -56,25 +56,28 @@ async function main() {
   // 3. Categorías de Productos
   console.log('Cargando categorías...')
   const categoriesData = [
-    { name: 'Electrónica', description: 'Artículos de tecnología y gadgetry' },
-    { name: 'Repuestos', description: 'Componentes y repuestos automotores' },
-    { name: 'Herramientas', description: 'Equipamiento y herramientas de taller' }
+    { name: 'Electrónica', description: 'Artículos de tecnología y electrónica' },
+    { name: 'Herramienta', description: 'Equipamiento y herramientas de taller' },
+    { name: 'Repuestos', description: 'Componentes y repuestos automotores' }
   ]
 
   const createdCategories = []
-  for (const cat of categoriesData) {
-    let category = await prisma.category.findFirst({
-      where: { name: cat.name }
+  for (const category of categoriesData) {
+    const existingCategory = await prisma.category.findFirst({
+      where: category.name === 'Herramienta'
+        ? { name: { in: ['Herramienta', 'Herramientas'] } }
+        : { name: category.name }
     })
+    const savedCategory = existingCategory
+      ? await prisma.category.update({
+          where: { id: existingCategory.id },
+          data: category
+        })
+      : await prisma.category.create({ data: category })
 
-    if (!category) {
-      category = await prisma.category.create({
-        data: cat
-      })
-    }
-
-    createdCategories.push(category)
+    createdCategories.push(savedCategory)
   }
+  const categoriesByName = new Map(createdCategories.map((category) => [category.name, category]))
 
   // 4. Productos
   console.log('Cargando productos de prueba...')
@@ -86,7 +89,7 @@ async function main() {
       lowStock: 3,
       image: 'https://via.placeholder.com/150',
       isActive: true,
-      categoryId: createdCategories[0].id
+      categoryId: categoriesByName.get('Electrónica')!.id
     },
     {
       name: 'Interface J2534 Pass-Thru',
@@ -95,7 +98,7 @@ async function main() {
       lowStock: 2,
       image: 'https://via.placeholder.com/150',
       isActive: true,
-      categoryId: createdCategories[0].id
+      categoryId: categoriesByName.get('Electrónica')!.id
     },
     {
       name: 'Sensor MAP Volkswagen 1.6',
@@ -104,7 +107,7 @@ async function main() {
       lowStock: 5,
       image: 'https://via.placeholder.com/150',
       isActive: true,
-      categoryId: createdCategories[1].id
+      categoryId: categoriesByName.get('Repuestos')!.id
     },
     {
       name: 'Kit Inyectores Bosch 0280',
@@ -113,7 +116,7 @@ async function main() {
       lowStock: 2,
       image: 'https://via.placeholder.com/150',
       isActive: true,
-      categoryId: createdCategories[1].id
+      categoryId: categoriesByName.get('Repuestos')!.id
     },
     {
       name: 'Soldadora Inverter MIG/MAG 170A',
@@ -122,7 +125,7 @@ async function main() {
       lowStock: 1,
       image: 'https://via.placeholder.com/150',
       isActive: true,
-      categoryId: createdCategories[2].id
+      categoryId: categoriesByName.get('Herramienta')!.id
     },
     {
       name: 'Multímetro Digital Profesional',
@@ -131,7 +134,7 @@ async function main() {
       lowStock: 3,
       image: 'https://via.placeholder.com/150',
       isActive: true,
-      categoryId: createdCategories[2].id
+      categoryId: categoriesByName.get('Herramienta')!.id
     },
     {
       name: 'Batería 12V 75Ah',
@@ -140,7 +143,7 @@ async function main() {
       lowStock: 2,
       image: 'https://via.placeholder.com/150',
       isActive: true,
-      categoryId: createdCategories[1].id
+      categoryId: categoriesByName.get('Repuestos')!.id
     },
     {
       name: 'Cargador Inteligente de Baterías',
@@ -149,7 +152,7 @@ async function main() {
       lowStock: 2,
       image: 'https://via.placeholder.com/150',
       isActive: true,
-      categoryId: createdCategories[0].id
+      categoryId: categoriesByName.get('Electrónica')!.id
     }
   ]
 

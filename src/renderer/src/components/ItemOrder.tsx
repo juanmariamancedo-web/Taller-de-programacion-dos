@@ -1,6 +1,6 @@
 import { ChangeEvent, useState, useEffect, useRef } from 'react'
 import { FormOrderItem } from './views/CreateOrderPage'
-import { Product } from '../../../main/domain/types/electron-env'
+import { ProductListItem } from '../../../main/domain/types/electron-env'
 
 interface ItemOrderProps {
   item: FormOrderItem
@@ -16,7 +16,7 @@ export function ItemOrder({
   onRemoveItem,
 }: ItemOrderProps) {
   const [searchTerm, setSearchTerm] = useState(item.description || '')
-  const [products, setProducts] = useState<Product[]>([])
+  const [products, setProducts] = useState<ProductListItem[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -52,7 +52,7 @@ export function ItemOrder({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const handleSelectProduct = (product: Product) => {
+  const handleSelectProduct = (product: ProductListItem) => {
     setSearchTerm(product.name)
     setIsOpen(false)
 
