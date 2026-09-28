@@ -169,10 +169,6 @@ export default function Catalogo(): JSX.Element {
         const loadedCategories = response.data ?? []
         if (!cancelled) {
           setCategories(loadedCategories)
-          setForm((currentForm) => ({
-            ...currentForm,
-            categoryId: currentForm.categoryId || loadedCategories[0]?.id || ''
-          }))
         }
       } catch (error) {
         if (!cancelled) {
@@ -352,7 +348,7 @@ export default function Catalogo(): JSX.Element {
   }
 
   const resetForm = (): void => {
-    setForm({ ...emptyForm, categoryId: categories[0]?.id ?? '' })
+    setForm(emptyForm)
     setEditingProductId(null)
     setErrors({})
   }
