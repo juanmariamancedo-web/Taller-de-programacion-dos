@@ -413,9 +413,17 @@ export default function Catalogo(): JSX.Element {
               onChange={(event) => updateForm('categoryId', event.target.value)}
               className="rounded-lg border border-gray-300 bg-white px-3 py-2 font-normal text-gray-900 outline-none focus:border-blue-500 dark:border-white/10 dark:bg-black/20 dark:text-white"
             >
-              <option value="">Seleccioná una categoría</option>
+              <option value="" className="bg-white text-gray-900 dark:bg-zinc-900 dark:text-white">
+                Seleccioná una categoría
+              </option>
               {categories.map((category) => (
-                <option key={category.id} value={category.id}>{category.name}</option>
+                <option
+                  key={category.id}
+                  value={category.id}
+                  className="bg-white text-gray-900 dark:bg-zinc-900 dark:text-white"
+                >
+                  {category.name}
+                </option>
               ))}
             </select>
             {errors.categoryId && <span className="text-xs text-rose-600 dark:text-rose-300">{errors.categoryId}</span>}
