@@ -1,4 +1,5 @@
 import { ChangeEvent, useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { FormOrderItem } from './views/CreateOrderPage'
 import { ProductListItem } from '../../../main/domain/types/electron-env'
 
@@ -19,7 +20,26 @@ export function ItemOrder({
   const [products, setProducts] = useState<ProductListItem[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dropdownRef = useRef<HTMLUListElement>(null)
+  const [dropdownPosition, setDropdownPosition] = useState<{
+    top: number
+    left: number
+    width: number
+  } | null>(null)
+
+  const updateDropdownPosition = (): void => {
+    const input = inputRef.current
+    if (!input) return
+
+    const bounds = input.getBoundingClientRect()
+    setDropdownPosition({ top: bounds.bottom + 4, left: bounds.left, width: bounds.width })
+  }
+
+  const openDropdown = (): void => {
+    updateDropdownPosition()
+    setIsOpen(true)
+  }
 
   // Carga productos desde IPC con debounce al escribir
   useEffect(() => {
@@ -43,8 +63,20 @@ export function ItemOrder({
   }, [searchTerm, isOpen])
 
   useEffect(() => {
+    if (!isOpen) return
+
+    window.addEventListener('resize', updateDropdownPosition)
+    window.addEventListener('scroll', updateDropdownPosition, true)
+    return () => {
+      window.removeEventListener('resize', updateDropdownPosition)
+      window.removeEventListener('scroll', updateDropdownPosition, true)
+    }
+  }, [isOpen])
+
+  useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      const target = event.target as Node
+      if (!inputRef.current?.contains(target) && !dropdownRef.current?.contains(target)) {
         setIsOpen(false)
       }
     }
@@ -82,44 +114,59 @@ export function ItemOrder({
     <tr className="border-b border-slate-200/80 transition hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.02]">
       {/* Columna: Búsqueda y Selección de Producto */}
       <td className="px-4 py-3">
-        <div className="relative" ref={dropdownRef}>
+        <div className="relative">
           <input
+            ref={inputRef}
             type="text"
             className={inputStyle}
             placeholder="Buscar producto..."
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value)
-              setIsOpen(true)
+              openDropdown()
             }}
-            onFocus={() => setIsOpen(true)}
+            onFocus={openDropdown}
             onBlur={() => {
               // Retrasamos el cierre para permitir el evento click de la lista
               setTimeout(() => setIsOpen(false), 200)
             }}
           />
 
-          {isOpen && (
-            <ul className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900">
+          {isOpen && dropdownPosition && createPortal(
+            <ul
+              ref={dropdownRef}
+              style={{
+                top: dropdownPosition.top,
+                left: dropdownPosition.left,
+                width: dropdownPosition.width
+              }}
+              className="fixed z-[1000] max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
+            >
               {isLoading ? (
                 <li className="px-4 py-2 text-xs text-slate-400">Buscando productos...</li>
               ) : products.length > 0 ? (
                 products.map((product) => (
                   <li
                     key={product.id}
-                    onClick={() => handleSelectProduct(product)}
-                    className="flex cursor-pointer items-center justify-between px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-zinc-800"
                   >
-                    <span className="font-medium">{product.name}</span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                      ${Number(product.price).toLocaleString('es-AR')}
-                    </span>
+                    <button
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => handleSelectProduct(product)}
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-zinc-800"
+                    >
+                      <span className="font-medium">{product.name}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        ${Number(product.price).toLocaleString('es-AR')}
+                      </span>
+                    </button>
                   </li>
                 ))
               ) : (
                 <li className="px-4 py-2 text-xs text-slate-400">Sin resultados</li>
               )}
-            </ul>
+            </ul>,
+            document.body
           )}
         </div>
       </td>
