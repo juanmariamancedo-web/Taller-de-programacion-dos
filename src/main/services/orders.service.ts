@@ -2,14 +2,6 @@ import { prisma } from '../infrastructure/db/prisma';
 import { SearchParams, CreateOrderPayload, CreateOrderResponse, UpdateOrderPayload, OrderMutationResponse } from '../domain/types/electron-env';
 import { Prisma } from '../infrastructure/db/generated/client/client';
 
-export interface FormOrderItem {
-  id: string;
-  productId: number;
-  description: string;
-  quantity: number;
-  unitPrice: number;
-}
-
 export class OrdersService {
   async getOrders(searchParams?: SearchParams, userId?: number) {
     const page = searchParams?.page ?? 1;
@@ -54,17 +46,36 @@ export class OrdersService {
         take: limit,
         orderBy,
         include: {
-          currentState: { select: { name: true } },
+          currentState: { select: { id: true, name: true } },
           client: true,
+          shippingAddress: {
+            include: { city: true },
+          },
+          itemOrders: {
+            include: {
+              product: true,
+            },
+          },
         },
       }),
     ]);
+
+    const formattedOrders = orders.map((order) => ({
+      ...order,
+      items: order.itemOrders.map((item) => ({
+        id: Number(item.id),
+        productId: Number(item.productId),
+        description: item.product?.name ?? '',
+        quantity: Number(item.amount), // Mapeamos `amount` de Prisma como `quantity` para la vista
+        unitPrice: Number(item.unitPrice),
+      })),
+    }));
 
     const totalPages = Math.ceil(totalOrders / limit);
 
     return {
       success: true,
-      data: orders,
+      data: formattedOrders,
       totalPages,
     };
   }
@@ -73,7 +84,6 @@ export class OrdersService {
     try {
       const { clientId, sellerId, items, total } = payload;
 
-      // Validar que sellerId también esté presente
       if (!clientId || !sellerId || !items || items.length === 0) {
         return {
           success: false,
@@ -85,15 +95,14 @@ export class OrdersService {
         const order = await tx.order.create({
           data: {
             clientId: Number(clientId),
-            sellerId: Number(sellerId), // <--- Pasarlo como número directo
+            sellerId: Number(sellerId),
             total: Number(total),
             currentStateId: 1,
             itemOrders: {
               create: items.map((item) => ({
                 productId: Number(item.productId),
-                quantity: Number(item.quantity),
+                amount: Number(item.quantity), // Mapeo de `quantity` a `amount`
                 unitPrice: Number(item.unitPrice),
-                amount: Number(item.quantity) * Number(item.unitPrice),
               })),
             },
           },
@@ -115,68 +124,63 @@ export class OrdersService {
       };
     }
   }
+
   async updateOrder(payload: UpdateOrderPayload): Promise<OrderMutationResponse> {
-      try {
-        const { id, clientId, sellerId, items, total, currentStateId } = payload;
+    try {
+      const { id, clientId, sellerId, items, total, currentStateId } = payload;
 
-        if (!id || !clientId || !sellerId || !items || items.length === 0) {
-          return {
-            success: false,
-            message: 'Datos insuficientes para actualizar la orden (ID, cliente, vendedor e ítems obligatorios)',
-          };
-        }
-
-        const orderId = Number(id);
-        const parsedClientId = Number(clientId);
-        const parsedSellerId = Number(sellerId);
-        const parsedTotal = Number(total);
-
-        const updatedOrder = await prisma.$transaction(async (tx) => {
-          // 1. Eliminar los ítems anteriores de la orden
-          await tx.itemOrder.deleteMany({
-            where: { orderId: orderId },
-          });
-
-          // 2. Actualizar la cabecera de la orden y recrear sus ítems
-          const order = await tx.order.update({
-            where: { id: orderId },
-            data: {
-              clientId: parsedClientId,
-              sellerId: parsedSellerId,
-              total: parsedTotal,
-              ...(currentStateId && { currentStateId: Number(currentStateId) }),
-              itemOrders: {
-                create: items.map((item) => {
-                  const quantity = Number(item.quantity);
-                  const unitPrice = Number(item.unitPrice);
-
-                  return {
-                    productId: Number(item.productId),
-                    quantity,
-                    unitPrice,
-                    amount: quantity * unitPrice,
-                  };
-                }),
-              },
-            },
-          });
-
-          return order;
-        });
-
-        return {
-          success: true,
-          orderId: Number(updatedOrder.id),
-          message: 'Orden actualizada exitosamente',
-        };
-      } catch (err: any) {
-        console.error('Error al actualizar orden en Prisma:', err);
+      if (!id || !clientId || !sellerId || !items || items.length === 0) {
         return {
           success: false,
-          message: err.message || 'Error al actualizar la orden en la base de datos',
+          message: 'Datos insuficientes para actualizar la orden (ID, cliente, vendedor e ítems obligatorios)',
         };
       }
+
+      const orderId = Number(id);
+      const parsedClientId = Number(clientId);
+      const parsedSellerId = Number(sellerId);
+      const parsedTotal = Number(total);
+
+      const updatedOrder = await prisma.$transaction(async (tx) => {
+        // 1. Eliminar los ítems anteriores de la orden
+        await tx.itemOrder.deleteMany({
+          where: { orderId: orderId },
+        });
+
+        // 2. Actualizar la cabecera de la orden y recrear sus ítems
+        const order = await tx.order.update({
+          where: { id: orderId },
+          data: {
+            clientId: parsedClientId,
+            sellerId: parsedSellerId,
+            total: parsedTotal,
+            ...(currentStateId && { currentStateId: Number(currentStateId) }),
+            itemOrders: {
+              create: items.map((item) => ({
+                productId: Number(item.productId),
+                amount: Number(item.quantity), // Mapeo de `quantity` a `amount`
+                unitPrice: Number(item.unitPrice),
+              })),
+            },
+          },
+        });
+
+        return order;
+      });
+
+      return {
+        success: true,
+        orderId: Number(updatedOrder.id),
+        message: 'Orden actualizada exitosamente',
+      };
+    } catch (err: any) {
+      console.error('Error al actualizar orden en Prisma:', err);
+      return {
+        success: false,
+        message: err.message || 'Error al actualizar la orden en la base de datos',
+      };
     }
+  }
 }
 
 export const ordersService = new OrdersService();

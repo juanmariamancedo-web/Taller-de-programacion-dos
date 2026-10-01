@@ -16,6 +16,7 @@ function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
   const session = useAppSelector((state) => state.app.session)
   const roleId = useAppSelector((state) => state.app.session?.roleId)
+  const orderToEdit = useAppSelector((state)=> state.app.orderToEdit)
 
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Inicio'},
@@ -53,7 +54,7 @@ function App(): React.JSX.Element {
         return <CreateUserPage />
       case "order-create":
         if(roleId == 1 || roleId == 3){ // debe ser admin o vendedor
-          return <CreateOrderPage />
+          return <CreateOrderPage initialOrder={orderToEdit} />
         }
       case "profile":
         return <Profile />

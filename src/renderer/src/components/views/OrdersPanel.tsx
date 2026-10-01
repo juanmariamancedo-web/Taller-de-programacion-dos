@@ -4,8 +4,7 @@ import { Sort } from "../Sort"
 import { useEffect, useState } from "react"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
 import { useAppDispatch, useAppSelector } from "../../store/hooks"
-import { setCurrentTab } from "../../store/slices/appSlice"
-import { OrderResponse } from "../../../../main/domain/types/electron-env"
+import { setCurrentTab, setOrderToEdit } from "../../store/slices/appSlice" // Asegúrate de importar/crear setOrderToEdit
 
 export default function OrdersPage() {
     const [orders, setOrders] = useState<OrderWithState[]>();
@@ -15,19 +14,18 @@ export default function OrdersPage() {
 
     const dispatch = useAppDispatch()
 
-    const sort = useAppSelector(store=>store.app.sort)
-    const search = useAppSelector(store=>store.app.search)
-    const page = useAppSelector(store=>store.app.page)
+    const sort = useAppSelector(store => store.app.sort)
+    const search = useAppSelector(store => store.app.search)
+    const page = useAppSelector(store => store.app.page)
     const session = useAppSelector(store => store.app.session)
 
     useEffect(() => {
         const fetchOrders = async () => {
             try {
                 setIsLoading(true);
-                const sellerId  = session && (session.roleId == 3)? parseInt(session.id) : undefined
-                console.log(sellerId)
+                const sellerId = session && (session.roleId == 3) ? parseInt(session.id) : undefined
 
-                const response = await window.electronAPI?.getOrders({ page, sort, search}, sellerId);
+                const response = await window.electronAPI?.getOrders({ page, sort, search }, sellerId);
                 
                 if (response?.success && response) {
                     setPages(response.totalPages ?? 1)
@@ -45,25 +43,33 @@ export default function OrdersPage() {
         fetchOrders();
     }, [search, sort, page]);
 
+    // Función para manejar el clic en editar
+    const handleEdit = (order: OrderWithState) => {
+        dispatch(setOrderToEdit(order))
+        dispatch(setCurrentTab("order-create")) // O "order-edit" según el nombre de tu pestaña
+    }
+
+    // Función para manejar la creación de una nueva orden
+    const handleCreateNew = () => {
+        dispatch(setOrderToEdit(null)) // Limpiamos la orden seleccionada
+        dispatch(setCurrentTab("order-create"))
+    }
 
     return (
         <>
             <div className="flex flex-col items-center gap-3">
                 <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
                     <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">
-                        {session && (session.roleId == 3) ? (//Cambia el titulo segun el vendedor o no
-                                <>Mis Ordenes</>
-                            ):
-                                <>Ordenes</>
-                        }
+                        {session && (session.roleId == 3) ? (
+                            <>Mis Órdenes</>
+                        ) : (
+                            <>Órdenes</>
+                        )}
                     </h1>
-                    {session && (session.roleId == 1 || session.roleId == 3) && ( //debe ser vendedor o admin
+                    {session && (session.roleId == 1 || session.roleId == 3) && (
                         <button
                             type="button"
-                            onClick={() => {
-                            // dispatch(setClientToEdit(null))
-                                dispatch(setCurrentTab("order-create"))
-                            }}
+                            onClick={handleCreateNew}
                             className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
                         >
                             <span className="text-xl leading-none">+</span>
@@ -80,38 +86,22 @@ export default function OrdersPage() {
                         <thead className="bg-gray-100 dark:bg-white/10">
                             <tr className="text-left text-sm font-semibold text-gray-700 dark:text-gray-200">
                                 <th className="px-4 py-3">
-                                    <Sort   
-                                        name="ID"
-                                        serverArg="id"
-                                        className=""
-                                    />
+                                    <Sort name="ID" serverArg="id" className="" />
                                 </th>
                                 <th className="px-4 py-3">
-                                    <Sort 
-                                        name="Cliente"
-                                        serverArg="client"
-                                        className=""
-                                    />
+                                    <Sort name="Cliente" serverArg="client" className="" />
                                 </th>
                                 <th className="px-4 py-3">
-                                    <Sort 
-                                        name="Total"
-                                        serverArg="total"
-                                        className=""
-                                    />
+                                    <Sort name="Total" serverArg="total" className="" />
                                 </th>
                                 <th className="px-4 py-3">
-                                    <Sort 
-                                        name="Estado"
-                                        serverArg="state"
-                                        className=""
-                                    />
+                                    <Sort name="Estado" serverArg="state" className="" />
                                 </th>
-                                {session && session.roleId != 3 && //los vendedores no pueden editar las ordenes, una vez emetidas
-                                    <th>
+                                {session && session.roleId != 3 && (
+                                    <th className="px-4 py-3">
                                         Editar
                                     </th>
-                                }
+                                )}
                             </tr>
                         </thead>
 
@@ -143,25 +133,25 @@ export default function OrdersPage() {
                                                     {order.currentState.name}
                                                 </span>
                                             </td>
-                                            {session && session.roleId != 3 && //los vendedores no pueden editar las ordenes, una vez emetidas
+                                            {session && session.roleId != 3 && (
                                                 <td className="px-4 py-3">
                                                     <button
                                                         type="button"
-                                                        // onClick={() => handleEdit(client)}
-                                                        // title={`Editar a ${client.name} ${client.lastname}`}
-                                                        // aria-label={`Editar a ${client.name} ${client.lastname}`}
+                                                        onClick={() => handleEdit(order)}
+                                                        title={`Editar orden #${order.id}`}
+                                                        aria-label={`Editar orden #${order.id}`}
                                                         className="rounded-lg bg-blue-100 px-3 py-1.5 font-semibold text-blue-700 transition hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
-                                                        >
+                                                    >
                                                         Editar
                                                     </button>
                                                 </td>
-                                            }
+                                            )}
                                         </tr>
                                     )
                                 })
                             ) : (
                                 <tr>
-                                    <td colSpan={4} className="text-center py-6 text-gray-500">
+                                    <td colSpan={session?.roleId !== 3 ? 5 : 4} className="text-center py-6 text-gray-500">
                                         No hay órdenes encontradas
                                     </td>
                                 </tr>
