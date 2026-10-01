@@ -304,6 +304,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                     key={item.id}
                     item={item}
                     isOnlyItem={items.length === 1}
+                    selectedProductIds={items
+                      .map((i) => i.productId)
+                      .filter((id) => id > 0)}
                     onUpdateItem={handleUpdateItem}
                     onRemoveItem={handleRemoveItem}
                   />
