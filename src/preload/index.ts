@@ -23,7 +23,10 @@ import {
   ProductStockInput,
   ProductStatusInput,
   UpdateProductInput,
-  Unsubscribe
+  Unsubscribe, 
+  CreateOrderPayload, 
+  CreateOrderResponse,
+  UpdateOrderPayload
 } from '../main/domain/types/electron-env'
 
 const api = {
@@ -32,6 +35,10 @@ const api = {
   getSession: () => ipcRenderer.invoke('auth:get-session'),
   getDashboardData: () => ipcRenderer.invoke('dashboard:getData'),
   getOrders: (searchParams, userId) => ipcRenderer.invoke('orders:getOrders', searchParams, userId),
+  createOrder: (payload: CreateOrderPayload) =>
+    ipcRenderer.invoke('orders:create', payload),
+  updateOrder: (payload: UpdateOrderPayload) =>
+    ipcRenderer.invoke('orders:update', payload),
   getUsers: (params: SearchParams) => ipcRenderer.invoke('users:getUsers', params),
   createUser: (input: CreateUserInput): Promise<CreateUserResponse> =>
     ipcRenderer.invoke('users:create', input),

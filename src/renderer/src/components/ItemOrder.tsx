@@ -6,6 +6,7 @@ import { ProductListItem } from '../../../main/domain/types/electron-env'
 interface ItemOrderProps {
   item: FormOrderItem
   isOnlyItem: boolean
+  selectedProductIds: number[] // Lista de IDs de productos ya seleccionados
   onUpdateItem: (id: string, updatedFields: Partial<FormOrderItem>) => void
   onRemoveItem: (id: string) => void
 }
@@ -13,6 +14,7 @@ interface ItemOrderProps {
 export function ItemOrder({
   item,
   isOnlyItem,
+  selectedProductIds,
   onUpdateItem,
   onRemoveItem,
 }: ItemOrderProps) {
@@ -27,6 +29,11 @@ export function ItemOrder({
     left: number
     width: number
   } | null>(null)
+
+  // Sincronizar el nombre si cambia la propiedad description externamente
+  useEffect(() => {
+    setSearchTerm(item.description || '')
+  }, [item.description])
 
   const updateDropdownPosition = (): void => {
     const input = inputRef.current
@@ -49,7 +56,7 @@ export function ItemOrder({
       setIsLoading(true)
       try {
         if (window.electronAPI?.getProducts) {
-          const res = await window.electronAPI?.getProducts({search: searchTerm, page: 1, sort: "nameDesc"})
+          const res = await window.electronAPI?.getProducts({ search: searchTerm, page: 1, sort: "nameDesc" })
           setProducts(res.data || [])
         }
       } catch (error) {
@@ -83,6 +90,12 @@ export function ItemOrder({
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  // Filtrar la lista de productos para no mostrar aquellos elegidos en otras filas
+  const availableProducts = products.filter(
+    (product) =>
+      Number(product.id) === item.productId || !selectedProductIds.includes(Number(product.id))
+  )
 
   const handleSelectProduct = (product: ProductListItem) => {
     setSearchTerm(product.name)
@@ -127,7 +140,6 @@ export function ItemOrder({
             }}
             onFocus={openDropdown}
             onBlur={() => {
-              // Retrasamos el cierre para permitir el evento click de la lista
               setTimeout(() => setIsOpen(false), 200)
             }}
           />
@@ -144,11 +156,9 @@ export function ItemOrder({
             >
               {isLoading ? (
                 <li className="px-4 py-2 text-xs text-slate-400">Buscando productos...</li>
-              ) : products.length > 0 ? (
-                products.map((product) => (
-                  <li
-                    key={product.id}
-                  >
+              ) : availableProducts.length > 0 ? (
+                availableProducts.map((product) => (
+                  <li key={product.id}>
                     <button
                       type="button"
                       onMouseDown={(event) => event.preventDefault()}
@@ -163,7 +173,9 @@ export function ItemOrder({
                   </li>
                 ))
               ) : (
-                <li className="px-4 py-2 text-xs text-slate-400">Sin resultados</li>
+                <li className="px-4 py-2 text-xs text-slate-400">
+                  {products.length > 0 ? "Producto ya seleccionado" : "Sin resultados"}
+                </li>
               )}
             </ul>,
             document.body

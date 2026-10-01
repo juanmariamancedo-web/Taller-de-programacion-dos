@@ -245,14 +245,55 @@ export interface ToggleClientStatusResponse {
   error?: string
 }
 
+// main/domain/types/electron-env.d.ts
+
+export interface OrderItemInput {
+  productId: number;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface CreateOrderPayload {
+  clientId: number;
+  sellerId?: number;
+  items: OrderItemInput[];
+  total: number;
+  notes?: string;
+}
+
+export interface CreateOrderResponse {
+  success: boolean;
+  orderId?: number;
+  message?: string;
+}
+
+// Payload para Actualizar Orden
+export interface UpdateOrderPayload {
+  id: number;
+  clientId: number;
+  sellerId: number;
+  items: OrderItemInput[];
+  total: number;
+  currentStateId?: number;
+}
+
+// Respuesta genérica de operación sobre orden
+export interface OrderMutationResponse {
+  success: boolean;
+  orderId?: number;
+  message?: string;
+}
+
 export type Unsubscribe = () => void
 
 export interface IElectronAPI {
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
   getDashboardData: () => Promise<DashboardDataResponse>
-  getOrders: (searchParams: SearchParams, userId?: number) => Promise<OrderResponse>
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
+  getOrders: (searchParams: SearchParams, userId?: number) => Promise<OrderResponse>
+  createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResponse>
+  updateOrder: (payload: UpdateOrderPayload) => Promise<OrderMutationResponse>;
   createUser: (input: CreateUserInput) => Promise<CreateUserResponse>
   getProvinces: () => Promise<ProvinceOption[]>
   createClient: (input: CreateClientInput) => Promise<CreateClientResponse>
