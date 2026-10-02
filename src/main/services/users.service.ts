@@ -1,19 +1,26 @@
 import { prisma } from '../infrastructure/db/prisma';
 import bcrypt from 'bcryptjs';
-import { CreateUserInput, SearchParams } from '../domain/types/electron-env';
+import { CreateUserInput, UpdateUserInput, SearchParams } from '../domain/types/electron-env';
 import { Prisma } from '../infrastructure/db/generated/client/client';
 
 export class UsersService {
   async createUser(input: CreateUserInput): Promise<{ id: string }> {
+    // Eliminamos cualquier espacio que pueda tener el username
+    const cleanUsername = input.username.replace(/\s+/g, '');
+
+    if (!cleanUsername) {
+      throw new Error('El nombre de usuario no puede estar vacío ni contener solo espacios.');
+    }
+
     const password = await bcrypt.hash(input.password, 10);
     const user = await prisma.user.create({
       data: {
-        username: input.username.trim(),
+        username: cleanUsername,
         roleId: BigInt(input.roleId),
         password,
-        isActive: input.isActive
+        isActive: input.isActive,
       },
-      select: { id: true }
+      select: { id: true },
     });
 
     return { id: user.id.toString() };
@@ -22,21 +29,22 @@ export class UsersService {
   async getUsers(searchParams?: SearchParams) {
     const page = searchParams?.page ?? 1;
     const limit = 5;
-    
-    const sortMap: Record<string, Prisma.UserOrderByWithRelationInput> = {
-          idAsc: { id: 'asc' },         
-          idDesc: { id: 'desc' },
-          usernameAsc: { username: "asc" },    
-          usernameDesc: { username: 'desc' },
-          activeAsc: { isActive: 'asc' },
-          activeDesc: { isActive: 'desc' },
-          roleAsc: { roleId: 'asc' }, 
-          roleDesc: { roleId: 'desc' },
-        };
 
-    const orderBy = (searchParams?.sort && sortMap[searchParams.sort])
-      ? sortMap[searchParams.sort]
-      : { createdAt: 'desc' as const };
+    const sortMap: Record<string, Prisma.UserOrderByWithRelationInput> = {
+      idAsc: { id: 'asc' },
+      idDesc: { id: 'desc' },
+      usernameAsc: { username: 'asc' },
+      usernameDesc: { username: 'desc' },
+      activeAsc: { isActive: 'asc' },
+      activeDesc: { isActive: 'desc' },
+      roleAsc: { roleId: 'asc' },
+      roleDesc: { roleId: 'desc' },
+    };
+
+    const orderBy =
+      searchParams?.sort && sortMap[searchParams.sort]
+        ? sortMap[searchParams.sort]
+        : { createdAt: 'desc' as const };
 
     const search = searchParams?.search?.trim();
 
@@ -47,37 +55,89 @@ export class UsersService {
             mode: 'insensitive',
           },
         }
-    : {};
+      : {};
 
     const [totalUsers, users] = await prisma.$transaction([
       prisma.user.count({ where }),
       prisma.user.findMany({
         skip: (page - 1) * limit,
-        take: 5,
+        take: limit,
         where,
         orderBy,
         include: {
           role: {
-              select: {
-                  name: true
-              }
-          }
-        }
-      })
-    ]) 
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      }),
+    ]);
 
-    // Cálculo del número de páginas
     const totalPages = Math.ceil(totalUsers / limit);
 
-
-    // Mapeamos los acampos que no sean serializables directamente por IPC
     return {
-      data: users.map(user => ({
-        ...user
+      data: users.map((user) => ({
+        ...user,
+        id: Number(user.id),
+        roleId: Number(user.roleId),
+        role: user.role ? { ...user.role, id: Number(user.role.id) } : null,
       })),
-      success: true, 
-      totalPages
+      success: true,
+      totalPages,
+    };
+  }
+
+  async updateUser(input: UpdateUserInput): Promise<{ success: boolean; message?: string }> {
+    const userId = BigInt(input.id);
+    
+    // Eliminamos cualquier espacio que pueda tener el username
+    const cleanUsername = input.username.replace(/\s+/g, '');
+
+    if (!cleanUsername) {
+      throw new Error('El nombre de usuario no puede estar vacío ni contener solo espacios.');
     }
+
+    const updateData: Prisma.UserUpdateInput = {
+      username: cleanUsername,
+      role: { connect: { id: BigInt(input.roleId) } },
+      isActive: input.isActive,
+    };
+
+    if (input.password && input.password.trim().length > 0) {
+      updateData.password = await bcrypt.hash(input.password, 10);
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+    });
+
+    return { success: true, message: 'Usuario actualizado exitosamente' };
+  }
+
+
+  async deleteUser(id: number | bigint): Promise<{ success: boolean; message?: string }> {
+    await prisma.user.delete({
+      where: { id: BigInt(id) },
+    });
+
+    return { success: true, message: 'Usuario eliminado correctamente' };
+  }
+
+  async getRoles() {
+    const roles = await prisma.userRole.findMany({
+      orderBy: { name: 'asc' },
+    });
+
+    return {
+      success: true,
+      data: roles.map((role) => ({
+        ...role,
+        id: Number(role.id),
+      })),
+    };
   }
 }
 
