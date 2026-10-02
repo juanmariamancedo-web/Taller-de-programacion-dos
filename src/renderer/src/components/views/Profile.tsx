@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
-import { setCurrentTab } from '../../store/slices/appSlice'
+import { setCurrentTab, setSession } from '../../store/slices/appSlice'
 import UserSuccess from '../UserSucces'
 import { Prisma } from '../../../../main/infrastructure/db/generated/client/client'
 
@@ -27,6 +27,17 @@ export default function Profile() {
     passwordRepeat: '',
   })
 
+  // Sincronizar estado local si la sesión cambia
+  useEffect(() => {
+    if (session) {
+      setFormData((prev) => ({
+        ...prev,
+        username: session.username,
+        roleId: session.roleId,
+      }))
+    }
+  }, [session])
+
   useEffect(() => {
     async function fetchRoles() {
       try {
@@ -47,10 +58,7 @@ export default function Profile() {
 
     setFormData((prev) => ({
       ...prev,
-      [name]:
-        name === 'username'
-          ? value.replace(/\s+/g, '') // Eliminación de espacios en tiempo real
-          : value,
+      [name]: name === 'username' ? value.replace(/\s+/g, '') : value,
     }))
   }
 
@@ -64,7 +72,6 @@ export default function Profile() {
 
     let hayErrores = false
 
-    // Validar nombre de usuario
     if (/\s/.test(formData.username)) {
       newErrors.username = 'El nombre de usuario no puede contener espacios'
       hayErrores = true
@@ -73,7 +80,6 @@ export default function Profile() {
       hayErrores = true
     }
 
-    // Si ingresó alguna nueva contraseña, exigir la contraseña previa y validación
     const isChangingPassword = formData.password.length > 0 || formData.passwordRepeat.length > 0
 
     if (isChangingPassword) {
@@ -100,10 +106,22 @@ export default function Profile() {
     setSaveError('')
 
     if (!checkErrors()) return
+    if (!session?.id) {
+      setSaveError('No se encontró una sesión activa válida.')
+      return
+    }
 
     try {
-      const payload: any = {
-        userId: session?.id,
+      // BigInt a String para evitar error de serialización IPC
+      const userId = typeof session.id === 'bigint' ? String(session.id) : String(session.id)
+
+      const payload: {
+        userId: string
+        username: string
+        prevPassword?: string
+        newPassword?: string
+      } = {
+        userId,
         username: formData.username,
       }
 
@@ -118,6 +136,14 @@ export default function Profile() {
         setSaveError(response?.message || 'No se pudo actualizar el perfil.')
         return
       }
+
+      // Sincronizar el estado de Redux con el nuevo username
+      dispatch(
+        setSession({
+          ...session,
+          username: formData.username,
+        })
+      )
 
       setSuccess(true)
     } catch (error) {
