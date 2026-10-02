@@ -318,6 +318,13 @@ export interface ProductCategoriesResponse {
   message?: string
 }
 
+export interface UpdateProfileInput {
+  userId: number | string
+  username: string
+  prevPassword?: string
+  newPassword?: string
+}
+
 export type Unsubscribe = () => void
 
 // --- INTERFAZ GLOBAL IPC (ELECTRON API) ---
@@ -332,6 +339,7 @@ export interface IElectronAPI {
   updateUser: (input: UpdateUserInput) => Promise<UpdateUserResponse>
   deleteUser: (id: number | bigint) => Promise<DeleteUserResponse>
   getRoles: () => Promise<RolesResponse>
+  updateProfile: (input: UpdateProfileInput) => Promise<ProfileResponse>
 
   // Órdenes
   getOrders: (searchParams: SearchParams, userId?: number) => Promise<OrderResponse>
