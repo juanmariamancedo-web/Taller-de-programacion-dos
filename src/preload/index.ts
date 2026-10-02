@@ -29,7 +29,8 @@ import {
   Unsubscribe, 
   CreateOrderPayload, 
   CreateOrderResponse,
-  UpdateOrderPayload
+  UpdateOrderPayload, 
+  UpdateProfileInput
 } from '../main/domain/types/electron-env'
 
 const api = {
@@ -54,6 +55,8 @@ const api = {
     ipcRenderer.invoke('users:delete', id),
   getRoles: (): Promise<RolesResponse> =>
     ipcRenderer.invoke('users:getRoles'),
+  updateProfile: (input: UpdateProfileInput) =>
+    ipcRenderer.invoke('users:update-profile', input),
 
   // --- MÓDULO DE CLIENTES Y DIRECCIONES ---
   getProvinces: (): Promise<ProvinceOption[]> => ipcRenderer.invoke('provinces:get-all'),

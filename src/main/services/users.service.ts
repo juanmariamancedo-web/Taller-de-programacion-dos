@@ -139,6 +139,52 @@ export class UsersService {
       })),
     };
   }
+
+  async updateProfile(input: {
+    userId: number | string;
+    username: string;
+    prevPassword?: string;
+    newPassword?: string;
+  }) {
+    const cleanUsername = input.username.replace(/\s+/g, '');
+
+    if (!cleanUsername || cleanUsername.length < 4) {
+      throw new Error('El nombre de usuario debe tener al menos 4 caracteres y sin espacios.');
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: BigInt(input.userId) },
+    });
+
+    if (!user) {
+      throw new Error('Usuario no encontrado.');
+    }
+
+    const updateData: any = {
+      username: cleanUsername,
+    };
+
+    // Si intenta cambiar la contraseña, validar la contraseña previa
+    if (input.newPassword) {
+      if (!input.prevPassword) {
+        throw new Error('Debes ingresar tu contraseña actual para cambiarla.');
+      }
+
+      const isMatch = await bcrypt.compare(input.prevPassword, user.password);
+      if (!isMatch) {
+        throw new Error('La contraseña actual es incorrecta.');
+      }
+
+      updateData.password = await bcrypt.hash(input.newPassword, 10);
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: updateData,
+    });
+
+    return { success: true, message: 'Perfil actualizado exitosamente' };
+  }
 }
 
 export const usersService = new UsersService();

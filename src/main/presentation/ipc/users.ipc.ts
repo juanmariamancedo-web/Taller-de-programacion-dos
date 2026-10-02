@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
 import { usersService } from '../../services/users.service';
-import { SearchParams, CreateUserInput, UpdateUserInput } from '../../domain/types/electron-env';
+import { SearchParams, CreateUserInput, UpdateUserInput, UpdateProfileInput } from '../../domain/types/electron-env';
 
 export function registerUserIPC(): void {
   // Crear usuario
@@ -83,4 +83,15 @@ export function registerUserIPC(): void {
       };
     }
   });
+  ipcMain.handle('users:update-profile', async (_event, input: UpdateProfileInput) => {
+    try {
+      const result = await usersService.updateProfile(input)
+      return result
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Error al actualizar el perfil',
+      }
+    }
+  })
 }
