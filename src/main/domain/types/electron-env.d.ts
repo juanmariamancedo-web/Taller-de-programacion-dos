@@ -8,10 +8,19 @@ export interface Credentials {
   password: string
 }
 
+// --- TIPOS DE USUARIO ---
 export interface CreateUserInput {
   username: string
   roleId: number
   password: string
+  isActive: boolean
+}
+
+export interface UpdateUserInput {
+  id: number | bigint
+  username: string
+  roleId: number
+  password?: string
   isActive: boolean
 }
 
@@ -21,6 +30,41 @@ export interface CreateUserResponse {
   error?: string
 }
 
+export interface UpdateUserResponse {
+  success: boolean
+  message?: string
+  error?: string
+}
+
+export interface DeleteUserResponse {
+  success: boolean
+  message?: string
+  error?: string
+}
+
+export interface UserListItem {
+  id: number | bigint
+  username: string
+  isActive: boolean
+  roleId: number
+  role?: {
+    id: number
+    name: string
+  }
+}
+
+export type UserWithRole = Prisma.UserGetPayload<{
+  include: { role: true }
+}>
+
+export interface UserResponse {
+  success: boolean
+  data?: UserListItem[]
+  message?: string
+  totalPages?: number
+}
+
+// --- TIPOS DE AUTENTICACIÓN Y SESIÓN ---
 export interface AuthResponse {
   success: boolean
   token?: string
@@ -41,6 +85,7 @@ export interface SearchParams {
   includeInactive?: boolean
 }
 
+// --- TIPOS DE ORDENES ---
 export interface OrderState {
   id: bigint
   name: string
@@ -57,6 +102,42 @@ export interface OrderResponse {
   totalPages?: number
 }
 
+export interface OrderItemInput {
+  productId: number
+  quantity: number
+  unitPrice: number
+}
+
+export interface CreateOrderPayload {
+  clientId: number
+  sellerId?: number
+  items: OrderItemInput[]
+  total: number
+  notes?: string
+}
+
+export interface CreateOrderResponse {
+  success: boolean
+  orderId?: number
+  message?: string
+}
+
+export interface UpdateOrderPayload {
+  id: number | bigint
+  clientId: number
+  sellerId: number
+  items: OrderItemInput[]
+  total: number
+  currentStateId?: number
+}
+
+export interface OrderMutationResponse {
+  success: boolean
+  orderId?: number
+  message?: string
+}
+
+// --- DASHBOARD ---
 export interface TopProduct {
   id: bigint
   name: string
@@ -80,17 +161,7 @@ export interface DashboardDataResponse {
   message?: string
 }
 
-export type UserWithRole = Prisma.UserGetPayload<{
-  include: { role: true }
-}>
-
-export interface UserResponse {
-  success: boolean
-  data?: UserWithRole[]
-  message?: string
-  totalPages?: number
-}
-
+// --- DIRECCIONES Y PROVINCIAS ---
 export type AddressWithCityAndClient = Prisma.AddressGetPayload<{
   include: { city: true; client: true }
 }>
@@ -104,7 +175,7 @@ export interface AddressResponse {
 
 export interface RolesResponse {
   success: boolean
-  data?: Prisma.UserRoleGetPayload<{}>
+  data?: Prisma.UserRoleGetPayload<{}>[]
   message?: string
 }
 
@@ -113,6 +184,7 @@ export interface ProvinceOption {
   name: string
 }
 
+// --- CLIENTES ---
 export interface CreateClientInput {
   name: string
   lastname: string
@@ -170,6 +242,18 @@ export interface DeleteClientResponse {
   error?: string
 }
 
+export interface ToggleClientStatusInput {
+  id: string
+  isActive: boolean
+}
+
+export interface ToggleClientStatusResponse {
+  success: boolean
+  data?: { id: string; isActive: boolean }
+  error?: string
+}
+
+// --- PRODUCTOS ---
 export type Product = Prisma.ProductGetPayload<{}>
 export type ItemOrder = Prisma.ItemOrderGetPayload<{}>
 
@@ -234,74 +318,44 @@ export interface ProductCategoriesResponse {
   message?: string
 }
 
-export interface ToggleClientStatusInput {
-  id: string
-  isActive: boolean
-}
-
-export interface ToggleClientStatusResponse {
-  success: boolean
-  data?: { id: string; isActive: boolean }
-  error?: string
-}
-
-// main/domain/types/electron-env.d.ts
-
-export interface OrderItemInput {
-  productId: number;
-  quantity: number;
-  unitPrice: number;
-}
-
-export interface CreateOrderPayload {
-  clientId: number;
-  sellerId?: number;
-  items: OrderItemInput[];
-  total: number;
-  notes?: string;
-}
-
-export interface CreateOrderResponse {
-  success: boolean;
-  orderId?: number;
-  message?: string;
-}
-
-// Payload para Actualizar Orden
-export interface UpdateOrderPayload {
-  id: number;
-  clientId: number;
-  sellerId: number;
-  items: OrderItemInput[];
-  total: number;
-  currentStateId?: number;
-}
-
-// Respuesta genérica de operación sobre orden
-export interface OrderMutationResponse {
-  success: boolean;
-  orderId?: number;
-  message?: string;
-}
-
 export type Unsubscribe = () => void
 
+// --- INTERFAZ GLOBAL IPC (ELECTRON API) ---
 export interface IElectronAPI {
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
   getDashboardData: () => Promise<DashboardDataResponse>
+  
+  // Usuarios
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
+  createUser: (input: CreateUserInput) => Promise<CreateUserResponse>
+  updateUser: (input: UpdateUserInput) => Promise<UpdateUserResponse>
+  deleteUser: (id: number | bigint) => Promise<DeleteUserResponse>
+  getRoles: () => Promise<RolesResponse>
+
+  // Órdenes
   getOrders: (searchParams: SearchParams, userId?: number) => Promise<OrderResponse>
   createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResponse>
-  updateOrder: (payload: UpdateOrderPayload) => Promise<OrderMutationResponse>;
-  createUser: (input: CreateUserInput) => Promise<CreateUserResponse>
+  updateOrder: (payload: UpdateOrderPayload) => Promise<OrderMutationResponse>
+
+  // Clientes y Direcciones
   getProvinces: () => Promise<ProvinceOption[]>
   createClient: (input: CreateClientInput) => Promise<CreateClientResponse>
   updateClient: (input: UpdateClientInput) => Promise<UpdateClientResponse>
   getClients: (searchParams: SearchParams) => Promise<ClientListResponse>
   deleteClient: (id: string) => Promise<DeleteClientResponse>
   setClientStatus: (input: ToggleClientStatusInput) => Promise<ToggleClientStatusResponse>
-  onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe
+  getAddresses: (clientId?: number | bigint, searchParams?: SearchParams) => Promise<AddressResponse>
+
+  // Productos
+  getProducts: (searchParams: SearchParams) => Promise<ProductsResponse>
+  getProductCategories: () => Promise<ProductCategoriesResponse>
+  createProduct: (input: ProductInput) => Promise<ProductMutationResponse>
+  updateProduct: (input: UpdateProductInput) => Promise<ProductMutationResponse>
+  setProductStatus: (input: ProductStatusInput) => Promise<ProductMutationResponse>
+  updateProductStock: (input: ProductStockInput) => Promise<ProductMutationResponse>
+
+  // Autenticación y Sesión
   login: (credentials: Credentials) => Promise<AuthResponse>
   logout: () => Promise<{ success: boolean }>
   getSession: () => Promise<{
@@ -311,14 +365,8 @@ export interface IElectronAPI {
     roleId: number
     roleName: string
   } | null>
-  getRoles: () => Promise<RolesResponse>
-  getAddresses: (clientId?: number | bigint, searchParams?: SearchParams) => Promise<AddressResponse>
-  getProducts: (searchParams: SearchParams) => Promise<ProductsResponse>
-  getProductCategories: () => Promise<ProductCategoriesResponse>
-  createProduct: (input: ProductInput) => Promise<ProductMutationResponse>
-  updateProduct: (input: UpdateProductInput) => Promise<ProductMutationResponse>
-  setProductStatus: (input: ProductStatusInput) => Promise<ProductMutationResponse>
-  updateProductStock: (input: ProductStockInput) => Promise<ProductMutationResponse>
+
+  onThemeChanged: (callback: (isDark: boolean) => void) => Unsubscribe
 }
 
 declare global {

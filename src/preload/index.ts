@@ -4,7 +4,10 @@ import {
   Credentials,
   AuthResponse,
   CreateUserInput,
+  UpdateUserInput,
   CreateUserResponse,
+  UpdateUserResponse,
+  DeleteUserResponse,
   SearchParams,
   ProvinceOption,
   CreateClientInput,
@@ -34,14 +37,25 @@ const api = {
     ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
   getDashboardData: () => ipcRenderer.invoke('dashboard:getData'),
-  getOrders: (searchParams, userId) => ipcRenderer.invoke('orders:getOrders', searchParams, userId),
+  getOrders: (searchParams?: SearchParams, userId?: number) => 
+    ipcRenderer.invoke('orders:getOrders', searchParams, userId),
   createOrder: (payload: CreateOrderPayload) =>
     ipcRenderer.invoke('orders:create', payload),
   updateOrder: (payload: UpdateOrderPayload) =>
     ipcRenderer.invoke('orders:update', payload),
+
+  // --- MÓDULO DE USUARIOS ---
   getUsers: (params: SearchParams) => ipcRenderer.invoke('users:getUsers', params),
   createUser: (input: CreateUserInput): Promise<CreateUserResponse> =>
     ipcRenderer.invoke('users:create', input),
+  updateUser: (input: UpdateUserInput): Promise<UpdateUserResponse> =>
+    ipcRenderer.invoke('users:update', input),
+  deleteUser: (id: number | bigint): Promise<DeleteUserResponse> =>
+    ipcRenderer.invoke('users:delete', id),
+  getRoles: (): Promise<RolesResponse> =>
+    ipcRenderer.invoke('users:getRoles'),
+
+  // --- MÓDULO DE CLIENTES Y DIRECCIONES ---
   getProvinces: (): Promise<ProvinceOption[]> => ipcRenderer.invoke('provinces:get-all'),
   createClient: (input: CreateClientInput): Promise<CreateClientResponse> =>
     ipcRenderer.invoke('clients:create', input),
@@ -53,28 +67,10 @@ const api = {
     ipcRenderer.invoke('clients:delete', id),
   setClientStatus: (input: ToggleClientStatusInput): Promise<ToggleClientStatusResponse> =>
     ipcRenderer.invoke('clients:set-status', input),
-  logout: () => ipcRenderer.invoke('auth:logout'),
-  setTheme: (theme: ThemeSource): Promise<boolean> =>
-    ipcRenderer.invoke('theme:set', theme),
-
-  getInitialTheme: (): Promise<'dark' | 'light'> => ipcRenderer.invoke('theme:get-initial'),
-
-  onThemeChanged: (callback: (isDark: boolean) => void): Unsubscribe => {
-    const subscription = (
-      _event: Electron.IpcRendererEvent,
-      isDark: boolean
-    ): void => callback(isDark)
-
-    ipcRenderer.on('theme-changed', subscription)
-
-    return () => {
-      ipcRenderer.removeListener('theme-changed', subscription)
-    }
-  }, 
-  getRoles: (): Promise<RolesResponse> =>
-    ipcRenderer.invoke('roles:getRoles'),
-  getAddresses: (clientId?: number, searchParams?: SearchParams) =>
+  getAddresses: (clientId?: number | bigint, searchParams?: SearchParams) =>
     ipcRenderer.invoke('address:getAddresses', clientId, searchParams),
+
+  // --- MÓDULO DE PRODUCTOS ---
   getProducts: (params: SearchParams): Promise<ProductsResponse> =>
     ipcRenderer.invoke('products:getProducts', params),
   getProductCategories: (): Promise<ProductCategoriesResponse> =>
@@ -87,6 +83,25 @@ const api = {
     ipcRenderer.invoke('products:set-status', input),
   updateProductStock: (input: ProductStockInput): Promise<ProductMutationResponse> =>
     ipcRenderer.invoke('products:update-stock', input),
+
+  // --- SISTEMA Y SESIÓN ---
+  logout: () => ipcRenderer.invoke('auth:logout'),
+  setTheme: (theme: ThemeSource): Promise<boolean> =>
+    ipcRenderer.invoke('theme:set', theme),
+  getInitialTheme: (): Promise<'dark' | 'light'> => 
+    ipcRenderer.invoke('theme:get-initial'),
+  onThemeChanged: (callback: (isDark: boolean) => void): Unsubscribe => {
+    const subscription = (
+      _event: Electron.IpcRendererEvent,
+      isDark: boolean
+    ): void => callback(isDark)
+
+    ipcRenderer.on('theme-changed', subscription)
+
+    return () => {
+      ipcRenderer.removeListener('theme-changed', subscription)
+    }
+  }, 
 }
 
 if (process.contextIsolated) {
@@ -96,6 +111,6 @@ if (process.contextIsolated) {
     console.error('Error al exponer electronAPI en Preload:', error)
   }
 } else {
-  // @ts-ignore (Fallback para desarrollo sin aislación de contexto)
+  // @ts-ignore
   window.electronAPI = api
 }
