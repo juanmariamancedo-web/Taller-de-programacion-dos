@@ -44,6 +44,8 @@ const api = {
     ipcRenderer.invoke('orders:create', payload),
   updateOrder: (payload: UpdateOrderPayload) =>
     ipcRenderer.invoke('orders:update', payload),
+  updateOrderState: (payload: { id: number | string; currentStateId: number; trackingNumber?: string; notes?: string }) =>
+    ipcRenderer.invoke('orders:updateState', payload),
 
   // --- MÓDULO DE USUARIOS ---
   getUsers: (params: SearchParams) => ipcRenderer.invoke('users:getUsers', params),

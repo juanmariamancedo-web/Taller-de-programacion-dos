@@ -1,5 +1,12 @@
 import { prisma } from '../infrastructure/db/prisma';
-import { SearchParams, CreateOrderPayload, CreateOrderResponse, UpdateOrderPayload, OrderMutationResponse } from '../domain/types/electron-env';
+import {
+  SearchParams,
+  CreateOrderPayload,
+  CreateOrderResponse,
+  UpdateOrderPayload,
+  OrderMutationResponse,
+  UpdateOrderStatePayload,
+} from '../domain/types/electron-env';
 import { Prisma } from '../infrastructure/db/generated/client/client';
 
 export interface UserSessionContext {
@@ -43,14 +50,14 @@ export class OrdersService {
       }),
     };
 
-    // 1. Filtro por Rol: Vendedor solo ve sus propias órdenes ("Mis Órdenes")
+    // 1. Vendedor: Solo ve sus propias órdenes ("Mis Órdenes")
     if (roleName === 'vendedor' && currentUserId) {
-      where.sellerId = currentUserId;
+      where.sellerId = BigInt(currentUserId);
     }
 
-    // 2. Filtro por Rol: Operador solo ve órdenes pendientes de preparación/despacho
+    // 2. Operador: Solo ve órdenes en flujo logístico activo
     if (roleName === 'operador') {
-      where.currentStateId = { in: [1, 2] }; // Ej: created, paid
+      where.currentStateId = { in: [BigInt(1), BigInt(2), BigInt(3), BigInt(4)] };
     }
 
     const [totalOrders, orders] = await prisma.$transaction([
@@ -77,6 +84,11 @@ export class OrdersService {
 
     const formattedOrders = orders.map((order) => ({
       ...order,
+      id: Number(order.id),
+      clientId: Number(order.clientId),
+      sellerId: Number(order.sellerId),
+      currentStateId: Number(order.currentStateId),
+      shippingAddressId: order.shippingAddressId ? Number(order.shippingAddressId) : null,
       items: order.itemOrders.map((item) => ({
         id: Number(item.id),
         productId: Number(item.productId),
@@ -86,12 +98,10 @@ export class OrdersService {
       })),
     }));
 
-    const totalPages = Math.ceil(totalOrders / limit);
-
     return {
       success: true,
       data: formattedOrders,
-      totalPages,
+      totalPages: Math.ceil(totalOrders / limit),
     };
   }
 
@@ -99,7 +109,6 @@ export class OrdersService {
     try {
       const roleName = sessionContext?.roleName?.toLowerCase();
 
-      // Operadores y Supervisores no generan órdenes directamente
       if (roleName === 'operador' || roleName === 'supervisor') {
         return {
           success: false,
@@ -108,7 +117,7 @@ export class OrdersService {
       }
 
       const clientId = Number(payload.clientId);
-      // Asignar automáticamente el ID del vendedor autenticado si es un perfil comercial
+      const shippingAddressId = payload.shippingAddressId ? Number(payload.shippingAddressId) : null;
       const sellerId = roleName === 'vendedor' ? Number(sessionContext?.userId) : Number(payload.sellerId);
       const { items, total } = payload;
 
@@ -122,19 +131,32 @@ export class OrdersService {
       const newOrder = await prisma.$transaction(async (tx) => {
         const order = await tx.order.create({
           data: {
-            clientId,
-            sellerId,
+            clientId: BigInt(clientId),
+            sellerId: BigInt(sellerId),
             total: Number(total),
-            currentStateId: 1, // Estado inicial (creado)
+            currentStateId: BigInt(1), // Estado borrador/creado
+            ...(shippingAddressId && { shippingAddressId: BigInt(shippingAddressId) }),
             itemOrders: {
               create: items.map((item) => ({
-                productId: Number(item.productId),
+                productId: BigInt(item.productId),
                 amount: Number(item.quantity),
                 unitPrice: Number(item.unitPrice),
               })),
             },
           },
         });
+
+        // Registro de auditoría inicial si existe dirección de envío
+        if (shippingAddressId) {
+          await tx.orderStatusHistory.create({
+            data: {
+              orderId: order.id,
+              stateId: BigInt(1),
+              addressId: BigInt(shippingAddressId),
+              notes: 'Creación de la orden de compra',
+            },
+          });
+        }
 
         return order;
       });
@@ -155,74 +177,91 @@ export class OrdersService {
 
   async updateOrder(payload: UpdateOrderPayload, sessionContext?: UserSessionContext): Promise<OrderMutationResponse> {
     try {
-      const { id, clientId, sellerId, items, total, currentStateId } = payload;
+      const { id, clientId, sellerId, shippingAddressId, items, total, currentStateId, trackingNumber } = payload;
       const roleName = sessionContext?.roleName?.toLowerCase();
-      const orderId = Number(id);
+      const orderId = BigInt(id);
 
-      // Obtener el estado actual de la orden
       const existingOrder = await prisma.order.findUnique({
         where: { id: orderId },
-        select: { currentStateId: true, sellerId: true },
       });
 
       if (!existingOrder) {
         return { success: false, message: 'La orden no existe' };
       }
 
-      // Restricciones por Rol al actualizar
+      // Vendedor: Solo puede editar sus propias órdenes y únicamente en estado borrador (1)
       if (roleName === 'vendedor') {
-        // Un vendedor solo puede editar sus propias órdenes
         if (Number(existingOrder.sellerId) !== Number(sessionContext?.userId)) {
           return { success: false, message: 'No tenés permisos para modificar órdenes de otros vendedores' };
         }
+        if (Number(existingOrder.currentStateId) !== 1) {
+          return { success: false, message: 'No podés editar una orden que ya inició procesamiento logístico' };
+        }
       }
 
+      // Operador: Redirige o limita la actualización al estado logístico
       if (roleName === 'operador') {
-        // El operador solo puede actualizar el estado logístico
         if (currentStateId) {
-          await prisma.order.update({
-            where: { id: orderId },
-            data: { currentStateId: Number(currentStateId) },
-          });
-          return { success: true, orderId, message: 'Estado logístico actualizado correctamente' };
+          return this.updateOrderState(
+            { id, currentStateId: Number(currentStateId), trackingNumber },
+            sessionContext
+          );
         }
         return { success: false, message: 'Los operadores solo pueden modificar el estado logístico de la orden' };
       }
 
-      // Restricción de Cancelación / Rechazo: Requiere permisos de Supervisor o Administrador
-      const REJECTED_STATE_ID = 5; // ID correspondiente a estado Cancelado/Rechazado
-      if (currentStateId === REJECTED_STATE_ID && roleName !== 'admin' && roleName !== 'supervisor') {
+      // Cancelación / Rechazo (ID 6): Requiere Supervisor o Administrador
+      const REJECTED_STATE_ID = 6;
+      if (currentStateId && Number(currentStateId) === REJECTED_STATE_ID && roleName !== 'admin' && roleName !== 'supervisor') {
         return {
           success: false,
           message: 'Se requieren permisos de Supervisor o Administrador para rechazar o cancelar una orden',
         };
       }
 
-      const parsedClientId = Number(clientId);
-      const parsedSellerId = Number(sellerId);
-      const parsedTotal = Number(total);
+      const parsedClientId = clientId ? BigInt(clientId) : existingOrder.clientId;
+      const parsedSellerId = sellerId ? BigInt(sellerId) : existingOrder.sellerId;
+      const parsedAddressId = shippingAddressId ? BigInt(shippingAddressId) : existingOrder.shippingAddressId;
+      const parsedTotal = total !== undefined ? Number(total) : Number(existingOrder.total);
 
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        await tx.itemOrder.deleteMany({
-          where: { orderId },
-        });
+        if (items && items.length > 0) {
+          await tx.itemOrder.deleteMany({
+            where: { orderId },
+          });
+        }
 
         const order = await tx.order.update({
           where: { id: orderId },
           data: {
             clientId: parsedClientId,
             sellerId: parsedSellerId,
+            shippingAddressId: parsedAddressId,
             total: parsedTotal,
-            ...(currentStateId && { currentStateId: Number(currentStateId) }),
-            itemOrders: {
-              create: items.map((item) => ({
-                productId: Number(item.productId),
-                amount: Number(item.quantity),
-                unitPrice: Number(item.unitPrice),
-              })),
-            },
+            ...(currentStateId && { currentStateId: BigInt(currentStateId) }),
+            ...(trackingNumber && { trackingNumber }),
+            ...(items && items.length > 0 && {
+              itemOrders: {
+                create: items.map((item) => ({
+                  productId: BigInt(item.productId),
+                  amount: Number(item.quantity),
+                  unitPrice: Number(item.unitPrice),
+                })),
+              },
+            }),
           },
         });
+
+        if (currentStateId && parsedAddressId) {
+          await tx.orderStatusHistory.create({
+            data: {
+              orderId,
+              stateId: BigInt(currentStateId),
+              addressId: parsedAddressId,
+              notes: payload.notes || `Modificación integral de orden por ${roleName}`,
+            },
+          });
+        }
 
         return order;
       });
@@ -237,6 +276,79 @@ export class OrdersService {
       return {
         success: false,
         message: err.message || 'Error al actualizar la orden en la base de datos',
+      };
+    }
+  }
+
+  async updateOrderState(
+    payload: UpdateOrderStatePayload,
+    sessionContext?: UserSessionContext
+  ): Promise<OrderMutationResponse> {
+    try {
+      const { id, currentStateId, trackingNumber, notes } = payload;
+      const roleName = sessionContext?.roleName?.toLowerCase();
+      const orderId = BigInt(id);
+
+      if (roleName === 'vendedor') {
+        return {
+          success: false,
+          message: 'Los vendedores no tienen permisos para modificar el estado logístico.',
+        };
+      }
+
+      const REJECTED_STATE_ID = 6;
+      if (Number(currentStateId) === REJECTED_STATE_ID && roleName !== 'admin' && roleName !== 'supervisor') {
+        return {
+          success: false,
+          message: 'Se requieren permisos de Supervisor o Administrador para rechazar o cancelar una orden.',
+        };
+      }
+
+      const updatedOrder = await prisma.$transaction(async (tx) => {
+        const order = await tx.order.findUnique({
+          where: { id: orderId },
+        });
+
+        if (!order) {
+          throw new Error('La orden especificada no existe.');
+        }
+
+        if (Number(currentStateId) >= 3 && !trackingNumber && !order.trackingNumber) {
+          throw new Error('El número de seguimiento (tracking number) es obligatorio al despachar el paquete.');
+        }
+
+        const updated = await tx.order.update({
+          where: { id: orderId },
+          data: {
+            currentStateId: BigInt(currentStateId),
+            ...(trackingNumber && { trackingNumber }),
+          },
+        });
+
+        if (order.shippingAddressId) {
+          await tx.orderStatusHistory.create({
+            data: {
+              orderId: order.id,
+              stateId: BigInt(currentStateId),
+              addressId: order.shippingAddressId,
+              notes: notes || `Estado actualizado a ID ${currentStateId} por ${roleName}`,
+            },
+          });
+        }
+
+        return updated;
+      });
+
+      return {
+        success: true,
+        orderId: Number(updatedOrder.id),
+        message: 'Estado logístico e historial actualizados correctamente.',
+      };
+    } catch (err: any) {
+      console.error('Error en updateOrderState:', err);
+      return {
+        success: false,
+        message: err.message || 'Error al actualizar el estado logístico de la orden.',
       };
     }
   }

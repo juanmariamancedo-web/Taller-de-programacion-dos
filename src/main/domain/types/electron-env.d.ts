@@ -108,28 +108,12 @@ export interface OrderItemInput {
   unitPrice: number
 }
 
-export interface CreateOrderPayload {
-  clientId: number
-  sellerId?: number
-  items: OrderItemInput[]
-  total: number
-  notes?: string
-}
-
 export interface CreateOrderResponse {
   success: boolean
   orderId?: number
   message?: string
 }
 
-export interface UpdateOrderPayload {
-  id: number | bigint
-  clientId: number
-  sellerId: number
-  items: OrderItemInput[]
-  total: number
-  currentStateId?: number
-}
 
 export interface OrderMutationResponse {
   success: boolean
@@ -325,6 +309,41 @@ export interface UpdateProfileInput {
   newPassword?: string
 }
 
+export interface UpdateOrderStatePayload {
+  id: number | string
+  currentStateId: number
+  trackingNumber?: string
+  notes?: string
+}
+
+export interface CreateOrderPayload {
+  clientId: number | string;
+  sellerId?: number | string;
+  shippingAddressId?: number | string; // <-- Agregar esta línea
+  total: number;
+  items: Array<{
+    productId: number;
+    quantity: number;
+    unitPrice: number;
+  }>;
+}
+
+export interface UpdateOrderPayload {
+  id: number | string;
+  clientId?: number | string;
+  sellerId?: number | string;
+  shippingAddressId?: number | string; // <-- Agregar
+  currentStateId?: number | string;
+  trackingNumber?: string;             // <-- Agregar
+  total?: number;
+  items?: Array<{
+    productId: number;
+    quantity: number;
+    unitPrice: number;
+  }>;
+  notes?: string;
+}
+
 export type Unsubscribe = () => void
 
 // --- INTERFAZ GLOBAL IPC (ELECTRON API) ---
@@ -345,7 +364,8 @@ export interface IElectronAPI {
   getOrders: (searchParams?: SearchParams) => Promise<OrderResponse>;
   createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResponse>;
   updateOrder: (payload: UpdateOrderPayload) => Promise<OrderMutationResponse>;
-  
+  updateOrderState: (payload: UpdateOrderStatePayload) => Promise<OrderMutationResponse>
+
   // Clientes y Direcciones
   getProvinces: () => Promise<ProvinceOption[]>
   createClient: (input: CreateClientInput) => Promise<CreateClientResponse>

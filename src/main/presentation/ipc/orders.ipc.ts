@@ -69,4 +69,22 @@ export function registerOrderIPC(): void {
       };
     }
   });
+    ipcMain.handle('orders:updateState', async (_event, payload: { id: number | string; currentStateId: number; trackingNumber?: string; notes?: string }) => {
+        try {
+            const session = await authService.getActiveSession()
+
+            const sessionContext = session ? {
+            userId: Number(session.id),
+            roleName: session.roleName,
+            } : undefined
+
+            return await ordersService.updateOrderState(payload, sessionContext)
+        } catch (error) {
+            console.error('Failed to update order state:', error)
+            return {
+            success: false,
+            message: error instanceof Error ? error.message : 'Error al cambiar el estado logístico',
+            }
+        }
+    })
 }
