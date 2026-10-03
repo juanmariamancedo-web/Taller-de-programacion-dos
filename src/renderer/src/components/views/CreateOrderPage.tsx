@@ -22,10 +22,22 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const dispatch = useAppDispatch()
   const session = useAppSelector((state) => state.app.session)
 
-  // 1. Estado local de IDs
+  // Identificación de rol de usuario
+  const roleName = session?.roleName?.toLowerCase() || ''
+  const isVendedor = roleName === 'vendedor' || session?.roleId === 3
+  const isOperador = roleName === 'operador' || session?.roleId === 2
+  const isSupervisor = roleName === 'supervisor' || session?.roleId === 4
+  const isAdmin = roleName === 'admin' || session?.roleId === 1
+
+  // Si editamos una orden existente y somos Operadores, solo gestionamos el estado logístico
+  const isReadOnlyDetails = isOperador && Boolean(initialOrder?.id)
+
+  // 1. Estado local de IDs y Estado Logístico
   const [formData, setFormData] = useState({
     clientId: initialOrder?.client?.id != null ? Number(initialOrder.client.id) : -1,
     shippingAddressId: initialOrder?.shippingAddressId != null ? Number(initialOrder.shippingAddressId) : -1,
+    currentStateId: initialOrder?.currentState?.id != null ? Number(initialOrder.currentState.id) : 1,
+    trackingNumber: '',
   })
 
   // 2. Hooks de búsqueda de Clientes y Direcciones
@@ -55,8 +67,14 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     if (initialOrder?.id) {
       const clientId = initialOrder.client?.id != null ? Number(initialOrder.client.id) : -1
       const shippingAddressId = initialOrder.shippingAddressId != null ? Number(initialOrder.shippingAddressId) : -1
+      const currentStateId = initialOrder.currentState?.id != null ? Number(initialOrder.currentState.id) : 1
 
-      setFormData({ clientId, shippingAddressId })
+      setFormData({
+        clientId,
+        shippingAddressId,
+        currentStateId,
+        trackingNumber: '',
+      })
 
       if (initialOrder.client) {
         setSearchTermClients(`${initialOrder.client.name} ${initialOrder.client.lastname}`)
@@ -81,7 +99,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         )
       }
     } else {
-      setFormData({ clientId: -1, shippingAddressId: -1 })
+      setFormData({ clientId: -1, shippingAddressId: -1, currentStateId: 1, trackingNumber: '' })
       setSearchTermClients("")
       setSearchTermAddress("")
       setItems([{ id: crypto.randomUUID(), productId: 0, description: "", quantity: 1, unitPrice: 0 }])
@@ -90,6 +108,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   // Handlers para ítems
   const handleAddItem = () => {
+    if (isReadOnlyDetails) return
     setItems((prev) => [
       ...prev,
       { id: crypto.randomUUID(), productId: 0, description: "", quantity: 1, unitPrice: 0 },
@@ -97,11 +116,12 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   }
 
   const handleRemoveItem = (id: string) => {
-    if (items.length === 1) return
+    if (isReadOnlyDetails || items.length === 1) return
     setItems((prev) => prev.filter((item) => item.id !== id))
   }
 
   const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) => {
+    if (isReadOnlyDetails) return
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item))
     )
@@ -133,16 +153,20 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (formData.clientId <= 0) return alert("Debe seleccionar un cliente")
-    if (formData.shippingAddressId <= 0) return alert("Debe seleccionar una dirección")
-    if (items.some((i) => i.productId <= 0)) return alert("Todos los ítems deben tener un producto seleccionado")
+    if (!isReadOnlyDetails) {
+      if (formData.clientId <= 0) return alert("Debe seleccionar un cliente")
+      if (formData.shippingAddressId <= 0) return alert("Debe seleccionar una dirección")
+      if (items.some((i) => i.productId <= 0)) return alert("Todos los ítems deben tener un producto seleccionado")
+    }
 
-    const sellerId = session?.id ? Number(session.id) : 0
+    const sellerId = isVendedor ? Number(session?.id) : Number(initialOrder?.sellerId || session?.id || 0)
 
     const payload = {
       clientId: formData.clientId,
       shippingAddressId: formData.shippingAddressId,
       sellerId: sellerId,
+      currentStateId: formData.currentStateId,
+      trackingNumber: formData.trackingNumber,
       total: total,
       items: items.map((i) => ({
         productId: i.productId,
@@ -154,7 +178,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     try {
       if (initialOrder?.id) {
         await window.electronAPI?.updateOrder?.({
-          id: BigInt(initialOrder.id),
+          id: String(initialOrder.id),
           ...payload,
         } as any)
       } else {
@@ -176,11 +200,17 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            {initialOrder?.id ? `Editar Órden #${initialOrder.id}` : "Nueva Órden"}
+            {initialOrder?.id
+              ? isOperador
+                ? `Gestión Logística - Orden #${initialOrder.id}`
+                : `Editar Órden #${initialOrder.id}`
+              : "Nueva Órden"}
           </h1>
           <p className="text-gray-500 text-sm mt-1">
             {initialOrder?.id
-              ? "Modifica los datos necesarios de la orden existente."
+              ? isOperador
+                ? "Actualiza el estado logístico y datos de despacho."
+                : "Modifica los datos necesarios de la orden existente."
               : "Ingresá los datos necesarios para registrar una nueva orden."}
           </p>
         </div>
@@ -194,6 +224,44 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       </div>
 
       <form onSubmit={handleSubmit} className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm">
+        
+        {/* Sección de Gestión Logística (Operador, Supervisor y Admin al editar) */}
+        {(isOperador || isSupervisor || isAdmin) && initialOrder?.id && (
+          <div className="rounded-xl bg-blue-50/50 p-4 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Estado Logístico
+              </label>
+              <select
+                value={formData.currentStateId}
+                onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))}
+                className={inputClass}
+              >
+                <option value={1}>Creada / Pendiente</option>
+                <option value={2}>Pagada (Paid)</option>
+                <option value={3}>Despachado (Dispatched)</option>
+                <option value={4}>En Camino (In Transit)</option>
+                <option value={5}>Entregado (Delivered)</option>
+                {(isSupervisor || isAdmin) && <option value={6}>Rechazado / Cancelado</option>}
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                Número de Seguimiento (Tracking)
+              </label>
+              <input
+                type="text"
+                value={formData.trackingNumber}
+                onChange={(e) => setFormData((prev) => ({ ...prev, trackingNumber: e.target.value }))}
+                placeholder="Ej. TRK-98234123"
+                className={inputClass}
+                required={isOperador && formData.currentStateId >= 3}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Desplegables de Cliente y Dirección */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           {/* Selector de Cliente */}
@@ -203,14 +271,15 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             </label>
             <input
               type="text"
-              className={inputClass}
+              disabled={isReadOnlyDetails}
+              className={`${inputClass} ${isReadOnlyDetails ? "cursor-not-allowed opacity-60" : ""}`}
               placeholder="Buscar cliente por nombre o DNI..."
               value={searchTermClients}
               onChange={(e) => setSearchTermClients(e.target.value)}
-              onFocus={() => setIsOpenClients(true)}
+              onFocus={() => !isReadOnlyDetails && setIsOpenClients(true)}
               onBlur={() => setTimeout(() => setIsOpenClients(false), 200)}
             />
-            {isOpenClients && (
+            {isOpenClients && !isReadOnlyDetails && (
               <ul className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 text-gray-900 dark:text-white">
                 {clients.length > 0 ? (
                   clients.map((client) => (
@@ -240,15 +309,15 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             </label>
             <input
               type="text"
-              disabled={formData.clientId <= 0}
-              className={`${inputClass} ${formData.clientId <= 0 ? "cursor-not-allowed opacity-60" : ""}`}
+              disabled={isReadOnlyDetails || formData.clientId <= 0}
+              className={`${inputClass} ${(isReadOnlyDetails || formData.clientId <= 0) ? "cursor-not-allowed opacity-60" : ""}`}
               placeholder={formData.clientId > 0 ? "Buscar dirección..." : "Selecciona un cliente primero"}
               value={searchTermAddress}
               onChange={(e) => setSearchTermAddress(e.target.value)}
-              onFocus={() => formData.clientId > 0 && setIsOpenAddress(true)}
+              onFocus={() => !isReadOnlyDetails && formData.clientId > 0 && setIsOpenAddress(true)}
               onBlur={() => setTimeout(() => setIsOpenAddress(false), 200)}
             />
-            {isOpenAddress && formData.clientId > 0 && (
+            {isOpenAddress && !isReadOnlyDetails && formData.clientId > 0 && (
               <ul className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 text-gray-900 dark:text-white">
                 {addresses.length > 0 ? (
                   addresses.map((ubic) => (
@@ -274,17 +343,19 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           </div>
         </div>
 
-        {/* Tabla de Productos utilizando el componente ItemOrder con su buscador interno */}
+        {/* Tabla de Productos utilizando el componente ItemOrder */}
         <div className="mt-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">Items de la Orden</h2>
-            <button
-              type="button"
-              onClick={handleAddItem}
-              className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-100 dark:border-white/10 dark:bg-white/5 dark:text-gray-200 dark:hover:bg-white/10"
-            >
-              + Agregar Ítem
-            </button>
+            {!isReadOnlyDetails && (
+              <button
+                type="button"
+                onClick={handleAddItem}
+                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-100 dark:border-white/10 dark:bg-white/5 dark:text-gray-200 dark:hover:bg-white/10"
+              >
+                + Agregar Ítem
+              </button>
+            )}
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-white/10">
@@ -303,7 +374,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                   <ItemOrder
                     key={item.id}
                     item={item}
-                    isOnlyItem={items.length === 1}
+                    isOnlyItem={items.length === 1 || isReadOnlyDetails}
                     selectedProductIds={items
                       .map((i) => i.productId)
                       .filter((id) => id > 0)}
@@ -338,7 +409,11 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             type="submit"
             className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
           >
-            {initialOrder?.id ? "Actualizar Orden" : "Guardar Orden"}
+            {isReadOnlyDetails
+              ? "Actualizar Estado Logístico"
+              : initialOrder?.id
+              ? "Actualizar Orden"
+              : "Guardar Orden"}
           </button>
         </div>
       </form>

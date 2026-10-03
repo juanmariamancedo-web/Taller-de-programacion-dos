@@ -1,32 +1,72 @@
 import { ipcMain } from 'electron';
 import { ordersService } from '../../services/orders.service';
-import { CreateOrderPayload, UpdateOrderPayload } from '../../domain/types/electron-env';
+import { authService } from '../../services/auth.service'; // Tu servicio de auth/sesión
+import { SearchParams, CreateOrderPayload, UpdateOrderPayload } from '../../domain/types/electron-env';
 
 export function registerOrderIPC(): void {
-    ipcMain.handle('orders:getOrders', async (event, searchParams, userId) => {
-        try {
-            const rawData = await ordersService.getOrders(searchParams, userId);
-            
-            // Convierte Decimal, BigInt y Date a tipos primitivos JSON planos (string/number)
-            const data = JSON.parse(
-            JSON.stringify(rawData, (_key, value) =>
-                typeof value === 'bigint' ? value.toString() : value
-            )
-            );
+  // Obtener órdenes según rol
+  ipcMain.handle('orders:getOrders', async (_event, searchParams: SearchParams) => {
+    try {
+      const session = await authService.getActiveSession();
+      
+      const sessionContext = session ? {
+        userId: Number(session.id),
+        roleName: session.roleName,
+      } : undefined;
 
-            return data;
-        } catch (error) {
-            console.error('Failed to fetch orders:', error);
-            return { 
-                success: false, 
-                message: error instanceof Error ? error.message : 'Unknown error occurred' 
-            };
-        }
-    });
-    ipcMain.handle('orders:create', async (_event, payload: CreateOrderPayload) => {
-        return await ordersService.createOrder(payload);
-    });
-    ipcMain.handle('orders:update', async (_event, payload: UpdateOrderPayload) => {
-        return await ordersService.updateOrder(payload);
-    });
+      const rawData = await ordersService.getOrders(searchParams, sessionContext);
+
+      return JSON.parse(
+        JSON.stringify(rawData, (_key, value) =>
+          typeof value === 'bigint' ? value.toString() : value
+        )
+      );
+    } catch (error) {
+      console.error('Failed to fetch orders:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Error al obtener órdenes',
+      };
+    }
+  });
+
+  // Crear orden validando rol
+  ipcMain.handle('orders:create', async (_event, payload: CreateOrderPayload) => {
+    try {
+      const session = await authService.getActiveSession();
+
+      const sessionContext = session ? {
+        userId: Number(session.id),
+        roleName: session.roleName,
+      } : undefined;
+
+      return await ordersService.createOrder(payload, sessionContext);
+    } catch (error) {
+      console.error('Failed to create order:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Error al crear la orden',
+      };
+    }
+  });
+
+  // Actualizar orden / estado logístico según rol
+  ipcMain.handle('orders:update', async (_event, payload: UpdateOrderPayload) => {
+    try {
+      const session = await authService.getActiveSession();
+
+      const sessionContext = session ? {
+        userId: Number(session.id),
+        roleName: session.roleName,
+      } : undefined;
+
+      return await ordersService.updateOrder(payload, sessionContext);
+    } catch (error) {
+      console.error('Failed to update order:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Error al actualizar la orden',
+      };
+    }
+  });
 }

@@ -38,8 +38,8 @@ const api = {
     ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
   getDashboardData: () => ipcRenderer.invoke('dashboard:getData'),
-  getOrders: (searchParams?: SearchParams, userId?: number) => 
-    ipcRenderer.invoke('orders:getOrders', searchParams, userId),
+  getOrders: (searchParams?: SearchParams) => 
+    ipcRenderer.invoke('orders:getOrders', searchParams),
   createOrder: (payload: CreateOrderPayload) =>
     ipcRenderer.invoke('orders:create', payload),
   updateOrder: (payload: UpdateOrderPayload) =>

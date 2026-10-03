@@ -342,10 +342,10 @@ export interface IElectronAPI {
   updateProfile: (input: UpdateProfileInput) => Promise<ProfileResponse>
 
   // Órdenes
-  getOrders: (searchParams: SearchParams, userId?: number) => Promise<OrderResponse>
-  createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResponse>
-  updateOrder: (payload: UpdateOrderPayload) => Promise<OrderMutationResponse>
-
+  getOrders: (searchParams?: SearchParams) => Promise<OrderResponse>;
+  createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResponse>;
+  updateOrder: (payload: UpdateOrderPayload) => Promise<OrderMutationResponse>;
+  
   // Clientes y Direcciones
   getProvinces: () => Promise<ProvinceOption[]>
   createClient: (input: CreateClientInput) => Promise<CreateClientResponse>
