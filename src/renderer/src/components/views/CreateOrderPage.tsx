@@ -167,8 +167,10 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       return alert("Esta orden ya fue procesada y se encuentra en modo de solo lectura.")
     }
 
-    // 1. Operador gestionando estado logístico
-    if (isOperador && initialOrder?.id) {
+    // 1. Gestión de Estado Logístico (Operador, Supervisor o Admin editando una orden existente)
+    const isLogisticsAction = (isOperador || isSupervisor || isAdmin) && Boolean(initialOrder?.id)
+
+    if (isLogisticsAction && initialOrder?.id) {
       if (formData.currentStateId >= 3 && !formData.trackingNumber.trim()) {
         return alert("El número de seguimiento (tracking) es obligatorio para despachar la orden.")
       }
@@ -177,7 +179,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         const response = await window.electronAPI?.updateOrderState?.({
           id: String(initialOrder.id),
           currentStateId: formData.currentStateId,
-          trackingNumber: formData.trackingNumber,
+          trackingNumber: formData.trackingNumber.trim(),
           location: formData.location.trim() || undefined,
           notes: formData.notes.trim() || undefined,
         } as any)
@@ -189,15 +191,15 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         dispatch(setOrderToEdit(null))
         setTimeout(() => {
           dispatch(setCurrentTab("orders"))
-        }, 100)
+        }, 150)
+        return
       } catch (err) {
         console.error("Error al actualizar estado logístico:", err)
-        alert("Ocurrió un error inesperado al actualizar el estado de la orden.")
+        return alert("Ocurrió un error inesperado al actualizar el estado de la orden.")
       }
-      return
     }
 
-    // 2. Creación / Edición estándar (Vendedor en estado 1, Admin, Supervisor)
+    // 2. Creación / Edición Comercial Integral (Vendedor en borrador 1 o Creación Nueva)
     if (formData.clientId <= 0) return alert("Debe seleccionar un cliente")
     if (formData.shippingAddressId <= 0) return alert("Debe seleccionar una dirección")
     if (items.some((i) => i.productId <= 0)) return alert("Todos los ítems deben tener un producto seleccionado")
@@ -239,7 +241,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       dispatch(setOrderToEdit(null))
       setTimeout(() => {
         dispatch(setCurrentTab("orders"))
-      }, 100)
+      }, 150)
     } catch (err) {
       console.error("Error al guardar la orden:", err)
       alert("Error de comunicación con el proceso principal de Electron.")
@@ -297,17 +299,23 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
                   Estado Logístico
                 </label>
-                <select
+               <select
                   value={formData.currentStateId}
                   onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))}
                   className={inputClass}
                 >
-                  <option value={1}>Creada / Pendiente</option>
-                  <option value={2}>Pagada (Paid)</option>
-                  <option value={3}>Despachado (Dispatched)</option>
-                  <option value={4}>En Camino (In Transit)</option>
-                  <option value={5}>Entregado (Delivered)</option>
-                  {(isSupervisor || isAdmin) && <option value={6}>Rechazado / Cancelado</option>}
+                  <option value={1}>Creada / Borrador (created)</option>
+                  <option value={2}>Pendiente (pending)</option>
+                  <option value={3}>Pagada (paid)</option>
+                  <option value={4}>Despachado (dispatched)</option>
+                  <option value={5}>En Camino (in_transit)</option>
+                  <option value={6}>Entregado (delivered)</option>
+                  {(isSupervisor || isAdmin) && (
+                    <>
+                      <option value={7}>Rechazado / Cancelado (rejected)</option>
+                      <option value={8}>Error de Stock (stock_error)</option>
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -537,7 +545,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
               type="submit"
               className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
             >
-              {isOperador
+              {initialOrder?.id && (isOperador || isSupervisor || isAdmin)
                 ? "Actualizar Estado Logístico"
                 : initialOrder?.id
                 ? "Actualizar Orden"

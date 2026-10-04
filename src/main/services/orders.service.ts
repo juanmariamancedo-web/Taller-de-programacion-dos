@@ -79,7 +79,7 @@ export class OrdersService {
             },
           },
           orderStatusHistory: {
-            orderBy: { createdAt: 'asc' },
+            orderBy: { id: 'asc' }, // Orden secuencial estricto por ID
             include: {
               state: { select: { id: true, name: true } },
               address: { include: { city: true } },
@@ -163,14 +163,14 @@ export class OrdersService {
           },
         });
 
-        // Registro de auditoría inicial e hito de origen
+        // Hito inicial único al crear la orden
         if (shippingAddressId) {
           await tx.orderStatusHistory.create({
             data: {
               orderId: order.id,
               stateId: BigInt(1),
               addressId: BigInt(shippingAddressId),
-              notes: 'Creación de la orden de compra y registro de dirección de despacho',
+              notes: 'Creación de la orden de compra',
             },
           });
         }
@@ -216,7 +216,7 @@ export class OrdersService {
         }
       }
 
-      // Operador: Redirige o limita la actualización al estado logístico
+      // Operador: Redirige al método logístico
       if (roleName === 'operador') {
         if (currentStateId) {
           return this.updateOrderState(
@@ -227,7 +227,7 @@ export class OrdersService {
         return { success: false, message: 'Los operadores solo pueden modificar el estado logístico de la orden' };
       }
 
-      // Cancelación / Rechazo (ID 6): Requiere Supervisor o Administrador
+      // Cancelación / Rechazo (ID 6)
       const REJECTED_STATE_ID = 6;
       if (currentStateId && Number(currentStateId) === REJECTED_STATE_ID && roleName !== 'admin' && roleName !== 'supervisor') {
         return {
@@ -270,14 +270,29 @@ export class OrdersService {
         });
 
         if (currentStateId && parsedAddressId) {
-          await tx.orderStatusHistory.create({
-            data: {
-              orderId,
-              stateId: BigInt(currentStateId),
-              addressId: parsedAddressId,
-              notes: payload.notes || `Modificación integral de orden por ${roleName}`,
-            },
+          // Obtener el último hito ingresado ordenado por ID estrictamente decreciente
+          const lastHistory = await tx.orderStatusHistory.findFirst({
+            where: { orderId },
+            orderBy: { id: 'desc' },
           });
+
+          const targetStateId = Number(currentStateId);
+          const lastStateId = lastHistory ? Number(lastHistory.stateId) : Number(existingOrder.currentStateId);
+          
+          const isSameState = lastStateId === targetStateId;
+          const hasNewInfo = Boolean((payload as any).location?.trim() || payload.notes?.trim());
+
+          // Solo inserta si hay cambio de estado o si se incluye ubicación/nota nueva
+          if (!isSameState || hasNewInfo) {
+            await tx.orderStatusHistory.create({
+              data: {
+                orderId,
+                stateId: BigInt(targetStateId),
+                addressId: parsedAddressId,
+                notes: payload.notes || `Modificación integral de orden por ${roleName}`,
+              },
+            });
+          }
         }
 
         return order;
@@ -296,7 +311,6 @@ export class OrdersService {
       };
     }
   }
-
   async updateOrderState(
     payload: UpdateOrderStatePayload & { location?: string },
     sessionContext?: UserSessionContext
@@ -305,6 +319,7 @@ export class OrdersService {
       const { id, currentStateId, trackingNumber, notes, location } = payload;
       const roleName = sessionContext?.roleName?.toLowerCase();
       const orderId = BigInt(id);
+      const targetStateId = BigInt(currentStateId);
 
       if (roleName === 'vendedor') {
         return {
@@ -313,46 +328,36 @@ export class OrdersService {
         };
       }
 
-      const REJECTED_STATE_ID = 6;
-      if (Number(currentStateId) === REJECTED_STATE_ID && roleName !== 'admin' && roleName !== 'supervisor') {
-        return {
-          success: false,
-          message: 'Se requieren permisos de Supervisor o Administrador para rechazar o cancelar una orden.',
-        };
-      }
-
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        const order = await tx.order.findUnique({
+        const existingOrder = await tx.order.findUnique({
           where: { id: orderId },
         });
 
-        if (!order) {
+        if (!existingOrder) {
           throw new Error('La orden especificada no existe.');
         }
 
-        if (Number(currentStateId) >= 3 && !trackingNumber && !order.trackingNumber) {
-          throw new Error('El número de seguimiento (tracking number) es obligatorio al despachar el paquete.');
-        }
-
+        // 1. Actualizar la orden con el ID exacto que seleccionó el usuario
         const updated = await tx.order.update({
           where: { id: orderId },
           data: {
-            currentStateId: BigInt(currentStateId),
+            currentStateId: targetStateId,
             ...(trackingNumber && { trackingNumber }),
           },
         });
 
-        if (order.shippingAddressId) {
-          // Asigna notas o ubicación enviada desde el formulario logístico
-          const historyNote = location
-            ? `Ubicación: ${location}. ${notes ?? ''}`.trim()
-            : notes || `Estado actualizado a ID ${currentStateId} por ${roleName}`;
+        // 2. Armar la nota
+        const historyNote = location?.trim()
+          ? `Ubicación: ${location.trim()}.${notes?.trim() ? ` ${notes.trim()}` : ''}`
+          : notes?.trim() || `Estado actualizado por ${roleName}`;
 
+        // 3. Insertar el historial vinculado al targetStateId
+        if (updated.shippingAddressId) {
           await tx.orderStatusHistory.create({
             data: {
-              orderId: order.id,
-              stateId: BigInt(currentStateId),
-              addressId: order.shippingAddressId,
+              orderId: updated.id,
+              stateId: targetStateId, // <-- Asegura guardar el ID que seleccionaste
+              addressId: updated.shippingAddressId,
               notes: historyNote,
             },
           });
@@ -364,7 +369,7 @@ export class OrdersService {
       return {
         success: true,
         orderId: Number(updatedOrder.id),
-        message: 'Estado logístico e historial de ubicación actualizados correctamente.',
+        message: 'Estado logístico e historial actualizados correctamente.',
       };
     } catch (err: any) {
       console.error('Error en updateOrderState:', err);
