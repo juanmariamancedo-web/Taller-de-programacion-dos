@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { useAppDispatch, useAppSelector } from "../../store/hooks"
+import { useAppDispatch } from "../../store/hooks"
 import { setCurrentTab, setOrderToEdit } from "../../store/slices/appSlice"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
 import { useSeletedAddressOnOrder } from "../../hooks/useSeletedAddressOnOrder"
@@ -18,36 +18,65 @@ interface OrderFormProps {
   initialOrder?: OrderWithState | null
 }
 
+const ALL_STATUSES = [
+  { id: 1, label: "Creada / Borrador (created)" },
+  { id: 2, label: "Pendiente (pending)" },
+  { id: 3, label: "Pagada (paid)" },
+  { id: 4, label: "Despachado (dispatched)" },
+  { id: 5, label: "En Camino (in_transit)" },
+  { id: 6, label: "Entregado (delivered)" },
+  { id: 8, label: "Error de Stock (stock_error)" },
+  { id: 7, label: "Rechazado / Cancelado (rejected)" },
+]
+
 export default function OrderForm({ initialOrder }: OrderFormProps) {
   const dispatch = useAppDispatch()
-  const session = useAppSelector((state) => state.app.session)
 
-  // Identificación de rol de usuario
+  const [session, setSession] = useState<{ id?: number; roleId?: number; roleName?: string } | null>(null)
+  const [loadingSession, setLoadingSession] = useState<boolean>(true)
+
+  useEffect(() => {
+    const fetchSession = async () => {
+      try {
+        const sessionData = await window.electronAPI?.getSession?.()
+        if (sessionData) {
+          setSession({
+            ...sessionData,
+            id: Number(sessionData.id),
+            roleId: Number(sessionData.roleId),
+          })
+        }
+      } catch (err) {
+        console.error("Error al obtener la sesión activa:", err)
+      } finally {
+        setLoadingSession(false)
+      }
+    }
+    fetchSession()
+  }, [])
+
   const roleName = session?.roleName?.toLowerCase() || ''
-  const isVendedor = roleName === 'vendedor' || session?.roleId === 3
-  const isOperador = roleName === 'operador' || session?.roleId === 2
-  const isSupervisor = roleName === 'supervisor' || session?.roleId === 4
-  const isAdmin = roleName === 'admin' || session?.roleId === 1
+  const roleId = Number(session?.roleId)
 
-  // Determinar si la orden iniciada ya no está en borrador (Estado ID 1)
+  const isAdmin = roleName === 'admin' || roleId === 1
+  const isSupervisor = roleName === 'supervisor' || roleId === 2
+  const isVendedor = roleName === 'seller' || roleName === 'vendedor' || roleId === 3
+  const isOperador = roleName === 'operator' || roleName === 'operador' || roleId === 4
+
   const isAdvancedOrder = Boolean(initialOrder?.id) && Number(initialOrder?.currentState?.id ?? 1) !== 1
-
-  // MODO SOLO LECTURA:
-  // 1. Operador viendo detalles generales de la orden.
-  // 2. Vendedor consultando una orden que ya avanzó en el flujo logístico.
   const isReadOnlyDetails = Boolean(initialOrder?.id) && (isOperador || (isVendedor && isAdvancedOrder))
 
-  // 1. Estado local de IDs, Estado Logístico, Tracking y Ubicación/Notas
+  const currentOrderStateId = Number(initialOrder?.currentState?.id ?? 1)
+
   const [formData, setFormData] = useState({
     clientId: initialOrder?.client?.id != null ? Number(initialOrder.client.id) : -1,
     shippingAddressId: initialOrder?.shippingAddressId != null ? Number(initialOrder.shippingAddressId) : -1,
-    currentStateId: initialOrder?.currentState?.id != null ? Number(initialOrder.currentState.id) : 1,
+    currentStateId: currentOrderStateId,
     trackingNumber: initialOrder?.trackingNumber || '',
     location: '',
     notes: '',
   })
 
-  // 2. Hooks de búsqueda de Clientes y Direcciones
   const {
     clients,
     searchTermClients,
@@ -64,12 +93,10 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     setIsOpenAddress,
   } = useSeletedAddressOnOrder(formData)
 
-  // 3. Ítems de la orden
   const [items, setItems] = useState<FormOrderItem[]>([
     { id: crypto.randomUUID(), productId: 0, description: "", quantity: 1, unitPrice: 0 },
   ])
 
-  // 4. Sincronización al montar/cambiar la orden a editar
   useEffect(() => {
     if (initialOrder?.id) {
       const clientId = initialOrder.client?.id != null ? Number(initialOrder.client.id) : -1
@@ -115,7 +142,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     }
   }, [initialOrder])
 
-  // Handlers para ítems
   const handleAddItem = () => {
     if (isReadOnlyDetails) return
     setItems((prev) => [
@@ -162,20 +188,33 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Bloqueo directo para Vendedor intentando guardar en solo lectura
+    let currentSession = session
+    try {
+      const freshSession = await window.electronAPI?.getSession?.()
+      if (freshSession) {
+        currentSession = {
+          ...freshSession,
+          id: Number(freshSession.id),
+          roleId: Number(freshSession.roleId),
+        }
+      }
+    } catch (err) {
+      console.error("Error al refrescar sesión en submit:", err)
+    }
+
     if (isVendedor && isAdvancedOrder) {
       return alert("Esta orden ya fue procesada y se encuentra en modo de solo lectura.")
     }
 
-    // 1. Gestión de Estado Logístico (Operador, Supervisor o Admin editando una orden existente)
     const isLogisticsAction = (isOperador || isSupervisor || isAdmin) && Boolean(initialOrder?.id)
 
     if (isLogisticsAction && initialOrder?.id) {
-      if (formData.currentStateId >= 3 && !formData.trackingNumber.trim()) {
-        return alert("El número de seguimiento (tracking) es obligatorio para despachar la orden.")
+      if (formData.currentStateId >= 4 && !formData.trackingNumber.trim()) {
+        return alert("El número de seguimiento (tracking) es obligatorio al despachar el paquete.")
       }
 
       try {
+        // Se envía directamente al backend y este validará si la transición o rol son correctos
         const response = await window.electronAPI?.updateOrderState?.({
           id: String(initialOrder.id),
           currentStateId: formData.currentStateId,
@@ -199,12 +238,11 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       }
     }
 
-    // 2. Creación / Edición Comercial Integral (Vendedor en borrador 1 o Creación Nueva)
     if (formData.clientId <= 0) return alert("Debe seleccionar un cliente")
     if (formData.shippingAddressId <= 0) return alert("Debe seleccionar una dirección")
     if (items.some((i) => i.productId <= 0)) return alert("Todos los ítems deben tener un producto seleccionado")
 
-    const sellerId = isVendedor ? Number(session?.id) : Number(initialOrder?.sellerId || session?.id || 0)
+    const sellerId = isVendedor ? Number(currentSession?.id) : Number(initialOrder?.sellerId || currentSession?.id || 0)
 
     const payload = {
       clientId: formData.clientId,
@@ -248,10 +286,32 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     }
   }
 
+  const formatStateLabel = (name: string, stateId: number) => {
+    const map: Record<number, string> = {
+      1: "Creada / Borrador",
+      2: "Pendiente",
+      3: "Pagada",
+      4: "Despachado",
+      5: "En Camino",
+      6: "Entregado",
+      7: "Rechazado / Cancelado",
+      8: "Error de Stock",
+    }
+    return map[stateId] || name
+  }
+
   const inputClass =
     "w-full rounded-xl border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
 
   const statusHistoryList = (initialOrder as any)?.statusHistory || []
+
+  if (loadingSession) {
+    return (
+      <div className="flex h-96 items-center justify-center">
+        <p className="text-sm text-gray-500">Cargando datos de sesión...</p>
+      </div>
+    )
+  }
 
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col gap-6 p-6">
@@ -287,7 +347,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
       <form onSubmit={handleSubmit} className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm">
         
-        {/* Sección de Gestión Logística (Exclusivo para Operador, Supervisor y Admin al editar) */}
+        {/* Sección de Gestión Logística: Muestra todos los estados sin restricciones visuales */}
         {(isOperador || isSupervisor || isAdmin) && initialOrder?.id && (
           <div className="rounded-xl bg-blue-50/50 p-4 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 flex flex-col gap-4">
             <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wide">
@@ -299,23 +359,16 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
                   Estado Logístico
                 </label>
-               <select
+                <select
                   value={formData.currentStateId}
                   onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))}
                   className={inputClass}
                 >
-                  <option value={1}>Creada / Borrador (created)</option>
-                  <option value={2}>Pendiente (pending)</option>
-                  <option value={3}>Pagada (paid)</option>
-                  <option value={4}>Despachado (dispatched)</option>
-                  <option value={5}>En Camino (in_transit)</option>
-                  <option value={6}>Entregado (delivered)</option>
-                  {(isSupervisor || isAdmin) && (
-                    <>
-                      <option value={7}>Rechazado / Cancelado (rejected)</option>
-                      <option value={8}>Error de Stock (stock_error)</option>
-                    </>
-                  )}
+                  {ALL_STATUSES.map((status) => (
+                    <option key={status.id} value={status.id}>
+                      {status.label}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -329,7 +382,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                   onChange={(e) => setFormData((prev) => ({ ...prev, trackingNumber: e.target.value }))}
                   placeholder="Ej. TRK-98234123"
                   className={inputClass}
-                  required={isOperador && formData.currentStateId >= 3}
+                  required={isOperador && formData.currentStateId >= 4}
                 />
               </div>
             </div>
@@ -366,7 +419,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
         {/* Desplegables de Cliente y Dirección */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          {/* Selector de Cliente */}
           <div className="relative w-full">
             <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
               Cliente
@@ -404,7 +456,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             )}
           </div>
 
-          {/* Selector de Dirección */}
           <div className="relative w-full">
             <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
               Dirección de Envío
@@ -511,7 +562,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                   <span className="absolute -left-[31px] top-1.5 h-4 w-4 rounded-full bg-blue-600 ring-4 ring-white dark:ring-zinc-900" />
                   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center">
                     <span className="font-semibold text-gray-900 dark:text-white">
-                      {event.stateName || 'Cambio de Estado'}
+                      {formatStateLabel(event.stateName, Number(event.stateId))}
                     </span>
                     <span className="text-xs text-gray-400">
                       {event.createdAt ? new Date(event.createdAt).toLocaleString('es-AR') : ''}
@@ -539,7 +590,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             {isVendedor && isAdvancedOrder ? "Volver a la Lista" : "Cancelar"}
           </button>
 
-          {/* Ocultar el botón de submit si el vendedor consulta una orden en solo lectura */}
           {!(isVendedor && isAdvancedOrder) && (
             <button
               type="submit"

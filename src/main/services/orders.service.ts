@@ -1,4 +1,5 @@
 import { prisma } from '../infrastructure/db/prisma';
+import { authService } from './auth.service';
 import {
   SearchParams,
   CreateOrderPayload,
@@ -10,12 +11,35 @@ import {
 import { Prisma } from '../infrastructure/db/generated/client/client';
 
 export interface UserSessionContext {
-  userId: number;
+  userId?: number | bigint;
+  id?: number | bigint;
   roleName: 'admin' | 'supervisor' | 'operador' | 'vendedor' | string;
 }
 
 export class OrdersService {
-  async getOrders(searchParams?: SearchParams, sessionContext?: UserSessionContext) {
+  /**
+   * Define las transiciones de estado permitidas en el sistema logístico.
+   * Evita retrocesos o saltos inconsistentes (ej. pasar de 'delivered' a 'dispatched').
+   */
+  private static readonly ALLOWED_TRANSITIONS: Record<number, number[]> = {
+    1: [2, 3, 7, 8],    // 'created' -> 'pending', 'paid', 'rejected', 'stock_error'
+    2: [3, 7, 8],       // 'pending' -> 'paid', 'rejected', 'stock_error'
+    3: [4, 7, 8],       // 'paid'    -> 'dispatched', 'rejected', 'stock_error'
+    4: [5, 6, 7],       // 'dispatched' -> 'in_transit', 'delivered', 'rejected'
+    5: [6, 7],          // 'in_transit' -> 'delivered', 'rejected'
+    6: [],              // 'delivered' es estado terminal (no permite más cambios)
+    7: [],              // 'rejected' es estado terminal
+    8: [1, 2, 7],       // 'stock_error' -> reacondicionar o rechazar
+  };
+
+  private getSessionUserId(session: UserSessionContext | null | undefined): number | undefined {
+    if (!session) return undefined;
+    const rawId = session.userId ?? session.id;
+    return rawId !== undefined ? Number(rawId) : undefined;
+  }
+
+  async getOrders(searchParams?: SearchParams, sessionContext?: UserSessionContext | null) {
+    const activeSession = sessionContext || (await authService.getActiveSession?.());
     const page = searchParams?.page ?? 1;
     const limit = 5;
 
@@ -36,8 +60,8 @@ export class OrdersService {
         : { createdAt: 'desc' as const };
 
     const search = searchParams?.search?.trim();
-    const roleName = sessionContext?.roleName?.toLowerCase();
-    const currentUserId = sessionContext?.userId ? Number(sessionContext.userId) : undefined;
+    const roleName = activeSession?.roleName?.toLowerCase();
+    const currentUserId = this.getSessionUserId(activeSession);
 
     const where: Prisma.OrderWhereInput = {
       ...(search && {
@@ -50,14 +74,12 @@ export class OrdersService {
       }),
     };
 
-    // 1. Vendedor: Solo ve sus propias órdenes ("Mis Órdenes")
     if (roleName === 'vendedor' && currentUserId) {
       where.sellerId = BigInt(currentUserId);
     }
 
-    // 2. Operador: Solo ve órdenes en flujo logístico activo
     if (roleName === 'operador') {
-      where.currentStateId = { in: [BigInt(1), BigInt(2), BigInt(3), BigInt(4)] };
+      where.currentStateId = { in: [BigInt(1), BigInt(2), BigInt(3), BigInt(4), BigInt(5)] };
     }
 
     const [totalOrders, orders] = await prisma.$transaction([
@@ -79,7 +101,7 @@ export class OrdersService {
             },
           },
           orderStatusHistory: {
-            orderBy: { id: 'asc' }, // Orden secuencial estricto por ID
+            orderBy: { id: 'asc' },
             include: {
               state: { select: { id: true, name: true } },
               address: { include: { city: true } },
@@ -122,9 +144,10 @@ export class OrdersService {
     };
   }
 
-  async createOrder(payload: CreateOrderPayload, sessionContext?: UserSessionContext): Promise<CreateOrderResponse> {
+  async createOrder(payload: CreateOrderPayload, sessionContext?: UserSessionContext | null): Promise<CreateOrderResponse> {
     try {
-      const roleName = sessionContext?.roleName?.toLowerCase();
+      const activeSession = sessionContext || (await authService.getActiveSession?.());
+      const roleName = activeSession?.roleName?.toLowerCase();
 
       if (roleName === 'operador' || roleName === 'supervisor') {
         return {
@@ -135,7 +158,8 @@ export class OrdersService {
 
       const clientId = Number(payload.clientId);
       const shippingAddressId = payload.shippingAddressId ? Number(payload.shippingAddressId) : null;
-      const sellerId = roleName === 'vendedor' ? Number(sessionContext?.userId) : Number(payload.sellerId);
+      const currentUserId = this.getSessionUserId(activeSession);
+      const sellerId = roleName === 'vendedor' ? currentUserId : Number(payload.sellerId);
       const { items, total } = payload;
 
       if (!clientId || !sellerId || !items || items.length === 0) {
@@ -151,7 +175,7 @@ export class OrdersService {
             clientId: BigInt(clientId),
             sellerId: BigInt(sellerId),
             total: Number(total),
-            currentStateId: BigInt(1), // Estado borrador/creado
+            currentStateId: BigInt(1), // 'created'
             ...(shippingAddressId && { shippingAddressId: BigInt(shippingAddressId) }),
             itemOrders: {
               create: items.map((item) => ({
@@ -163,7 +187,6 @@ export class OrdersService {
           },
         });
 
-        // Hito inicial único al crear la orden
         if (shippingAddressId) {
           await tx.orderStatusHistory.create({
             data: {
@@ -192,10 +215,12 @@ export class OrdersService {
     }
   }
 
-  async updateOrder(payload: UpdateOrderPayload, sessionContext?: UserSessionContext): Promise<OrderMutationResponse> {
+  async updateOrder(payload: UpdateOrderPayload, sessionContext?: UserSessionContext | null): Promise<OrderMutationResponse> {
     try {
+      const activeSession = sessionContext || (await authService.getActiveSession?.());
       const { id, clientId, sellerId, shippingAddressId, items, total, currentStateId, trackingNumber } = payload;
-      const roleName = sessionContext?.roleName?.toLowerCase();
+      const roleName = activeSession?.roleName?.toLowerCase();
+      const currentUserId = this.getSessionUserId(activeSession);
       const orderId = BigInt(id);
 
       const existingOrder = await prisma.order.findUnique({
@@ -206,9 +231,8 @@ export class OrdersService {
         return { success: false, message: 'La orden no existe' };
       }
 
-      // Vendedor: Solo puede editar sus propias órdenes y únicamente en estado borrador (1)
       if (roleName === 'vendedor') {
-        if (Number(existingOrder.sellerId) !== Number(sessionContext?.userId)) {
+        if (currentUserId && Number(existingOrder.sellerId) !== currentUserId) {
           return { success: false, message: 'No tenés permisos para modificar órdenes de otros vendedores' };
         }
         if (Number(existingOrder.currentStateId) !== 1) {
@@ -216,24 +240,14 @@ export class OrdersService {
         }
       }
 
-      // Operador: Redirige al método logístico
       if (roleName === 'operador') {
         if (currentStateId) {
           return this.updateOrderState(
             { id, currentStateId: Number(currentStateId), trackingNumber, location: (payload as any).location, notes: payload.notes },
-            sessionContext
+            activeSession
           );
         }
         return { success: false, message: 'Los operadores solo pueden modificar el estado logístico de la orden' };
-      }
-
-      // Cancelación / Rechazo (ID 6)
-      const REJECTED_STATE_ID = 6;
-      if (currentStateId && Number(currentStateId) === REJECTED_STATE_ID && roleName !== 'admin' && roleName !== 'supervisor') {
-        return {
-          success: false,
-          message: 'Se requieren permisos de Supervisor o Administrador para rechazar o cancelar una orden',
-        };
       }
 
       const parsedClientId = clientId ? BigInt(clientId) : existingOrder.clientId;
@@ -269,32 +283,6 @@ export class OrdersService {
           },
         });
 
-        if (currentStateId && parsedAddressId) {
-          // Obtener el último hito ingresado ordenado por ID estrictamente decreciente
-          const lastHistory = await tx.orderStatusHistory.findFirst({
-            where: { orderId },
-            orderBy: { id: 'desc' },
-          });
-
-          const targetStateId = Number(currentStateId);
-          const lastStateId = lastHistory ? Number(lastHistory.stateId) : Number(existingOrder.currentStateId);
-          
-          const isSameState = lastStateId === targetStateId;
-          const hasNewInfo = Boolean((payload as any).location?.trim() || payload.notes?.trim());
-
-          // Solo inserta si hay cambio de estado o si se incluye ubicación/nota nueva
-          if (!isSameState || hasNewInfo) {
-            await tx.orderStatusHistory.create({
-              data: {
-                orderId,
-                stateId: BigInt(targetStateId),
-                addressId: parsedAddressId,
-                notes: payload.notes || `Modificación integral de orden por ${roleName}`,
-              },
-            });
-          }
-        }
-
         return order;
       });
 
@@ -311,20 +299,30 @@ export class OrdersService {
       };
     }
   }
+
   async updateOrderState(
     payload: UpdateOrderStatePayload & { location?: string },
-    sessionContext?: UserSessionContext
+    sessionContext?: UserSessionContext | null
   ): Promise<OrderMutationResponse> {
     try {
+      const activeSession = sessionContext || (await authService.getActiveSession?.());
       const { id, currentStateId, trackingNumber, notes, location } = payload;
-      const roleName = sessionContext?.roleName?.toLowerCase();
+      const roleName = activeSession?.roleName?.toLowerCase();
       const orderId = BigInt(id);
-      const targetStateId = BigInt(currentStateId);
+      const targetStateId = Number(currentStateId);
 
-      if (roleName === 'vendedor') {
+      if (roleName === 'seller') {
         return {
           success: false,
           message: 'Los vendedores no tienen permisos para modificar el estado logístico.',
+        };
+      }
+
+      // Restricción evaluada en backend: Operadores no pueden marcar órdenes como rechazadas o canceladas (ID 7)
+      if (roleName === 'operator' && targetStateId === 7) {
+        return {
+          success: false,
+          message: 'Acción denegada: Los operadores no tienen permisos para marcar órdenes como rechazadas o canceladas.',
         };
       }
 
@@ -337,26 +335,45 @@ export class OrdersService {
           throw new Error('La orden especificada no existe.');
         }
 
-        // 1. Actualizar la orden con el ID exacto que seleccionó el usuario
+        const currentStateInDb = Number(existingOrder.currentStateId);
+
+        // 1. REGLA ANTI-DUPLICADOS: Bloquea intentos de volver a guardar el mismo estado
+        if (currentStateInDb === targetStateId) {
+          throw new Error('La orden ya se encuentra en este estado.');
+        }
+
+        // 2. REGLA DE SECUENCIA ILÓGICA: Valida que la transición sea permitida
+        const allowedNextStates = OrdersService.ALLOWED_TRANSITIONS[currentStateInDb] || [];
+        if (!allowedNextStates.includes(targetStateId)) {
+          throw new Error(
+            `Transición ilógica no permitida: no se puede pasar del estado ID ${currentStateInDb} al estado ID ${targetStateId}.`
+          );
+        }
+
+        // 3. Validación de Tracking
+        if (targetStateId >= 4 && !trackingNumber && !existingOrder.trackingNumber) {
+          throw new Error('El número de seguimiento (tracking number) es obligatorio al despachar el paquete.');
+        }
+
+        // 4. Actualizar la orden principal
         const updated = await tx.order.update({
           where: { id: orderId },
           data: {
-            currentStateId: targetStateId,
+            currentStateId: BigInt(targetStateId),
             ...(trackingNumber && { trackingNumber }),
           },
         });
 
-        // 2. Armar la nota
-        const historyNote = location?.trim()
-          ? `Ubicación: ${location.trim()}.${notes?.trim() ? ` ${notes.trim()}` : ''}`
-          : notes?.trim() || `Estado actualizado por ${roleName}`;
-
-        // 3. Insertar el historial vinculado al targetStateId
+        // 5. Registrar el hito único en el historial
         if (updated.shippingAddressId) {
+          const historyNote = location?.trim()
+            ? `Ubicación: ${location.trim()}.${notes?.trim() ? ` ${notes.trim()}` : ''}`
+            : notes?.trim() || `Estado actualizado a ID ${targetStateId} por ${roleName}`;
+
           await tx.orderStatusHistory.create({
             data: {
               orderId: updated.id,
-              stateId: targetStateId, // <-- Asegura guardar el ID que seleccionaste
+              stateId: BigInt(targetStateId),
               addressId: updated.shippingAddressId,
               notes: historyNote,
             },
