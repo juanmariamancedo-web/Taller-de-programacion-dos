@@ -19,7 +19,7 @@ export default function OrdersPage() {
     const page = useAppSelector((store) => store.app.page);
     const session = useAppSelector((store) => store.app.session);
 
-    // Normalizar la verificación del rol (compatible por ID o por nombre de rol)
+    // Normalizar roles de usuario
     const roleName = session?.roleName?.toLowerCase() || '';
     const isVendedor = roleName === 'vendedor' || session?.roleId === 3;
     const isOperador = roleName === 'operador' || session?.roleId === 2;
@@ -28,7 +28,7 @@ export default function OrdersPage() {
 
     // Permisos por módulo
     const canCreateOrder = isVendedor || isAdmin;
-    const canEditOrder = isOperador || isSupervisor || isAdmin || isVendedor;
+    const canManageOrders = isOperador || isSupervisor || isAdmin || isVendedor;
 
     useEffect(() => {
         const fetchOrders = async () => {
@@ -36,8 +36,6 @@ export default function OrdersPage() {
                 setIsLoading(true);
                 setError(null);
 
-                // La filtración de "Mis Órdenes" (Vendedor) u "Órdenes Pendientes" (Operador)
-                // la gestiona directamente el Proceso Principal con la sesión activa.
                 const response = await window.electronAPI?.getOrders({ page, sort, search });
                 
                 if (response?.success && response.data) {
@@ -66,18 +64,24 @@ export default function OrdersPage() {
         dispatch(setCurrentTab("order-create"));
     };
 
+    // Permite abrir el panel a Vendedor, Operador, Supervisor y Admin
+    const canEditSpecificOrder = (_order: OrderWithState) => {
+        if (isAdmin || isSupervisor || isOperador || isVendedor) return true;
+        return false;
+    };
+
     return (
         <div className="flex flex-col items-center gap-3 w-full">
             <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
                 <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">
-                    {isVendedor ? "Mis Órdenes" : "Órdenes"}
+                    {isVendedor ? "Mis Órdenes" : isOperador ? "Despacho y Logística" : "Órdenes"}
                 </h1>
 
                 {canCreateOrder && (
                     <button
                         type="button"
                         onClick={handleCreateNew}
-                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700 shadow-sm"
                     >
                         <span className="text-xl leading-none">+</span>
                         Agregar Orden
@@ -106,7 +110,7 @@ export default function OrdersPage() {
                             <th className="px-4 py-3">
                                 <Sort className="" name="Estado" serverArg="state" />
                             </th>
-                            {canEditOrder && (
+                            {canManageOrders && (
                                 <th className="px-4 py-3 text-center">Acciones</th>
                             )}
                         </tr>
@@ -114,55 +118,77 @@ export default function OrdersPage() {
 
                     <tbody className="divide-y divide-gray-200 dark:divide-white/10 text-sm">
                         {orders.length > 0 ? (
-                            orders.map((order) => (
-                                <tr
-                                    key={String(order.id)}
-                                    className="hover:bg-gray-50 dark:hover:bg-white/5 transition"
-                                >
-                                    <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">
-                                        #{String(order.id)}
-                                    </td>
+                            orders.map((order) => {
+                                const isEditable = canEditSpecificOrder(order);
+                                const isInitialState = Number(order.currentState?.id ?? 1) === 1;
 
-                                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300 font-medium">
-                                        {order.client ? `${order.client.name} ${order.client.lastname}` : 'Cliente Desconocido'}
-                                    </td>
-
-                                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300 font-semibold">
-                                        ${Number(order.total).toLocaleString()}
-                                    </td>
-
-                                    <td className="px-4 py-3">
-                                        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
-                                            order.currentState?.name === "delivered"
-                                                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                                                : order.currentState?.name === "dispatched" || order.currentState?.name === "in_transit"
-                                                ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                                                : order.currentState?.name === "paid" || order.currentState?.name === "created"
-                                                ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
-                                                : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                                        }`}>
-                                            {order.currentState?.name ?? 'Sin estado'}
-                                        </span>
-                                    </td>
-
-                                    {canEditOrder && (
-                                        <td className="px-4 py-3 text-center">
-                                            <button
-                                                type="button"
-                                                onClick={() => handleEdit(order)}
-                                                title={`Gestionar orden #${String(order.id)}`}
-                                                className="rounded-lg bg-blue-100 px-3 py-1.5 font-semibold text-blue-700 transition hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
-                                            >
-                                                {isOperador ? "Gestionar Envío" : "Editar"}
-                                            </button>
+                                return (
+                                    <tr
+                                        key={String(order.id)}
+                                        className="hover:bg-gray-50 dark:hover:bg-white/5 transition"
+                                    >
+                                        <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">
+                                            #{String(order.id)}
                                         </td>
-                                    )}
-                                </tr>
-                            ))
+
+                                        <td className="px-4 py-3 text-gray-700 dark:text-gray-300 font-medium">
+                                            {order.client ? `${order.client.name} ${order.client.lastname}` : 'Cliente Desconocido'}
+                                        </td>
+
+                                        <td className="px-4 py-3 text-gray-700 dark:text-gray-300 font-semibold">
+                                            ${Number(order.total).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                                        </td>
+
+                                        <td className="px-4 py-3">
+                                            <div className="flex flex-col items-start gap-1">
+                                                <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                                                    order.currentState?.name === "delivered" || Number(order.currentState?.id) === 5
+                                                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                                                        : order.currentState?.name === "dispatched" || order.currentState?.name === "in_transit" || Number(order.currentState?.id) === 3 || Number(order.currentState?.id) === 4
+                                                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                                                        : order.currentState?.name === "paid" || order.currentState?.name === "created" || Number(order.currentState?.id) === 1 || Number(order.currentState?.id) === 2
+                                                        ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                                                        : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                                                }`}>
+                                                    {order.currentState?.name ?? 'Sin estado'}
+                                                </span>
+                                                {order.trackingNumber && (
+                                                    <span className="text-[11px] font-mono text-gray-400">
+                                                        TRK: {order.trackingNumber}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+
+                                        {canManageOrders && (
+                                            <td className="px-4 py-3 text-center">
+                                                {isEditable ? (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleEdit(order)}
+                                                        title={`Ver u ordenar #${String(order.id)}`}
+                                                        className="rounded-lg bg-blue-100 px-3 py-1.5 font-semibold text-blue-700 transition hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
+                                                    >
+                                                        {isOperador 
+                                                            ? "Gestionar Envío" 
+                                                            : isVendedor 
+                                                            ? isInitialState ? "Editar" : "Ver Detalles" 
+                                                            : "Gestionar"}
+                                                    </button>
+                                                ) : (
+                                                    <span className="text-xs text-gray-400 italic">
+                                                        Bloqueada
+                                                    </span>
+                                                )}
+                                            </td>
+                                        )}
+                                    </tr>
+                                )
+                            })
                         ) : (
                             !isLoading && (
                                 <tr>
-                                    <td colSpan={canEditOrder ? 5 : 4} className="text-center py-6 text-gray-500">
+                                    <td colSpan={canManageOrders ? 5 : 4} className="text-center py-6 text-gray-500">
                                         No se encontraron órdenes
                                     </td>
                                 </tr>

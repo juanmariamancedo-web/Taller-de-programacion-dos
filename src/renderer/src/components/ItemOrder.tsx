@@ -1,12 +1,13 @@
+import { FormOrderItem } from './views/CreateOrderPage'
 import { ChangeEvent, useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { FormOrderItem } from './views/CreateOrderPage'
 import { ProductListItem } from '../../../main/domain/types/electron-env'
 
 interface ItemOrderProps {
   item: FormOrderItem
   isOnlyItem: boolean
-  selectedProductIds: number[] // Lista de IDs de productos ya seleccionados
+  disabled?: boolean // <-- Permite deshabilitar el ítem si el rol es de solo lectura (ej. Operador)
+  selectedProductIds: number[]
   onUpdateItem: (id: string, updatedFields: Partial<FormOrderItem>) => void
   onRemoveItem: (id: string) => void
 }
@@ -14,6 +15,7 @@ interface ItemOrderProps {
 export function ItemOrder({
   item,
   isOnlyItem,
+  disabled = false,
   selectedProductIds,
   onUpdateItem,
   onRemoveItem,
@@ -30,7 +32,6 @@ export function ItemOrder({
     width: number
   } | null>(null)
 
-  // Sincronizar el nombre si cambia la propiedad description externamente
   useEffect(() => {
     setSearchTerm(item.description || '')
   }, [item.description])
@@ -44,19 +45,19 @@ export function ItemOrder({
   }
 
   const openDropdown = (): void => {
+    if (disabled) return // Bloquea desplegable si está deshabilitado
     updateDropdownPosition()
     setIsOpen(true)
   }
 
-  // Carga productos desde IPC con debounce al escribir
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen || disabled) return
 
     const timer = setTimeout(async () => {
       setIsLoading(true)
       try {
         if (window.electronAPI?.getProducts) {
-          const res = await window.electronAPI?.getProducts({ search: searchTerm, page: 1, sort: "nameDesc" })
+          const res = await window.electronAPI?.getProducts({ search: searchTerm, page: 1, sort: 'nameDesc' })
           setProducts(res.data || [])
         }
       } catch (error) {
@@ -67,7 +68,7 @@ export function ItemOrder({
     }, 200)
 
     return () => clearTimeout(timer)
-  }, [searchTerm, isOpen])
+  }, [searchTerm, isOpen, disabled])
 
   useEffect(() => {
     if (!isOpen) return
@@ -91,13 +92,13 @@ export function ItemOrder({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Filtrar la lista de productos para no mostrar aquellos elegidos en otras filas
   const availableProducts = products.filter(
     (product) =>
       Number(product.id) === item.productId || !selectedProductIds.includes(Number(product.id))
   )
 
   const handleSelectProduct = (product: ProductListItem) => {
+    if (disabled) return
     setSearchTerm(product.name)
     setIsOpen(false)
 
@@ -109,13 +110,9 @@ export function ItemOrder({
   }
 
   const handleQuantityChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (disabled) return
     const qty = Math.max(1, Number(e.target.value) || 1)
     onUpdateItem(item.id, { quantity: qty })
-  }
-
-  const handleUnitPriceChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const price = Math.max(0, Number(e.target.value) || 0)
-    onUpdateItem(item.id, { unitPrice: price })
   }
 
   const subtotal = item.quantity * item.unitPrice
@@ -125,13 +122,14 @@ export function ItemOrder({
 
   return (
     <tr className="border-b border-slate-200/80 transition hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.02]">
-      {/* Columna: Búsqueda y Selección de Producto */}
+      {/* Producto */}
       <td className="px-4 py-3">
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
-            className={inputStyle}
+            disabled={disabled}
+            className={`${inputStyle} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
             placeholder="Buscar producto..."
             value={searchTerm}
             onChange={(e) => {
@@ -144,13 +142,13 @@ export function ItemOrder({
             }}
           />
 
-          {isOpen && dropdownPosition && createPortal(
+          {!disabled && isOpen && dropdownPosition && createPortal(
             <ul
               ref={dropdownRef}
               style={{
                 top: dropdownPosition.top,
                 left: dropdownPosition.left,
-                width: dropdownPosition.width
+                width: dropdownPosition.width,
               }}
               className="fixed z-[1000] max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
             >
@@ -174,7 +172,7 @@ export function ItemOrder({
                 ))
               ) : (
                 <li className="px-4 py-2 text-xs text-slate-400">
-                  {products.length > 0 ? "Producto ya seleccionado" : "Sin resultados"}
+                  {products.length > 0 ? 'Producto ya seleccionado' : 'Sin resultados'}
                 </li>
               )}
             </ul>,
@@ -183,44 +181,42 @@ export function ItemOrder({
         </div>
       </td>
 
-      {/* Columna: Cantidad */}
+      {/* Cantidad */}
       <td className="w-28 px-4 py-3">
         <input
           type="number"
           min={1}
+          disabled={disabled}
           value={item.quantity}
           onChange={handleQuantityChange}
-          className={`${inputStyle} text-center`}
+          className={`${inputStyle} text-center ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
         />
       </td>
 
-      {/* Columna: Precio Unitario */}
+      {/* Precio Unitario */}
       <td className="w-36 px-4 py-3">
         <input
           type="text"
-          min={0}
-          step="0.01"
           value={`$${item.unitPrice.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`}
-          onChange={handleUnitPriceChange}
-          className={`${inputStyle} text-right`}
+          className={`${inputStyle} text-right cursor-not-allowed opacity-60`}
           disabled
         />
       </td>
 
-      {/* Columna: Subtotal */}
+      {/* Subtotal */}
       <td className="w-32 px-4 py-3 text-right font-semibold text-slate-900 dark:text-white">
         ${subtotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
       </td>
 
-      {/* Columna: Botón Eliminar */}
+      {/* Eliminar Ítem */}
       <td className="w-12 px-4 py-3 text-center">
         <button
           type="button"
           onClick={() => onRemoveItem(item.id)}
-          disabled={isOnlyItem}
+          disabled={isOnlyItem || disabled}
           title={isOnlyItem ? 'La orden debe tener al menos un ítem' : 'Eliminar ítem'}
           className={`inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition ${
-            isOnlyItem
+            isOnlyItem || disabled
               ? 'cursor-not-allowed opacity-30'
               : 'hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-400'
           }`}

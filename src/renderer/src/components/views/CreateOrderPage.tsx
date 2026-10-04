@@ -29,15 +29,20 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const isSupervisor = roleName === 'supervisor' || session?.roleId === 4
   const isAdmin = roleName === 'admin' || session?.roleId === 1
 
-  // Si editamos una orden existente y somos Operadores, solo gestionamos el estado logístico
-  const isReadOnlyDetails = isOperador && Boolean(initialOrder?.id)
+  // Determinar si la orden iniciada ya no está en borrador (Estado ID 1)
+  const isAdvancedOrder = Boolean(initialOrder?.id) && Number(initialOrder?.currentState?.id ?? 1) !== 1
 
-  // 1. Estado local de IDs y Estado Logístico
+  // MODO SOLO LECTURA:
+  // 1. Operador viendo detalles generales de la orden.
+  // 2. Vendedor consultando una orden que ya avanzó en el flujo logístico.
+  const isReadOnlyDetails = Boolean(initialOrder?.id) && (isOperador || (isVendedor && isAdvancedOrder))
+
+  // 1. Estado local de IDs, Estado Logístico y Tracking
   const [formData, setFormData] = useState({
     clientId: initialOrder?.client?.id != null ? Number(initialOrder.client.id) : -1,
     shippingAddressId: initialOrder?.shippingAddressId != null ? Number(initialOrder.shippingAddressId) : -1,
     currentStateId: initialOrder?.currentState?.id != null ? Number(initialOrder.currentState.id) : 1,
-    trackingNumber: '',
+    trackingNumber: initialOrder?.trackingNumber || '',
   })
 
   // 2. Hooks de búsqueda de Clientes y Direcciones
@@ -73,7 +78,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         clientId,
         shippingAddressId,
         currentStateId,
-        trackingNumber: '',
+        trackingNumber: initialOrder.trackingNumber || '',
       })
 
       if (initialOrder.client) {
@@ -127,16 +132,16 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     )
   }
 
-  // Selección de cliente desde la lista desplegable
   const handleClientSelect = (client: (typeof clients)[number]) => {
+    if (isReadOnlyDetails) return
     setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
     setSearchTermClients(`${client.name} ${client.lastname}`)
     setSearchTermAddress("")
     setIsOpenClients(false)
   }
 
-  // Selección de dirección desde la lista desplegable
   const handleAddressSelect = (ubic: (typeof addresses)[number]) => {
+    if (isReadOnlyDetails) return
     setFormData((prev) => ({ ...prev, shippingAddressId: Number(ubic.id) }))
     const cityName = ubic.city?.name ? `, ${ubic.city.name}` : ""
     setSearchTermAddress(`${ubic.street} ${ubic.number}${cityName}`)
@@ -153,11 +158,41 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!isReadOnlyDetails) {
-      if (formData.clientId <= 0) return alert("Debe seleccionar un cliente")
-      if (formData.shippingAddressId <= 0) return alert("Debe seleccionar una dirección")
-      if (items.some((i) => i.productId <= 0)) return alert("Todos los ítems deben tener un producto seleccionado")
+    // Bloqueo directo para Vendedor intentando guardar en solo lectura
+    if (isVendedor && isAdvancedOrder) {
+      return alert("Esta orden ya fue procesada y se encuentra en modo de solo lectura.")
     }
+
+    // 1. Operador gestionando estado logístico
+    if (isOperador && initialOrder?.id) {
+      if (formData.currentStateId >= 3 && !formData.trackingNumber.trim()) {
+        return alert("El número de seguimiento (tracking) es obligatorio para despachar la orden.")
+      }
+
+      try {
+        const response = await window.electronAPI?.updateOrderState?.({
+          id: String(initialOrder.id),
+          currentStateId: formData.currentStateId,
+          trackingNumber: formData.trackingNumber,
+        })
+
+        if (!response?.success) {
+          return alert(response?.message || "Error al actualizar el estado logístico.")
+        }
+
+        dispatch(setOrderToEdit(null))
+        dispatch(setCurrentTab("orders"))
+      } catch (err) {
+        console.error("Error al actualizar estado logístico:", err)
+        alert("Ocurrió un error inesperado al actualizar el estado de la orden.")
+      }
+      return
+    }
+
+    // 2. Creación / Edición estándar (Vendedor en estado 1, Admin, Supervisor)
+    if (formData.clientId <= 0) return alert("Debe seleccionar un cliente")
+    if (formData.shippingAddressId <= 0) return alert("Debe seleccionar una dirección")
+    if (items.some((i) => i.productId <= 0)) return alert("Todos los ítems deben tener un producto seleccionado")
 
     const sellerId = isVendedor ? Number(session?.id) : Number(initialOrder?.sellerId || session?.id || 0)
 
@@ -176,19 +211,26 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     }
 
     try {
+      let response: any
+
       if (initialOrder?.id) {
-        await window.electronAPI?.updateOrder?.({
+        response = await window.electronAPI?.updateOrder?.({
           id: String(initialOrder.id),
           ...payload,
         } as any)
       } else {
-        await window.electronAPI?.createOrder?.(payload as any)
+        response = await window.electronAPI?.createOrder?.(payload as any)
+      }
+
+      if (!response?.success) {
+        return alert(response?.message || "Error al procesar la orden")
       }
 
       dispatch(setOrderToEdit(null))
       dispatch(setCurrentTab("orders"))
     } catch (err) {
       console.error("Error al guardar la orden:", err)
+      alert("Error de comunicación con el proceso principal de Electron.")
     }
   }
 
@@ -203,6 +245,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             {initialOrder?.id
               ? isOperador
                 ? `Gestión Logística - Orden #${initialOrder.id}`
+                : isVendedor && isAdvancedOrder
+                ? `Detalles de Orden #${initialOrder.id} (Solo Lectura)`
                 : `Editar Órden #${initialOrder.id}`
               : "Nueva Órden"}
           </h1>
@@ -210,6 +254,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             {initialOrder?.id
               ? isOperador
                 ? "Actualiza el estado logístico y datos de despacho."
+                : isVendedor && isAdvancedOrder
+                ? "La orden está en proceso logístico. Podés consultar la información pero no modificarla."
                 : "Modifica los datos necesarios de la orden existente."
               : "Ingresá los datos necesarios para registrar una nueva orden."}
           </p>
@@ -225,7 +271,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
       <form onSubmit={handleSubmit} className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm">
         
-        {/* Sección de Gestión Logística (Operador, Supervisor y Admin al editar) */}
+        {/* Sección de Gestión Logística (Exclusivo para Operador, Supervisor y Admin al editar) */}
         {(isOperador || isSupervisor || isAdmin) && initialOrder?.id && (
           <div className="rounded-xl bg-blue-50/50 p-4 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -272,7 +318,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             <input
               type="text"
               disabled={isReadOnlyDetails}
-              className={`${inputClass} ${isReadOnlyDetails ? "cursor-not-allowed opacity-60" : ""}`}
+              className={`${inputClass} ${isReadOnlyDetails ? "cursor-not-allowed opacity-60 bg-gray-100 dark:bg-zinc-800" : ""}`}
               placeholder="Buscar cliente por nombre o DNI..."
               value={searchTermClients}
               onChange={(e) => setSearchTermClients(e.target.value)}
@@ -310,7 +356,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             <input
               type="text"
               disabled={isReadOnlyDetails || formData.clientId <= 0}
-              className={`${inputClass} ${(isReadOnlyDetails || formData.clientId <= 0) ? "cursor-not-allowed opacity-60" : ""}`}
+              className={`${inputClass} ${(isReadOnlyDetails || formData.clientId <= 0) ? "cursor-not-allowed opacity-60 bg-gray-100 dark:bg-zinc-800" : ""}`}
               placeholder={formData.clientId > 0 ? "Buscar dirección..." : "Selecciona un cliente primero"}
               value={searchTermAddress}
               onChange={(e) => setSearchTermAddress(e.target.value)}
@@ -343,7 +389,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           </div>
         </div>
 
-        {/* Tabla de Productos utilizando el componente ItemOrder */}
+        {/* Tabla de Productos */}
         <div className="mt-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">Items de la Orden</h2>
@@ -374,6 +420,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                   <ItemOrder
                     key={item.id}
                     item={item}
+                    disabled={isReadOnlyDetails}
                     isOnlyItem={items.length === 1 || isReadOnlyDetails}
                     selectedProductIds={items
                       .map((i) => i.productId)
@@ -403,18 +450,22 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             onClick={handleCancel}
             className="rounded-xl px-5 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"
           >
-            Cancelar
+            {isVendedor && isAdvancedOrder ? "Volver a la Lista" : "Cancelar"}
           </button>
-          <button
-            type="submit"
-            className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
-          >
-            {isReadOnlyDetails
-              ? "Actualizar Estado Logístico"
-              : initialOrder?.id
-              ? "Actualizar Orden"
-              : "Guardar Orden"}
-          </button>
+
+          {/* Ocultar el botón de submit si el vendedor consulta una orden en solo lectura */}
+          {!(isVendedor && isAdvancedOrder) && (
+            <button
+              type="submit"
+              className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
+            >
+              {isOperador
+                ? "Actualizar Estado Logístico"
+                : initialOrder?.id
+                ? "Actualizar Orden"
+                : "Guardar Orden"}
+            </button>
+          )}
         </div>
       </form>
     </div>

@@ -16,6 +16,7 @@ function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
   const session = useAppSelector((state) => state.app.session)
   const roleId = useAppSelector((state) => state.app.session?.roleId)
+  const roleName = useAppSelector((state) => state.app.session?.roleName?.toLowerCase())
   const orderToEdit = useAppSelector((state)=> state.app.orderToEdit)
 
   const navItems: NavItem[] = [
@@ -26,10 +27,9 @@ function App(): React.JSX.Element {
     { id: 'orders', label: 'Ordenes'} 
   ]
 
-  if(roleId == 1){
+  if(roleId == 1 || roleName === 'admin'){
     navItems.push({ id: 'users', label: 'Usuarios'})
   }
-
 
   const renderPanel = () => {
     switch(currentTab){
@@ -38,24 +38,33 @@ function App(): React.JSX.Element {
       case "products":
         return <ProductsPanel />
       case "orders":
-        return <OrdersPanel />
+        return <OrdersPanel key={Date.now()} />
       case "users":
-        if(roleId == 1){
+        if(roleId == 1 || roleName === 'admin'){
           return <Users />
         }
+        return <HomePanel />
       case "clients":
         return <ClientsPanel />
       case "clients-create": 
-        if(roleId == 1 || roleId == 3){
+        if(roleId == 1 || roleId == 3 || roleName === 'admin' || roleName === 'vendedor'){
           return <CreateClientPage />
         }
         return <ClientsPanel />
       case "users-create":
-        return <CreateUserPage />
+        if(roleId == 1 || roleName === 'admin'){
+          return <CreateUserPage />
+        }
+        return <Users />
       case "order-create":
-        if(roleId == 1 || roleId == 3){ // debe ser admin o vendedor
+        // Permitir el acceso a los 4 roles (Admin: 1, Operador: 2, Vendedor: 3, Supervisor: 4)
+        if(
+          roleId == 1 || roleId == 2 || roleId == 3 || roleId == 4 ||
+          ['admin', 'operador', 'vendedor', 'supervisor'].includes(roleName || '')
+        ){
           return <CreateOrderPage initialOrder={orderToEdit} />
         }
+        return <OrdersPanel />
       case "profile":
         return <Profile />
       default:
