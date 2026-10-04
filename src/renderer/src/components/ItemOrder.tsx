@@ -1,25 +1,30 @@
+import { FormOrderItem } from './views/CreateOrderPage'
 import { ChangeEvent, useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { FormOrderItem } from './views/CreateOrderPage'
 import { ProductListItem } from '../../../main/domain/types/electron-env'
 
 interface ItemOrderProps {
   item: FormOrderItem
   isOnlyItem: boolean
-  selectedProductIds: number[] // Lista de IDs de productos ya seleccionados
+  disabled?: boolean
+  selectedProductIds: number[]
   onUpdateItem: (id: string, updatedFields: Partial<FormOrderItem>) => void
   onRemoveItem: (id: string) => void
 }
 
+// Solución: Usamos intersección o aseguramos que stock sea compatible
+type ProductWithStock = ProductListItem & { stock: number }
+
 export function ItemOrder({
   item,
   isOnlyItem,
+  disabled = false,
   selectedProductIds,
   onUpdateItem,
   onRemoveItem,
 }: ItemOrderProps) {
   const [searchTerm, setSearchTerm] = useState(item.description || '')
-  const [products, setProducts] = useState<ProductListItem[]>([])
+  const [products, setProducts] = useState<ProductWithStock[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -30,7 +35,6 @@ export function ItemOrder({
     width: number
   } | null>(null)
 
-  // Sincronizar el nombre si cambia la propiedad description externamente
   useEffect(() => {
     setSearchTerm(item.description || '')
   }, [item.description])
@@ -44,20 +48,20 @@ export function ItemOrder({
   }
 
   const openDropdown = (): void => {
+    if (disabled) return
     updateDropdownPosition()
     setIsOpen(true)
   }
 
-  // Carga productos desde IPC con debounce al escribir
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen || disabled) return
 
     const timer = setTimeout(async () => {
       setIsLoading(true)
       try {
         if (window.electronAPI?.getProducts) {
-          const res = await window.electronAPI?.getProducts({ search: searchTerm, page: 1, sort: "nameDesc" })
-          setProducts(res.data || [])
+          const res = await window.electronAPI?.getProducts({ search: searchTerm, page: 1, sort: 'nameDesc' })
+          setProducts((res.data || []) as ProductWithStock[])
         }
       } catch (error) {
         console.error('Error al obtener productos desde IPC:', error)
@@ -67,7 +71,7 @@ export function ItemOrder({
     }, 200)
 
     return () => clearTimeout(timer)
-  }, [searchTerm, isOpen])
+  }, [searchTerm, isOpen, disabled])
 
   useEffect(() => {
     if (!isOpen) return
@@ -91,31 +95,43 @@ export function ItemOrder({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Filtrar la lista de productos para no mostrar aquellos elegidos en otras filas
-  const availableProducts = products.filter(
-    (product) =>
-      Number(product.id) === item.productId || !selectedProductIds.includes(Number(product.id))
-  )
+  // FILTRO ESTRICTO: Excluye productos ya seleccionados y oculta automáticamente los que tengan stock 0 o menor
+  const availableProducts = products.filter((product) => {
+    const stock = Number(product.stock ?? 0)
+    const isOutOfStock = stock <= 0
+    const isAlreadySelected = Number(product.id) !== item.productId && selectedProductIds.includes(Number(product.id))
 
-  const handleSelectProduct = (product: ProductListItem) => {
+    return !isOutOfStock && !isAlreadySelected
+  })
+
+  // Obtener el stock actual del producto seleccionado en este ítem (si lo hubiera)
+  const currentProductStock = products.find((p) => Number(p.id) === item.productId)?.stock
+
+  const handleSelectProduct = (product: ProductWithStock) => {
+    if (disabled) return
     setSearchTerm(product.name)
     setIsOpen(false)
+
+    const maxStock = Number(product.stock ?? 1)
+    const adjustedQuantity = Math.min(item.quantity, maxStock)
 
     onUpdateItem(item.id, {
       productId: Number(product.id),
       description: product.name,
       unitPrice: Number(product.price),
+      quantity: adjustedQuantity,
     })
   }
 
   const handleQuantityChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const qty = Math.max(1, Number(e.target.value) || 1)
-    onUpdateItem(item.id, { quantity: qty })
-  }
+    if (disabled) return
+    const rawVal = Number(e.target.value) || 1
+    const minVal = 1
 
-  const handleUnitPriceChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const price = Math.max(0, Number(e.target.value) || 0)
-    onUpdateItem(item.id, { unitPrice: price })
+    const maxVal = currentProductStock !== undefined ? Number(currentProductStock) : rawVal
+    const qty = Math.min(maxVal, Math.max(minVal, rawVal))
+
+    onUpdateItem(item.id, { quantity: qty })
   }
 
   const subtotal = item.quantity * item.unitPrice
@@ -125,13 +141,14 @@ export function ItemOrder({
 
   return (
     <tr className="border-b border-slate-200/80 transition hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.02]">
-      {/* Columna: Búsqueda y Selección de Producto */}
+      {/* Producto */}
       <td className="px-4 py-3">
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
-            className={inputStyle}
+            disabled={disabled}
+            className={`${inputStyle} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
             placeholder="Buscar producto..."
             value={searchTerm}
             onChange={(e) => {
@@ -144,13 +161,13 @@ export function ItemOrder({
             }}
           />
 
-          {isOpen && dropdownPosition && createPortal(
+          {!disabled && isOpen && dropdownPosition && createPortal(
             <ul
               ref={dropdownRef}
               style={{
                 top: dropdownPosition.top,
                 left: dropdownPosition.left,
-                width: dropdownPosition.width
+                width: dropdownPosition.width,
               }}
               className="fixed z-[1000] max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
             >
@@ -165,8 +182,11 @@ export function ItemOrder({
                       onClick={() => handleSelectProduct(product)}
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-zinc-800"
                     >
-                      <span className="font-medium">{product.name}</span>
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                      <div>
+                        <span className="font-medium block">{product.name}</span>
+                        <span className="text-[11px] text-slate-400">Stock: {String(product.stock ?? 0)} un.</span>
+                      </div>
+                      <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                         ${Number(product.price).toLocaleString('es-AR')}
                       </span>
                     </button>
@@ -174,7 +194,7 @@ export function ItemOrder({
                 ))
               ) : (
                 <li className="px-4 py-2 text-xs text-slate-400">
-                  {products.length > 0 ? "Producto ya seleccionado" : "Sin resultados"}
+                  {products.length > 0 ? 'Sin stock disponible o ya seleccionado' : 'Sin resultados'}
                 </li>
               )}
             </ul>,
@@ -183,44 +203,46 @@ export function ItemOrder({
         </div>
       </td>
 
-      {/* Columna: Cantidad */}
+      {/* Cantidad */}
       <td className="w-28 px-4 py-3">
-        <input
-          type="number"
-          min={1}
-          value={item.quantity}
-          onChange={handleQuantityChange}
-          className={`${inputStyle} text-center`}
-        />
+        <div className="relative">
+          <input
+            type="number"
+            min={1}
+            max={currentProductStock !== undefined ? Number(currentProductStock) : undefined}
+            disabled={disabled}
+            value={item.quantity}
+            onChange={handleQuantityChange}
+            className={`${inputStyle} text-center ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+            title={currentProductStock !== undefined ? `Stock máximo disponible: ${currentProductStock}` : undefined}
+          />
+        </div>
       </td>
 
-      {/* Columna: Precio Unitario */}
+      {/* Precio Unitario */}
       <td className="w-36 px-4 py-3">
         <input
           type="text"
-          min={0}
-          step="0.01"
           value={`$${item.unitPrice.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`}
-          onChange={handleUnitPriceChange}
-          className={`${inputStyle} text-right`}
+          className={`${inputStyle} text-right cursor-not-allowed opacity-60`}
           disabled
         />
       </td>
 
-      {/* Columna: Subtotal */}
+      {/* Subtotal */}
       <td className="w-32 px-4 py-3 text-right font-semibold text-slate-900 dark:text-white">
         ${subtotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
       </td>
 
-      {/* Columna: Botón Eliminar */}
+      {/* Eliminar Ítem */}
       <td className="w-12 px-4 py-3 text-center">
         <button
           type="button"
           onClick={() => onRemoveItem(item.id)}
-          disabled={isOnlyItem}
+          disabled={isOnlyItem || disabled}
           title={isOnlyItem ? 'La orden debe tener al menos un ítem' : 'Eliminar ítem'}
           className={`inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition ${
-            isOnlyItem
+            isOnlyItem || disabled
               ? 'cursor-not-allowed opacity-30'
               : 'hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-400'
           }`}
