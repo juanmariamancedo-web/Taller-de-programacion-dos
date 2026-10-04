@@ -26,14 +26,15 @@ async function main() {
     rolesMap[roleName] = role.id
   }
 
-  // 2. Usuarios por tipo
+  // 2. Usuarios por tipo (Varios vendedores y roles estándar)
   console.log('Cargando usuarios...')
   const defaultPassword = await bcrypt.hash('123456', 10)
 
   const usersData = [
     { username: 'admin', roleId: rolesMap['admin'] },
     { username: 'supervisor', roleId: rolesMap['supervisor'] },
-    { username: 'seller', roleId: rolesMap['seller'] },
+    { username: 'seller_juan', roleId: rolesMap['seller'] },
+    { username: 'seller_maria', roleId: rolesMap['seller'] },
     { username: 'operator', roleId: rolesMap['operator'] }
   ]
 
@@ -270,13 +271,14 @@ async function main() {
     createdAddresses.push(address)
   }
 
-  // 8. Órdenes vinculadas al usuario 'seller'
-  const sellerUser = createdUsers['seller']
+  // 8. Órdenes distribuidas entre múltiples vendedores ('seller_juan' y 'seller_maria')
+  const sellerJuan = createdUsers['seller_juan']
+  const sellerMaria = createdUsers['seller_maria']
 
   const ordersData = [
     {
       currentStateId: statesMap['created'],
-      sellerId: sellerUser.id,
+      sellerId: sellerJuan.id,
       clientId: createdClients[0].id,
       shippingAddressId: createdAddresses[0].id,
       trackingNumber: null,
@@ -286,19 +288,19 @@ async function main() {
           {
             productId: createdProducts[0].id,
             unitPrice: 45000.0,
-            amount: 45000.0
+            amount: 1
           },
           {
             productId: createdProducts[2].id,
             unitPrice: 12500.5,
-            amount: 12500.5
+            amount: 1
           }
         ]
       }
     },
     {
       currentStateId: statesMap['pending'],
-      sellerId: sellerUser.id,
+      sellerId: sellerJuan.id,
       clientId: createdClients[1].id,
       shippingAddressId: createdAddresses[1].id,
       trackingNumber: 'TRK-1002-B',
@@ -308,14 +310,14 @@ async function main() {
           {
             productId: createdProducts[3].id,
             unitPrice: 68000.0,
-            amount: 136000.0
+            amount: 2
           }
         ]
       }
     },
     {
       currentStateId: statesMap['paid'],
-      sellerId: sellerUser.id,
+      sellerId: sellerMaria.id,
       clientId: createdClients[2].id,
       shippingAddressId: createdAddresses[2].id,
       trackingNumber: 'TRK-1003-C',
@@ -325,14 +327,14 @@ async function main() {
           {
             productId: createdProducts[1].id,
             unitPrice: 180000.0,
-            amount: 180000.0
+            amount: 1
           }
         ]
       }
     },
     {
       currentStateId: statesMap['dispatched'],
-      sellerId: sellerUser.id,
+      sellerId: sellerMaria.id,
       clientId: createdClients[3].id,
       shippingAddressId: null,
       trackingNumber: 'TRK-1004-D',
@@ -342,14 +344,14 @@ async function main() {
           {
             productId: createdProducts[2].id,
             unitPrice: 12500.5,
-            amount: 25001.0
+            amount: 2
           }
         ]
       }
     },
     {
       currentStateId: statesMap['delivered'],
-      sellerId: sellerUser.id,
+      sellerId: sellerMaria.id,
       clientId: createdClients[4].id,
       shippingAddressId: createdAddresses[4].id,
       trackingNumber: 'TRK-1005-E',
@@ -359,14 +361,14 @@ async function main() {
           {
             productId: createdProducts[4].id,
             unitPrice: 245000.0,
-            amount: 245000.0
+            amount: 1
           }
         ]
       }
     }
   ]
 
-  console.log('Cargando órdenes de prueba para seller...')
+  console.log('Cargando órdenes de prueba para múltiples vendedores...')
   for (const order of ordersData) {
     await prisma.order.create({
       data: order

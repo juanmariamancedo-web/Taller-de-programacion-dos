@@ -13,7 +13,7 @@ import { Prisma } from '../infrastructure/db/generated/client/client';
 export interface UserSessionContext {
   userId?: number | bigint;
   id?: number | bigint;
-  roleName: 'admin' | 'supervisor' | 'operador' | 'vendedor' | string;
+  roleName: 'admin' | 'supervisor' | 'operator' | 'seller' | string;
 }
 
 export class OrdersService {
@@ -74,11 +74,11 @@ export class OrdersService {
       }),
     };
 
-    if (roleName === 'vendedor' && currentUserId) {
+    if (roleName === 'seller' && currentUserId) {
       where.sellerId = BigInt(currentUserId);
     }
 
-    if (roleName === 'operador') {
+    if (roleName === 'operator') {
       where.currentStateId = { in: [BigInt(1), BigInt(2), BigInt(3), BigInt(4), BigInt(5)] };
     }
 
@@ -149,7 +149,7 @@ export class OrdersService {
       const activeSession = sessionContext || (await authService.getActiveSession?.());
       const roleName = activeSession?.roleName?.toLowerCase();
 
-      if (roleName === 'operador' || roleName === 'supervisor') {
+      if (roleName === 'operator' || roleName === 'supervisor') {
         return {
           success: false,
           message: 'Tu rol no tiene permisos para emitir nuevas órdenes de compra',
@@ -159,13 +159,13 @@ export class OrdersService {
       const clientId = Number(payload.clientId);
       const shippingAddressId = payload.shippingAddressId ? Number(payload.shippingAddressId) : null;
       const currentUserId = this.getSessionUserId(activeSession);
-      const sellerId = roleName === 'vendedor' ? currentUserId : Number(payload.sellerId);
+      const sellerId = roleName === 'seller' ? currentUserId : Number(payload.sellerId);
       const { items, total } = payload;
 
       if (!clientId || !sellerId || !items || items.length === 0) {
         return {
           success: false,
-          message: 'Datos de la orden incompletos (cliente, vendedor e ítems son obligatorios)',
+          message: 'Datos de la orden incompletos (cliente, seller e ítems son obligatorios)',
         };
       }
 
@@ -257,23 +257,23 @@ export class OrdersService {
         return { success: false, message: 'La orden no existe' };
       }
 
-      if (roleName === 'vendedor') {
+      if (roleName === 'seller') {
         if (currentUserId && Number(existingOrder.sellerId) !== currentUserId) {
-          return { success: false, message: 'No tenés permisos para modificar órdenes de otros vendedores' };
+          return { success: false, message: 'No tenés permisos para modificar órdenes de otros selleres' };
         }
         if (Number(existingOrder.currentStateId) !== 1) {
           return { success: false, message: 'No podés editar una orden que ya inició procesamiento logístico' };
         }
       }
 
-      if (roleName === 'operador') {
+      if (roleName === 'operator') {
         if (currentStateId) {
           return this.updateOrderState(
             { id, currentStateId: Number(currentStateId), trackingNumber, location: (payload as any).location, notes: payload.notes },
             activeSession
           );
         }
-        return { success: false, message: 'Los operadores solo pueden modificar el estado logístico de la orden' };
+        return { success: false, message: 'Los operatores solo pueden modificar el estado logístico de la orden' };
       }
 
       const parsedClientId = clientId ? BigInt(clientId) : existingOrder.clientId;
@@ -337,18 +337,18 @@ export class OrdersService {
       const orderId = BigInt(id);
       const targetStateId = Number(currentStateId);
 
-      if (roleName === 'vendedor') {
+      if (roleName === 'operator') {
         return {
           success: false,
-          message: 'Los vendedores no tienen permisos para modificar el estado logístico.',
+          message: 'Los selleres no tienen permisos para modificar el estado logístico.',
         };
       }
 
-      // Restricción evaluada en backend: Operadores no pueden marcar órdenes como rechazadas o canceladas (ID 7)
-      if (roleName === 'operador' && targetStateId === 7) {
+      // Restricción evaluada en backend: operatores no pueden marcar órdenes como rechazadas o canceladas (ID 7)
+      if (roleName === 'operator' && targetStateId === 7) {
         return {
           success: false,
-          message: 'Acción denegada: Los operadores no tienen permisos para marcar órdenes como rechazadas o canceladas.',
+          message: 'Acción denegada: Los operatores no tienen permisos para marcar órdenes como rechazadas o canceladas.',
         };
       }
 
