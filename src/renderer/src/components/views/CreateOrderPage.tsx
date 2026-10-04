@@ -37,12 +37,14 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   // 2. Vendedor consultando una orden que ya avanzó en el flujo logístico.
   const isReadOnlyDetails = Boolean(initialOrder?.id) && (isOperador || (isVendedor && isAdvancedOrder))
 
-  // 1. Estado local de IDs, Estado Logístico y Tracking
+  // 1. Estado local de IDs, Estado Logístico, Tracking y Ubicación/Notas
   const [formData, setFormData] = useState({
     clientId: initialOrder?.client?.id != null ? Number(initialOrder.client.id) : -1,
     shippingAddressId: initialOrder?.shippingAddressId != null ? Number(initialOrder.shippingAddressId) : -1,
     currentStateId: initialOrder?.currentState?.id != null ? Number(initialOrder.currentState.id) : 1,
     trackingNumber: initialOrder?.trackingNumber || '',
+    location: '',
+    notes: '',
   })
 
   // 2. Hooks de búsqueda de Clientes y Direcciones
@@ -79,6 +81,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         shippingAddressId,
         currentStateId,
         trackingNumber: initialOrder.trackingNumber || '',
+        location: '',
+        notes: '',
       })
 
       if (initialOrder.client) {
@@ -104,7 +108,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         )
       }
     } else {
-      setFormData({ clientId: -1, shippingAddressId: -1, currentStateId: 1, trackingNumber: '' })
+      setFormData({ clientId: -1, shippingAddressId: -1, currentStateId: 1, trackingNumber: '', location: '', notes: '' })
       setSearchTermClients("")
       setSearchTermAddress("")
       setItems([{ id: crypto.randomUUID(), productId: 0, description: "", quantity: 1, unitPrice: 0 }])
@@ -174,14 +178,18 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           id: String(initialOrder.id),
           currentStateId: formData.currentStateId,
           trackingNumber: formData.trackingNumber,
-        })
+          location: formData.location.trim() || undefined,
+          notes: formData.notes.trim() || undefined,
+        } as any)
 
         if (!response?.success) {
           return alert(response?.message || "Error al actualizar el estado logístico.")
         }
 
         dispatch(setOrderToEdit(null))
-        dispatch(setCurrentTab("orders"))
+        setTimeout(() => {
+          dispatch(setCurrentTab("orders"))
+        }, 100)
       } catch (err) {
         console.error("Error al actualizar estado logístico:", err)
         alert("Ocurrió un error inesperado al actualizar el estado de la orden.")
@@ -202,6 +210,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       sellerId: sellerId,
       currentStateId: formData.currentStateId,
       trackingNumber: formData.trackingNumber,
+      location: formData.location.trim() || undefined,
+      notes: formData.notes.trim() || undefined,
       total: total,
       items: items.map((i) => ({
         productId: i.productId,
@@ -227,7 +237,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       }
 
       dispatch(setOrderToEdit(null))
-      dispatch(setCurrentTab("orders"))
+      setTimeout(() => {
+        dispatch(setCurrentTab("orders"))
+      }, 100)
     } catch (err) {
       console.error("Error al guardar la orden:", err)
       alert("Error de comunicación con el proceso principal de Electron.")
@@ -236,6 +248,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const inputClass =
     "w-full rounded-xl border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+
+  const statusHistoryList = (initialOrder as any)?.statusHistory || []
 
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col gap-6 p-6">
@@ -253,7 +267,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           <p className="text-gray-500 text-sm mt-1">
             {initialOrder?.id
               ? isOperador
-                ? "Actualiza el estado logístico y datos de despacho."
+                ? "Actualiza el estado logístico, punto geográfico y datos de despacho."
                 : isVendedor && isAdvancedOrder
                 ? "La orden está en proceso logístico. Podés consultar la información pero no modificarla."
                 : "Modifica los datos necesarios de la orden existente."
@@ -273,37 +287,71 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         
         {/* Sección de Gestión Logística (Exclusivo para Operador, Supervisor y Admin al editar) */}
         {(isOperador || isSupervisor || isAdmin) && initialOrder?.id && (
-          <div className="rounded-xl bg-blue-50/50 p-4 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                Estado Logístico
-              </label>
-              <select
-                value={formData.currentStateId}
-                onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))}
-                className={inputClass}
-              >
-                <option value={1}>Creada / Pendiente</option>
-                <option value={2}>Pagada (Paid)</option>
-                <option value={3}>Despachado (Dispatched)</option>
-                <option value={4}>En Camino (In Transit)</option>
-                <option value={5}>Entregado (Delivered)</option>
-                {(isSupervisor || isAdmin) && <option value={6}>Rechazado / Cancelado</option>}
-              </select>
+          <div className="rounded-xl bg-blue-50/50 p-4 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 flex flex-col gap-4">
+            <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wide">
+              Actualización de Estado Logístico y Tracking
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  Estado Logístico
+                </label>
+                <select
+                  value={formData.currentStateId}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))}
+                  className={inputClass}
+                >
+                  <option value={1}>Creada / Pendiente</option>
+                  <option value={2}>Pagada (Paid)</option>
+                  <option value={3}>Despachado (Dispatched)</option>
+                  <option value={4}>En Camino (In Transit)</option>
+                  <option value={5}>Entregado (Delivered)</option>
+                  {(isSupervisor || isAdmin) && <option value={6}>Rechazado / Cancelado</option>}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  Número de Seguimiento (Tracking)
+                </label>
+                <input
+                  type="text"
+                  value={formData.trackingNumber}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, trackingNumber: e.target.value }))}
+                  placeholder="Ej. TRK-98234123"
+                  className={inputClass}
+                  required={isOperador && formData.currentStateId >= 3}
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                Número de Seguimiento (Tracking)
-              </label>
-              <input
-                type="text"
-                value={formData.trackingNumber}
-                onChange={(e) => setFormData((prev) => ({ ...prev, trackingNumber: e.target.value }))}
-                placeholder="Ej. TRK-98234123"
-                className={inputClass}
-                required={isOperador && formData.currentStateId >= 3}
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  Ubicación Física Actual (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={formData.location}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
+                  placeholder="Ej. Depósito Central Corrientes"
+                  className={inputClass}
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
+                  Observaciones / Novedad (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={formData.notes}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Ej. Paquete embalado y listo para transporte"
+                  className={inputClass}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -442,6 +490,36 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             </div>
           </div>
         </div>
+
+        {/* Historial de Seguimiento / Ubicaciones (Timeline) */}
+        {statusHistoryList.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-gray-200 dark:border-white/10">
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
+              Historial de Seguimiento Logístico
+            </h2>
+            <div className="relative border-l-2 border-blue-500 ml-3 flex flex-col gap-6 pl-6 py-2">
+              {statusHistoryList.map((event: any) => (
+                <div key={String(event.id)} className="relative">
+                  <span className="absolute -left-[31px] top-1.5 h-4 w-4 rounded-full bg-blue-600 ring-4 ring-white dark:ring-zinc-900" />
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center">
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {event.stateName || 'Cambio de Estado'}
+                    </span>
+                    <span className="text-xs text-gray-400">
+                      {event.createdAt ? new Date(event.createdAt).toLocaleString('es-AR') : ''}
+                    </span>
+                  </div>
+
+                  {event.notes && (
+                    <p className="text-sm font-medium text-blue-600 dark:text-blue-400 mt-1">
+                      {event.notes}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Botones de acción */}
         <div className="flex justify-end gap-4 border-t border-gray-200 pt-4 dark:border-white/10">

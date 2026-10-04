@@ -78,6 +78,13 @@ export class OrdersService {
               product: true,
             },
           },
+          orderStatusHistory: {
+            orderBy: { createdAt: 'asc' },
+            include: {
+              state: { select: { id: true, name: true } },
+              address: { include: { city: true } },
+            },
+          },
         },
       }),
     ]);
@@ -95,6 +102,16 @@ export class OrdersService {
         description: item.product?.name ?? '',
         quantity: Number(item.amount),
         unitPrice: Number(item.unitPrice),
+      })),
+      statusHistory: order.orderStatusHistory.map((history) => ({
+        id: Number(history.id),
+        orderId: Number(history.orderId),
+        stateId: Number(history.stateId),
+        addressId: history.addressId ? Number(history.addressId) : null,
+        stateName: history.state?.name ?? '',
+        location: (history as any).location ?? null,
+        notes: history.notes ?? '',
+        createdAt: history.createdAt,
       })),
     }));
 
@@ -146,14 +163,14 @@ export class OrdersService {
           },
         });
 
-        // Registro de auditoría inicial si existe dirección de envío
+        // Registro de auditoría inicial e hito de origen
         if (shippingAddressId) {
           await tx.orderStatusHistory.create({
             data: {
               orderId: order.id,
               stateId: BigInt(1),
               addressId: BigInt(shippingAddressId),
-              notes: 'Creación de la orden de compra',
+              notes: 'Creación de la orden de compra y registro de dirección de despacho',
             },
           });
         }
@@ -203,7 +220,7 @@ export class OrdersService {
       if (roleName === 'operador') {
         if (currentStateId) {
           return this.updateOrderState(
-            { id, currentStateId: Number(currentStateId), trackingNumber },
+            { id, currentStateId: Number(currentStateId), trackingNumber, location: (payload as any).location, notes: payload.notes },
             sessionContext
           );
         }
@@ -281,11 +298,11 @@ export class OrdersService {
   }
 
   async updateOrderState(
-    payload: UpdateOrderStatePayload,
+    payload: UpdateOrderStatePayload & { location?: string },
     sessionContext?: UserSessionContext
   ): Promise<OrderMutationResponse> {
     try {
-      const { id, currentStateId, trackingNumber, notes } = payload;
+      const { id, currentStateId, trackingNumber, notes, location } = payload;
       const roleName = sessionContext?.roleName?.toLowerCase();
       const orderId = BigInt(id);
 
@@ -326,12 +343,17 @@ export class OrdersService {
         });
 
         if (order.shippingAddressId) {
+          // Asigna notas o ubicación enviada desde el formulario logístico
+          const historyNote = location
+            ? `Ubicación: ${location}. ${notes ?? ''}`.trim()
+            : notes || `Estado actualizado a ID ${currentStateId} por ${roleName}`;
+
           await tx.orderStatusHistory.create({
             data: {
               orderId: order.id,
               stateId: BigInt(currentStateId),
               addressId: order.shippingAddressId,
-              notes: notes || `Estado actualizado a ID ${currentStateId} por ${roleName}`,
+              notes: historyNote,
             },
           });
         }
@@ -342,7 +364,7 @@ export class OrdersService {
       return {
         success: true,
         orderId: Number(updatedOrder.id),
-        message: 'Estado logístico e historial actualizados correctamente.',
+        message: 'Estado logístico e historial de ubicación actualizados correctamente.',
       };
     } catch (err: any) {
       console.error('Error en updateOrderState:', err);
