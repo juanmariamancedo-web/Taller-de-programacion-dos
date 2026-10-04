@@ -21,9 +21,9 @@ export default function OrdersPage() {
 
     // Normalizar roles de usuario
     const roleName = session?.roleName?.toLowerCase() || '';
-    const isVendedor = roleName === 'vendedor' || session?.roleId === 3;
-    const isOperador = roleName === 'operador' || session?.roleId === 2;
-    const isSupervisor = roleName === 'supervisor' || session?.roleId === 4;
+    const isVendedor = roleName === 'seller' || session?.roleId === 3;
+    const isOperador = roleName === 'operator' || session?.roleId === 4;
+    const isSupervisor = roleName === 'supervisor' || session?.roleId === 2;
     const isAdmin = roleName === 'admin' || session?.roleId === 1;
 
     // Permisos por módulo
