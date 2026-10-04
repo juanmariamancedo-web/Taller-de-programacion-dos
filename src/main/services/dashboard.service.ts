@@ -12,7 +12,7 @@ export class DashboardService {
     // Filtros base de órdenes según el rol
     const orderWhereClause: any = {};
 
-    if (roleName === 'vendedor' && currentUserId) {
+    if (roleName === 'seller' && currentUserId) {
       orderWhereClause.sellerId = currentUserId;
     }
 
@@ -70,7 +70,7 @@ export class DashboardService {
 
       prisma.itemOrder.groupBy({
         by: ['productId'],
-        ...(roleName === 'vendedor' && currentUserId && {
+        ...(roleName === 'seller' && currentUserId && {
           where: {
             order: {
               sellerId: currentUserId,
