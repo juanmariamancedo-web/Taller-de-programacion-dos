@@ -1,8 +1,21 @@
 import { DashboardDataResponse } from '../domain/types/electron-env';
 import { prisma } from '../infrastructure/db/prisma';
+import { authService } from './auth.service';
 
 export class DashboardService {
-  async getDashboardData(): Promise<DashboardDataResponse> {
+  async getDashboardData(sessionContext?: { id?: number | bigint; roleName?: string } | null): Promise<DashboardDataResponse> {
+    const activeSession = sessionContext || (await authService.getActiveSession?.());
+    const roleName = activeSession?.roleName?.toLowerCase();
+    const rawUserId = (activeSession as any)?.userId ?? activeSession?.id;
+    const currentUserId = rawUserId !== undefined ? BigInt(rawUserId) : undefined;
+
+    // Filtros base de órdenes según el rol
+    const orderWhereClause: any = {};
+
+    if (roleName === 'vendedor' && currentUserId) {
+      orderWhereClause.sellerId = currentUserId;
+    }
+
     const [
       registeredClients,
       pendingOrders,
@@ -16,6 +29,7 @@ export class DashboardService {
 
       prisma.order.count({
         where: {
+          ...orderWhereClause,
           currentState: {
             name: 'pending',
           },
@@ -24,34 +38,45 @@ export class DashboardService {
 
       prisma.order.count({
         where: {
+          ...orderWhereClause,
           currentState: {
             name: 'delivered',
           },
         },
       }),
 
-      prisma.order.count(),
+      prisma.order.count({
+        where: orderWhereClause,
+      }),
 
       prisma.order.findMany({
+        where: orderWhereClause,
         orderBy: {
           createdAt: 'desc',
         },
         take: 5,
         include: {
           currentState: true,
-          client: true, // Incluimos client por si renderizas su nombre
+          client: true,
         },
       }),
 
       prisma.order.aggregate({
+        where: orderWhereClause,
         _sum: {
           total: true,
         },
       }),
 
-      // Agrupamos en 'itemOrder' por productId y sumamos 'amount'
       prisma.itemOrder.groupBy({
         by: ['productId'],
+        ...(roleName === 'vendedor' && currentUserId && {
+          where: {
+            order: {
+              sellerId: currentUserId,
+            },
+          },
+        }),
         _sum: {
           amount: true,
         },
@@ -79,9 +104,19 @@ export class DashboardService {
       return {
         id: item.productId,
         name: product?.name ?? 'Producto no encontrado',
-        totalSold: item._sum.amount ?? 0,
+        totalSold: Number(item._sum.amount ?? 0),
       };
     });
+
+    const formattedLastOrders = lastOrders.map((order) => ({
+      ...order,
+      id: Number(order.id),
+      clientId: Number(order.clientId),
+      sellerId: Number(order.sellerId),
+      currentStateId: Number(order.currentStateId),
+      shippingAddressId: order.shippingAddressId ? Number(order.shippingAddressId) : null,
+      total: Number(order.total),
+    }));
 
     const totalRevenue = Number(ordersTotalAggregate._sum.total ?? 0);
     const averageTicket = totalOrdersCount > 0 ? totalRevenue / totalOrdersCount : 0;
@@ -93,7 +128,7 @@ export class DashboardService {
         pendingOrders,
         deliveredOrders,
         averageTicket,
-        lastOrders,
+        lastOrders: formattedLastOrders as any,
         topProducts,
       },
     };
