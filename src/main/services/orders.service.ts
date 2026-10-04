@@ -170,6 +170,32 @@ export class OrdersService {
       }
 
       const newOrder = await prisma.$transaction(async (tx) => {
+        // 1. Verificar stock y restar por cada ítem
+        for (const item of items) {
+          const productId = BigInt(item.productId);
+          const requestedQuantity = Number(item.quantity);
+
+          const product = await tx.product.findUnique({
+            where: { id: productId },
+            select: { id: true, name: true, stock: true },
+          });
+
+          if (!product) {
+            throw new Error(`El producto con ID ${item.productId} no existe.`);
+          }
+
+          if (product.stock < requestedQuantity) {
+            throw new Error(`Stock insuficiente para el producto "${product.name}". Disponible: ${product.stock}, solicitado: ${requestedQuantity}.`);
+          }
+
+          // Descontar stock del producto
+          await tx.product.update({
+            where: { id: productId },
+            data: { stock: { decrement: requestedQuantity } },
+          });
+        }
+
+        // 2. Crear la orden de compra
         const order = await tx.order.create({
           data: {
             clientId: BigInt(clientId),
@@ -193,7 +219,7 @@ export class OrdersService {
               orderId: order.id,
               stateId: BigInt(1),
               addressId: BigInt(shippingAddressId),
-              notes: 'Creación de la orden de compra',
+              notes: 'Creación de la orden de compra y descuento de stock',
             },
           });
         }
@@ -204,7 +230,7 @@ export class OrdersService {
       return {
         success: true,
         orderId: Number(newOrder.id),
-        message: 'Orden creada exitosamente',
+        message: 'Orden creada exitosamente y stock actualizado.',
       };
     } catch (err: any) {
       console.error('Error al crear orden en Prisma:', err);
@@ -311,7 +337,7 @@ export class OrdersService {
       const orderId = BigInt(id);
       const targetStateId = Number(currentStateId);
 
-      if (roleName === 'seller') {
+      if (roleName === 'vendedor') {
         return {
           success: false,
           message: 'Los vendedores no tienen permisos para modificar el estado logístico.',
@@ -319,7 +345,7 @@ export class OrdersService {
       }
 
       // Restricción evaluada en backend: Operadores no pueden marcar órdenes como rechazadas o canceladas (ID 7)
-      if (roleName === 'operator' && targetStateId === 7) {
+      if (roleName === 'operador' && targetStateId === 7) {
         return {
           success: false,
           message: 'Acción denegada: Los operadores no tienen permisos para marcar órdenes como rechazadas o canceladas.',
@@ -329,6 +355,7 @@ export class OrdersService {
       const updatedOrder = await prisma.$transaction(async (tx) => {
         const existingOrder = await tx.order.findUnique({
           where: { id: orderId },
+          include: { itemOrders: true },
         });
 
         if (!existingOrder) {
@@ -337,12 +364,12 @@ export class OrdersService {
 
         const currentStateInDb = Number(existingOrder.currentStateId);
 
-        // 1. REGLA ANTI-DUPLICADOS: Bloquea intentos de volver a guardar el mismo estado
+        // 1. REGLA ANTI-DUPLICADOS
         if (currentStateInDb === targetStateId) {
           throw new Error('La orden ya se encuentra en este estado.');
         }
 
-        // 2. REGLA DE SECUENCIA ILÓGICA: Valida que la transición sea permitida
+        // 2. REGLA DE SECUENCIA ILÓGICA
         const allowedNextStates = OrdersService.ALLOWED_TRANSITIONS[currentStateInDb] || [];
         if (!allowedNextStates.includes(targetStateId)) {
           throw new Error(
@@ -355,7 +382,17 @@ export class OrdersService {
           throw new Error('El número de seguimiento (tracking number) es obligatorio al despachar el paquete.');
         }
 
-        // 4. Actualizar la orden principal
+        // 4. LIBERAR / DEVOLVER STOCK SI LA ORDEN ES RECHAZADA (ID 7) O DA ERROR DE STOCK (ID 8)
+        if ((targetStateId === 7 || targetStateId === 8) && currentStateInDb !== 7 && currentStateInDb !== 8) {
+          for (const item of existingOrder.itemOrders) {
+            await tx.product.update({
+              where: { id: item.productId },
+              data: { stock: { increment: Number(item.amount) } },
+            });
+          }
+        }
+
+        // 5. Actualizar la orden principal
         const updated = await tx.order.update({
           where: { id: orderId },
           data: {
@@ -364,11 +401,17 @@ export class OrdersService {
           },
         });
 
-        // 5. Registrar el hito único en el historial
+        // 6. Registrar el hito en el historial
         if (updated.shippingAddressId) {
+          let statusSuffix = '';
+          if (targetStateId === 7) statusSuffix = ' (Stock devuelto por rechazo)';
+          if (targetStateId === 8) statusSuffix = ' (Stock devuelto por error de stock)';
+
           const historyNote = location?.trim()
-            ? `Ubicación: ${location.trim()}.${notes?.trim() ? ` ${notes.trim()}` : ''}`
-            : notes?.trim() || `Estado actualizado a ID ${targetStateId} por ${roleName}`;
+            ? `Ubicación: ${location.trim()}.${notes?.trim() ? ` ${notes.trim()}` : ''}${statusSuffix}`
+            : notes?.trim() 
+              ? `${notes.trim()}${statusSuffix}`
+              : `Estado actualizado a ID ${targetStateId} por ${roleName}${statusSuffix}`;
 
           await tx.orderStatusHistory.create({
             data: {
@@ -383,10 +426,14 @@ export class OrdersService {
         return updated;
       });
 
+      let successMessage = 'Estado logístico e historial actualizados correctamente.';
+      if (targetStateId === 7) successMessage = 'Orden rechazada y stock devuelto exitosamente.';
+      if (targetStateId === 8) successMessage = 'Estado marcado como Error de Stock y stock devuelto al inventario.';
+
       return {
         success: true,
         orderId: Number(updatedOrder.id),
-        message: 'Estado logístico e historial actualizados correctamente.',
+        message: successMessage,
       };
     } catch (err: any) {
       console.error('Error en updateOrderState:', err);
