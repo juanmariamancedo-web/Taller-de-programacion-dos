@@ -317,7 +317,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   
   const sliceStatuses = ALL_STATUSES.slice(currentOrderStateId - 1, currentOrderStateId + 1);
   
-  if(currentOrderStateId == 7 || session?.roleId !== 3){
+  if(currentOrderStateId == 7 || session?.roleId !== 3 && (currentOrderStateId !== 6)){
     sliceStatuses.push({ id: 7, label: "Rechazado / Cancelado (rejected)" })
   }
   
