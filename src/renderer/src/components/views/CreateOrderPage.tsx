@@ -321,7 +321,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     sliceStatuses.push({ id: 7, label: "Rechazado / Cancelado (rejected)" })
   }
   
-  if(currentOrderStateId == 8 || session?.roleId == 1 || session?.roleId === 2){
+  if((currentOrderStateId == 8 || session?.roleId == 1 || session?.roleId === 2) && currentOrderStateId !== 6){
     sliceStatuses.push({ id: 8, label: "Error de Stock (stock_error)" },)
   }
 

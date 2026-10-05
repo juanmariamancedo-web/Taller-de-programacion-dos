@@ -337,7 +337,7 @@ export class OrdersService {
       const orderId = BigInt(id);
       const targetStateId = Number(currentStateId);
 
-      if (roleName === 'operator') {
+      if (roleName === 'seller') {
         return {
           success: false,
           message: 'Los selleres no tienen permisos para modificar el estado logístico.',
