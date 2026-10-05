@@ -18,23 +18,16 @@ interface OrderFormProps {
   initialOrder?: OrderWithState | null
 }
 
-const ALL_STATUSES = [
-  { id: 1, label: "Creada / Borrador (created)" },
-  { id: 2, label: "Pendiente (pending)" },
-  { id: 3, label: "Pagada (paid)" },
-  { id: 4, label: "Despachado (dispatched)" },
-  { id: 5, label: "En Camino (in_transit)" },
-  { id: 6, label: "Entregado (delivered)" },
-  { id: 8, label: "Error de Stock (stock_error)" },
-  { id: 7, label: "Rechazado / Cancelado (rejected)" },
-]
+
+
 
 export default function OrderForm({ initialOrder }: OrderFormProps) {
   const dispatch = useAppDispatch()
-
+  
   const [session, setSession] = useState<{ id?: number; roleId?: number; roleName?: string } | null>(null)
   const [loadingSession, setLoadingSession] = useState<boolean>(true)
-
+  
+  
   useEffect(() => {
     const fetchSession = async () => {
       try {
@@ -54,20 +47,20 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     }
     fetchSession()
   }, [])
-
+  
   const roleName = session?.roleName?.toLowerCase() || ''
   const roleId = Number(session?.roleId)
-
+  
   const isAdmin = roleName === 'admin' || roleId === 1
   const isSupervisor = roleName === 'supervisor' || roleId === 2
   const isVendedor = roleName === 'seller' || roleName === 'vendedor' || roleId === 3
   const isOperador = roleName === 'operator' || roleName === 'operador' || roleId === 4
-
+  
   const isAdvancedOrder = Boolean(initialOrder?.id) && Number(initialOrder?.currentState?.id ?? 1) !== 1
   const isReadOnlyDetails = Boolean(initialOrder?.id) && (isOperador || (isVendedor && isAdvancedOrder))
-
+  
   const currentOrderStateId = Number(initialOrder?.currentState?.id ?? 1)
-
+  
   const [formData, setFormData] = useState({
     clientId: initialOrder?.client?.id != null ? Number(initialOrder.client.id) : -1,
     shippingAddressId: initialOrder?.shippingAddressId != null ? Number(initialOrder.shippingAddressId) : -1,
@@ -76,7 +69,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     location: '',
     notes: '',
   })
-
+  
   const {
     clients,
     searchTermClients,
@@ -102,7 +95,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       const clientId = initialOrder.client?.id != null ? Number(initialOrder.client.id) : -1
       const shippingAddressId = initialOrder.shippingAddressId != null ? Number(initialOrder.shippingAddressId) : -1
       const currentStateId = initialOrder.currentState?.id != null ? Number(initialOrder.currentState.id) : 1
-
+      
       setFormData({
         clientId,
         shippingAddressId,
@@ -111,7 +104,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         location: '',
         notes: '',
       })
-
+      
       if (initialOrder.client) {
         setSearchTermClients(`${initialOrder.client.name} ${initialOrder.client.lastname}`)
       }
@@ -121,7 +114,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         const city = addr.city?.name ? `, ${addr.city.name}` : ""
         setSearchTermAddress(`${addr.street ?? ""} ${addr.number ?? ""}${city}`.trim())
       }
-
+      
       const orderItems = (initialOrder as any).items ?? (initialOrder as any).itemOrders
       if (orderItems && orderItems.length > 0) {
         setItems(
@@ -154,7 +147,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     if (isReadOnlyDetails || items.length === 1) return
     setItems((prev) => prev.filter((item) => item.id !== id))
   }
-
+  
   const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) => {
     if (isReadOnlyDetails) return
     setItems((prev) =>
@@ -169,7 +162,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     setSearchTermAddress("")
     setIsOpenClients(false)
   }
-
+  
   const handleAddressSelect = (ubic: (typeof addresses)[number]) => {
     if (isReadOnlyDetails) return
     setFormData((prev) => ({ ...prev, shippingAddressId: Number(ubic.id) }))
@@ -212,7 +205,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       if (formData.currentStateId >= 4 && !formData.trackingNumber.trim()) {
         return alert("El número de seguimiento (tracking) es obligatorio al despachar el paquete.")
       }
-
+      
       try {
         // Se envía directamente al backend y este validará si la transición o rol son correctos
         const response = await window.electronAPI?.updateOrderState?.({
@@ -222,7 +215,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           location: formData.location.trim() || undefined,
           notes: formData.notes.trim() || undefined,
         } as any)
-
+        
         if (!response?.success) {
           return alert(response?.message || "Error al actualizar el estado logístico.")
         }
@@ -271,7 +264,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       } else {
         response = await window.electronAPI?.createOrder?.(payload as any)
       }
-
+      
       if (!response?.success) {
         return alert(response?.message || "Error al procesar la orden")
       }
@@ -304,13 +297,32 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     "w-full rounded-xl border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
 
   const statusHistoryList = (initialOrder as any)?.statusHistory || []
-
+  
   if (loadingSession) {
     return (
       <div className="flex h-96 items-center justify-center">
         <p className="text-sm text-gray-500">Cargando datos de sesión...</p>
       </div>
     )
+  }
+  
+  const ALL_STATUSES = [
+    { id: 1, label: "Creada / Borrador (created)" },
+    { id: 2, label: "Pendiente (pending)" },
+    { id: 3, label: "Pagada (paid)" },
+    { id: 4, label: "Despachado (dispatched)" },
+    { id: 5, label: "En Camino (in_transit)" },
+    { id: 6, label: "Entregado (delivered)" },
+  ]
+  
+  const sliceStatuses = ALL_STATUSES.slice(currentOrderStateId - 1, currentOrderStateId + 1);
+  
+  if(currentOrderStateId == 7 || session?.roleId !== 3){
+    sliceStatuses.push({ id: 7, label: "Rechazado / Cancelado (rejected)" })
+  }
+  
+  if((currentOrderStateId == 8 || session?.roleId == 1 || session?.roleId === 2) && currentOrderStateId !== 6){
+    sliceStatuses.push({ id: 8, label: "Error de Stock (stock_error)" },)
   }
 
   return (
@@ -333,7 +345,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 : isVendedor && isAdvancedOrder
                 ? "La orden está en proceso logístico. Podés consultar la información pero no modificarla."
                 : "Modifica los datos necesarios de la orden existente."
-              : "Ingresá los datos necesarios para registrar una nueva orden."}
+                : "Ingresá los datos necesarios para registrar una nueva orden."}
           </p>
         </div>
         <button
@@ -364,7 +376,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                   onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))}
                   className={inputClass}
                 >
-                  {ALL_STATUSES.map((status) => (
+                  {sliceStatuses.map((status) => (
                     <option key={status.id} value={status.id}>
                       {status.label}
                     </option>

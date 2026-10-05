@@ -61,6 +61,9 @@ export default function LoginPanel({ children }: Props) {
       }
 
       const activeSession = await window.electronAPI?.getSession();
+
+      setUsername("")
+      setPassword("")
       handleSetSession(activeSession);
 
     } catch (error) {
