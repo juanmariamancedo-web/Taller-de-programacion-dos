@@ -110,7 +110,7 @@ export default function Catalogo(): JSX.Element {
   const session = useAppSelector((state) => state.app.session)
   const canManageProducts = session?.roleName === 'admin' || session?.roleName === 'supervisor'
   const canEditProducts = canManageProducts
-  const canAdjustStock = session?.roleName === 'admin' || session?.roleName === 'seller'
+  const canAdjustStock = session?.roleName === 'admin' || session?.roleName === 'supervisor'
   const productTableColumnCount = canEditProducts ? 6 : 5
 
   const reloadCurrentPage = async (): Promise<void> => {
