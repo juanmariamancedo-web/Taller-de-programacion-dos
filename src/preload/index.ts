@@ -28,9 +28,9 @@ import {
   UpdateProductInput,
   Unsubscribe, 
   CreateOrderPayload, 
-  CreateOrderResponse,
   UpdateOrderPayload, 
-  UpdateProfileInput
+  UpdateProfileInput,
+  OrdersReportFilters
 } from '../main/domain/types/electron-env'
 
 const api = {
@@ -38,6 +38,9 @@ const api = {
     ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
   getDashboardData: () => ipcRenderer.invoke('dashboard:getData'),
+  getProductsReport: () => ipcRenderer.invoke('reports:products'),
+  getClientsReport: () => ipcRenderer.invoke('reports:clients'),
+  getOrdersReport: (filters: OrdersReportFilters) => ipcRenderer.invoke('reports:orders', filters),
   getOrders: (searchParams?: SearchParams) => 
     ipcRenderer.invoke('orders:getOrders', searchParams),
   createOrder: (payload: CreateOrderPayload) =>

@@ -5,19 +5,25 @@ import { NavItem } from '../../main/domain/types/NavItem'
 import OrdersPanel from './components/views/OrdersPanel'
 import ClientsPanel from './components/views/ClientsPanel'
 import CreateClientPage from './components/views/CreateClientPage'
-import { useAppSelector } from "./store/hooks";
+import { useAppDispatch, useAppSelector } from "./store/hooks";
+import { setCurrentTab } from './store/slices/appSlice'
 import LoginPanel from './components/views/LoginPanel'
 import Users from './components/views/Users'
 import CreateUserPage from './components/views/CreateUserPage'
 import CreateOrderPage from "./components/views/CreateOrderPage"
 import Profile from './components/views/Profile'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { ClientsReport, OrdersReport, ProductsReport } from './components/views/Reports'
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
+  const dispatch = useAppDispatch()
   const session = useAppSelector((state) => state.app.session)
   const roleId = useAppSelector((state) => state.app.session?.roleId)
   const roleName = useAppSelector((state) => state.app.session?.roleName?.toLowerCase())
   const orderToEdit = useAppSelector((state)=> state.app.orderToEdit)
+  const location = useLocation()
+  const navigate = useNavigate()
 
   const navItems: NavItem[] = [
     { id: 'dashboard', label: 'Inicio'},
@@ -32,6 +38,16 @@ function App(): React.JSX.Element {
   }
 
   const renderPanel = () => {
+    if (location.pathname === '/reportes/productos') {
+      return <ProductsReport onBack={(): void => { dispatch(setCurrentTab('products')); navigate('/') }} />
+    }
+    if (location.pathname === '/reportes/clientes') {
+      return <ClientsReport onBack={(): void => { dispatch(setCurrentTab('clients')); navigate('/') }} />
+    }
+    if (location.pathname === '/reportes/ordenes') {
+      return <OrdersReport onBack={(): void => { dispatch(setCurrentTab('orders')); navigate('/') }} />
+    }
+
     switch(currentTab){
       case "dashboard":
         return <HomePanel />

@@ -145,6 +145,60 @@ export interface DashboardDataResponse {
   message?: string
 }
 
+export interface ProductReportRow {
+  sellerId: string
+  sellerName: string
+  ordersCount: number
+  salesTotal: number
+}
+
+export interface ProductReportData {
+  rows: ProductReportRow[]
+  totalOrders: number
+  totalSales: number
+  sellerCount: number
+}
+
+export interface ClientReportRow {
+  clientId: string
+  clientName: string
+  purchases: number
+  amountSpent: number
+}
+
+export interface ClientReportData {
+  rows: ClientReportRow[]
+  totalPurchases: number
+  totalSpent: number
+  clientCount: number
+}
+
+export interface OrdersReportFilters {
+  from?: string
+  to?: string
+}
+
+export interface OrdersReportRow {
+  productId: string
+  productName: string
+  quantitySold: number
+  salesTotal: number
+  orderCount: number
+}
+
+export interface OrdersReportData {
+  rows: OrdersReportRow[]
+  totalUnits: number
+  totalSales: number
+  totalOrders: number
+}
+
+export interface ReportResponse<Data> {
+  success: boolean
+  data?: Data
+  message?: string
+}
+
 // --- DIRECCIONES Y PROVINCIAS ---
 export type AddressWithCityAndClient = Prisma.AddressGetPayload<{
   include: { city: true; client: true }
@@ -351,6 +405,9 @@ export interface IElectronAPI {
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
   getDashboardData: () => Promise<DashboardDataResponse>
+  getProductsReport: () => Promise<ReportResponse<ProductReportData>>
+  getClientsReport: () => Promise<ReportResponse<ClientReportData>>
+  getOrdersReport: (filters: OrdersReportFilters) => Promise<ReportResponse<OrdersReportData>>
   
   // Usuarios
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>

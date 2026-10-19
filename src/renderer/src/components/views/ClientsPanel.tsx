@@ -5,9 +5,11 @@ import { Sort } from '../Sort'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { setClientToEdit, setCurrentTab } from '../../store/slices/appSlice'
 import type { ClientListItem } from '../../../../main/domain/types/electron-env'
+import { useReportNavigation } from './useReportNavigation'
 
 export default function ClientsPanel() {
   const dispatch = useAppDispatch()
+  const navigateToReport = useReportNavigation()
   const { page, search, sort } = useAppSelector((state) => state.app)
   const [clients, setClients] = useState<ClientListItem[]>([])
   const [total, setTotal] = useState(0)
@@ -67,7 +69,15 @@ export default function ClientsPanel() {
     <div className="flex flex-col items-center gap-3">
       <div className="w-full flex flex-col sm:flex-row justify-between items-center gap-4 pb-6 lg:pb-8">
         <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">Clientes</h1>
-        {canManageClients && (
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigateToReport('clientes')}
+            className="rounded-lg border border-blue-600 px-4 py-2.5 font-semibold text-blue-700 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+          >
+            Reportes
+          </button>
+          {canManageClients && (
           <button
             type="button"
             onClick={() => {
@@ -79,7 +89,8 @@ export default function ClientsPanel() {
             <span className="text-xl leading-none">+</span>
             Agregar cliente
           </button>
-        )}
+          )}
+        </div>
       </div>
 
       <div className="min-w-full"><Search /></div>
