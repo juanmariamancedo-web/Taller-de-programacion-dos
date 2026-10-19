@@ -157,6 +157,24 @@ export interface ProductReportData {
   totalOrders: number
   totalSales: number
   sellerCount: number
+  details: ReportOrderDetail[]
+}
+
+export interface ReportOrderItem {
+  productName: string
+  quantity: number
+  unitPrice: number
+  lineTotal: number
+}
+
+export interface ReportOrderDetail {
+  orderId: string
+  orderDate: string | null
+  sellerName: string
+  clientName: string
+  orderState: string
+  orderTotal: number
+  items: ReportOrderItem[]
 }
 
 export interface ClientReportRow {
@@ -171,6 +189,7 @@ export interface ClientReportData {
   totalPurchases: number
   totalSpent: number
   clientCount: number
+  details: ReportOrderDetail[]
 }
 
 export interface OrdersReportFilters {
@@ -191,6 +210,28 @@ export interface OrdersReportData {
   totalUnits: number
   totalSales: number
   totalOrders: number
+  details: Array<{
+    orderId: string
+    orderDate: string | null
+    sellerName: string
+    clientName: string
+    productName: string
+    quantity: number
+    unitPrice: number
+    lineTotal: number
+    orderTotal: number
+  }>
+}
+
+export interface ReportPdfInput {
+  title: string
+  html: string
+}
+
+export interface ReportPdfResponse {
+  success: boolean
+  canceled?: boolean
+  message?: string
 }
 
 export interface ReportResponse<Data> {
@@ -408,7 +449,9 @@ export interface IElectronAPI {
   getProductsReport: () => Promise<ReportResponse<ProductReportData>>
   getClientsReport: () => Promise<ReportResponse<ClientReportData>>
   getOrdersReport: (filters: OrdersReportFilters) => Promise<ReportResponse<OrdersReportData>>
-  
+  exportReportPdf: (input: ReportPdfInput) => Promise<ReportPdfResponse>
+  onReportsUpdated: (callback: () => void) => Unsubscribe
+
   // Usuarios
   getUsers: (searchParams: SearchParams) => Promise<UserResponse>
   createUser: (input: CreateUserInput) => Promise<CreateUserResponse>
@@ -418,9 +461,9 @@ export interface IElectronAPI {
   updateProfile: (input: UpdateProfileInput) => Promise<ProfileResponse>
 
   // Órdenes
-  getOrders: (searchParams?: SearchParams) => Promise<OrderResponse>;
-  createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResponse>;
-  updateOrder: (payload: UpdateOrderPayload) => Promise<OrderMutationResponse>;
+  getOrders: (searchParams?: SearchParams) => Promise<OrderResponse>
+  createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResponse>
+  updateOrder: (payload: UpdateOrderPayload) => Promise<OrderMutationResponse>
   updateOrderState: (payload: UpdateOrderStatePayload) => Promise<OrderMutationResponse>
 
   // Clientes y Direcciones

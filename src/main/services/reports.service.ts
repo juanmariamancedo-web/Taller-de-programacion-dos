@@ -34,13 +34,25 @@ export class ReportsService {
     const orders = await prisma.order.findMany({
       where: sellerFilter,
       select: {
+        id: true,
+        createdAt: true,
+        currentState: { select: { name: true } },
         sellerId: true,
         total: true,
-        seller: { select: { username: true } }
+        seller: { select: { username: true } },
+        client: { select: { name: true, lastname: true } },
+        itemOrders: {
+          select: {
+            amount: true,
+            unitPrice: true,
+            product: { select: { name: true } }
+          }
+        }
       }
     })
 
     const sellers = new Map<string, ProductReportData['rows'][number]>()
+    const details: ProductReportData['details'] = []
     let totalSales = 0
     for (const order of orders) {
       const sellerId = order.sellerId.toString()
@@ -55,6 +67,24 @@ export class ReportsService {
       seller.salesTotal += salesTotal
       totalSales += salesTotal
       sellers.set(sellerId, seller)
+      details.push({
+        orderId: order.id.toString(),
+        orderDate: order.createdAt?.toISOString() ?? null,
+        sellerName: order.seller.username,
+        clientName: `${order.client.name} ${order.client.lastname}`,
+        orderState: order.currentState.name,
+        orderTotal: salesTotal,
+        items: order.itemOrders.map((item) => {
+          const quantity = Number(item.amount)
+          const unitPrice = Number(item.unitPrice)
+          return {
+            productName: item.product.name,
+            quantity,
+            unitPrice,
+            lineTotal: quantity * unitPrice
+          }
+        })
+      })
     }
 
     const rows = [...sellers.values()].sort(
@@ -67,7 +97,8 @@ export class ReportsService {
       rows,
       totalOrders: orders.length,
       totalSales,
-      sellerCount: rows.length
+      sellerCount: rows.length,
+      details
     }
   }
 
@@ -76,13 +107,25 @@ export class ReportsService {
     const orders = await prisma.order.findMany({
       where: sellerFilter,
       select: {
+        id: true,
+        createdAt: true,
         clientId: true,
         total: true,
-        client: { select: { name: true, lastname: true } }
+        client: { select: { name: true, lastname: true } },
+        seller: { select: { username: true } },
+        currentState: { select: { name: true } },
+        itemOrders: {
+          select: {
+            amount: true,
+            unitPrice: true,
+            product: { select: { name: true } }
+          }
+        }
       }
     })
 
     const clients = new Map<string, ClientReportData['rows'][number]>()
+    const details: ClientReportData['details'] = []
     let totalSpent = 0
     for (const order of orders) {
       const clientId = order.clientId.toString()
@@ -97,6 +140,24 @@ export class ReportsService {
       client.amountSpent += amountSpent
       totalSpent += amountSpent
       clients.set(clientId, client)
+      details.push({
+        orderId: order.id.toString(),
+        orderDate: order.createdAt?.toISOString() ?? null,
+        sellerName: order.seller.username,
+        clientName: `${order.client.name} ${order.client.lastname}`,
+        orderState: order.currentState.name,
+        orderTotal: amountSpent,
+        items: order.itemOrders.map((item) => {
+          const quantity = Number(item.amount)
+          const unitPrice = Number(item.unitPrice)
+          return {
+            productName: item.product.name,
+            quantity,
+            unitPrice,
+            lineTotal: quantity * unitPrice
+          }
+        })
+      })
     }
 
     const rows = [...clients.values()].sort(
@@ -109,7 +170,8 @@ export class ReportsService {
       rows,
       totalPurchases: orders.length,
       totalSpent,
-      clientCount: rows.length
+      clientCount: rows.length,
+      details
     }
   }
 
@@ -133,6 +195,7 @@ export class ReportsService {
       where: {
         order: {
           ...sellerFilter,
+          currentState: { name: { in: ['paid', 'dispatched', 'in_transit', 'delivered'] } },
           ...(Object.keys(createdAt).length ? { createdAt } : {})
         }
       },
@@ -141,13 +204,22 @@ export class ReportsService {
         unitPrice: true,
         orderId: true,
         productId: true,
-        product: { select: { name: true } }
+        product: { select: { name: true } },
+        order: {
+          select: {
+            createdAt: true,
+            total: true,
+            seller: { select: { username: true } },
+            client: { select: { name: true, lastname: true } }
+          }
+        }
       }
     })
 
     const products = new Map<string, OrdersReportData['rows'][number]>()
     const orderIds = new Set<string>()
     const ordersByProduct = new Map<string, Set<string>>()
+    const details: OrdersReportData['details'] = []
     let totalUnits = 0
     let totalSales = 0
     for (const item of items) {
@@ -171,6 +243,17 @@ export class ReportsService {
       ordersByProduct.set(productId, productOrders)
       totalUnits += quantitySold
       totalSales += salesTotal
+      details.push({
+        orderId,
+        orderDate: item.order.createdAt?.toISOString() ?? null,
+        sellerName: item.order.seller.username,
+        clientName: `${item.order.client.name} ${item.order.client.lastname}`,
+        productName: item.product.name,
+        quantity: quantitySold,
+        unitPrice: Number(item.unitPrice),
+        lineTotal: salesTotal,
+        orderTotal: Number(item.order.total)
+      })
     }
 
     for (const [productId, productOrders] of ordersByProduct) {
@@ -188,7 +271,8 @@ export class ReportsService {
       rows,
       totalUnits,
       totalSales,
-      totalOrders: orderIds.size
+      totalOrders: orderIds.size,
+      details
     }
   }
 }

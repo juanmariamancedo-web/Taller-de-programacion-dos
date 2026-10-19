@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type {
   ClientReportData,
   OrdersReportData,
@@ -9,9 +9,14 @@ type ReportTableRow = string[]
 type ChartItem = { label: string; value: number }
 type Metric = { label: string; value: string }
 type ReportKind = 'products' | 'clients' | 'orders'
+type PdfSection = { title: string; columns: string[]; rows: ReportTableRow[] }
 
 const currency = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' })
 const numberFormat = new Intl.NumberFormat('es-AR')
+
+function formatReportDate(value: string | null): string {
+  return value ? new Date(value).toLocaleString('es-AR') : 'Sin fecha'
+}
 
 function escapeHtml(value: string): string {
   return value.replace(
@@ -27,20 +32,15 @@ function escapeHtml(value: string): string {
   )
 }
 
-function openPrintableReport(
+function buildPrintableReport(
   title: string,
   period: string,
   metrics: Metric[],
   columns: string[],
   rows: ReportTableRow[],
-  chart: ChartItem[]
-): void {
-  const printWindow = window.open('', '_blank')
-  if (!printWindow) {
-    window.alert('No se pudo abrir el informe. Permití las ventanas emergentes e intentá de nuevo.')
-    return
-  }
-
+  chart: ChartItem[],
+  sections: PdfSection[]
+): string {
   const maxValue = Math.max(...chart.map((item) => item.value), 0)
   const chartHeight = Math.max(chart.length * 36 + 18, 60)
   const chartSvg = chart.length
@@ -63,45 +63,55 @@ function openPrintableReport(
     )
     .join('')
   const tableHead = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('')
-  const tableRows = rows.length
-    ? rows
+  const visibleRows = rows.slice(0, 5)
+  const tableRows = visibleRows.length
+    ? visibleRows
         .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`)
         .join('')
     : `<tr><td colspan="${columns.length}">Sin datos para el período seleccionado.</td></tr>`
+  const extraSections = sections
+    .map((section) => {
+      const sectionHead = section.columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('')
+      const visibleSectionRows = section.rows.slice(0, 5)
+      const sectionRows = visibleSectionRows.length
+        ? visibleSectionRows
+            .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join('')}</tr>`)
+            .join('')
+        : `<tr><td colspan="${section.columns.length}">Sin datos detallados para mostrar.</td></tr>`
+      return `<section class="detail-section"><h2>${escapeHtml(section.title)} (hasta 5 registros)</h2>
+        <table><thead><tr>${sectionHead}</tr></thead><tbody>${sectionRows}</tbody></table></section>`
+    })
+    .join('')
 
-  printWindow.document.open()
-  printWindow.document.write(`<!doctype html>
+  return `<!doctype html>
     <html lang="es">
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>${escapeHtml(title)}</title>
         <style>
-          body{font:14px Arial,sans-serif;color:#172033;margin:32px}
+          body{font:12px Arial,sans-serif;color:#172033;margin:32px}
           h1{margin:0 0 6px;font-size:26px} .period{color:#596579;margin:0 0 24px}
           .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:20px 0}
           .metric{border:1px solid #dbe2ee;border-radius:8px;padding:14px}
           .metric span{display:block;color:#596579;font-size:12px;margin-bottom:8px}
           .metric strong{font-size:18px}.chart{margin:24px 0}.chart svg{width:100%;height:auto}
-          table{width:100%;border-collapse:collapse;margin-top:20px}
-          th,td{text-align:left;padding:9px;border-bottom:1px solid #dbe2ee}
-          th{background:#f1f5f9} .print{padding:9px 14px;border:0;border-radius:6px;background:#2563eb;color:white;font-weight:bold}
-          @media print{body{margin:0}.print{display:none}}
+          table{width:100%;border-collapse:collapse;margin-top:12px;table-layout:auto}
+          th,td{text-align:left;padding:6px;border-bottom:1px solid #dbe2ee;overflow-wrap:anywhere}
+          th{background:#f1f5f9}.detail-section{margin-top:26px;break-inside:auto}
+          .detail-section h2{break-after:avoid}thead{display:table-header-group}
+          tr{break-inside:avoid}
+          @media print{body{margin:0}}
         </style>
       </head>
       <body>
-        <button class="print" onclick="window.print()">Imprimir / Guardar como PDF</button>
         <h1>${escapeHtml(title)}</h1><p class="period">${escapeHtml(period)} · Generado ${escapeHtml(new Date().toLocaleString('es-AR'))}</p>
         <section class="metrics">${metricCards}</section>
         <h2>Resumen visual</h2><div class="chart">${chartSvg}</div>
-        <h2>Detalle</h2><table><thead><tr>${tableHead}</tr></thead><tbody>${tableRows}</tbody></table>
+        <h2>Detalle (hasta 5 registros)</h2><table><thead><tr>${tableHead}</tr></thead><tbody>${tableRows}</tbody></table>
+        ${extraSections}
       </body>
-    </html>`)
-  printWindow.document.close()
-  window.setTimeout(() => {
-    printWindow.focus()
-    printWindow.print()
-  }, 250)
+    </html>`
 }
 
 function ReportChart({ items }: { items: ChartItem[] }): React.JSX.Element {
@@ -149,6 +159,8 @@ function ReportView({
   columns,
   rows,
   chart,
+  pdfSections,
+  recordCount,
   loading,
   error,
   onBack,
@@ -162,6 +174,8 @@ function ReportView({
   columns: string[]
   rows: ReportTableRow[]
   chart: ChartItem[]
+  pdfSections: PdfSection[]
+  recordCount: number
   loading: boolean
   error: string | null
   onBack: () => void
@@ -173,6 +187,27 @@ function ReportView({
     onSearch: () => void
   }
 }): React.JSX.Element {
+  const [generatingPdf, setGeneratingPdf] = useState(false)
+  const [pdfError, setPdfError] = useState<string | null>(null)
+
+  const generatePdf = async (): Promise<void> => {
+    setGeneratingPdf(true)
+    setPdfError(null)
+    try {
+      const response = await window.electronAPI?.exportReportPdf({
+        title,
+        html: buildPrintableReport(title, period, metrics, columns, rows, chart, pdfSections)
+      })
+      if (!response?.success) {
+        throw new Error(response?.message ?? 'No se pudo generar el PDF.')
+      }
+    } catch (exportError) {
+      setPdfError(exportError instanceof Error ? exportError.message : 'No se pudo generar el PDF.')
+    } finally {
+      setGeneratingPdf(false)
+    }
+  }
+
   return (
     <section className="flex w-full flex-col gap-6">
       <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
@@ -189,14 +224,24 @@ function ReportView({
         </div>
         <button
           type="button"
-          disabled={loading || Boolean(error)}
-          onClick={() => openPrintableReport(title, period, metrics, columns, rows, chart)}
+          disabled={loading || Boolean(error) || generatingPdf}
+          onClick={() => {
+            void generatePdf()
+          }}
           className="rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Generar PDF
+          {generatingPdf ? 'Generando PDF...' : 'Generar PDF'}
         </button>
       </div>
 
+      {pdfError && (
+        <p
+          role="alert"
+          className="rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-300"
+        >
+          {pdfError}
+        </p>
+      )}
       {dateFilters && (
         <form
           className="flex flex-col items-end gap-3 rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5 sm:flex-row"
@@ -263,7 +308,9 @@ function ReportView({
       <section className="overflow-hidden rounded-xl border border-gray-200 dark:border-white/10">
         <div className="border-b border-gray-200 px-4 py-3 dark:border-white/10">
           <h2 className="font-semibold text-gray-900 dark:text-white">Detalle del informe</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">{period}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {period} · Mostrando {Math.min(rows.length, 5)} de {recordCount} registros
+          </p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[600px] bg-white/80 text-left text-sm text-gray-900 dark:bg-white/5 dark:text-white">
@@ -284,7 +331,7 @@ function ReportView({
                   </td>
                 </tr>
               ) : rows.length ? (
-                rows.map((row, index) => (
+                rows.slice(0, 5).map((row, index) => (
                   <tr key={`${kind}-${index}`} className="hover:bg-gray-50 dark:hover:bg-white/5">
                     {row.map((cell, cellIndex) => (
                       <td key={`${cellIndex}-${cell}`} className="px-4 py-3">
@@ -313,40 +360,61 @@ export function ProductsReport({ onBack }: { onBack: () => void }): React.JSX.El
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async (): Promise<void> => {
-      setLoading(true)
-      setError(null)
-      try {
-        const response = await window.electronAPI?.getProductsReport()
-        if (!response?.success || !response.data)
-          throw new Error(response?.message ?? 'No se pudo cargar el reporte de productos.')
-        if (!cancelled) setData(response.data)
-      } catch (loadError) {
-        if (!cancelled)
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : 'No se pudo cargar el reporte de productos.'
-          )
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await window.electronAPI?.getProductsReport()
+      if (!response?.success || !response.data)
+        throw new Error(response?.message ?? 'No se pudo cargar el reporte de productos.')
+      setData(response.data)
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : 'No se pudo cargar el reporte de productos.'
+      )
+    } finally {
+      setLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    let active = true
+    const refresh = (): void => {
+      if (active) void load()
+    }
+    queueMicrotask(() => {
+      refresh()
+    })
+    const unsubscribe = window.electronAPI?.onReportsUpdated(refresh)
+    return () => {
+      active = false
+      unsubscribe?.()
+    }
+  }, [load])
 
   const rows = (data?.rows ?? []).map((row) => [
     row.sellerName,
     numberFormat.format(row.ordersCount),
     currency.format(row.salesTotal)
   ])
+  const detailRows = (data?.details ?? []).flatMap((order) =>
+    order.items.map((item) => [
+      order.sellerName,
+      `#${order.orderId}`,
+      formatReportDate(order.orderDate),
+      order.clientName,
+      order.orderState,
+      item.productName,
+      numberFormat.format(item.quantity),
+      currency.format(item.unitPrice),
+      currency.format(item.lineTotal),
+      currency.format(order.orderTotal)
+    ])
+  )
   const chart = (data?.rows ?? [])
-    .slice(0, 8)
+    .slice(0, 5)
     .map((row) => ({ label: row.sellerName, value: row.ordersCount }))
   const metrics = [
     { label: 'Órdenes registradas', value: numberFormat.format(data?.totalOrders ?? 0) },
@@ -364,6 +432,25 @@ export function ProductsReport({ onBack }: { onBack: () => void }): React.JSX.El
       columns={['Vendedor', 'Órdenes registradas', 'Ventas totales']}
       rows={rows}
       chart={chart}
+      recordCount={rows.length}
+      pdfSections={[
+        {
+          title: 'Productos vendidos por vendedor — detalle de órdenes',
+          columns: [
+            'Vendedor',
+            'Orden',
+            'Fecha',
+            'Cliente',
+            'Estado',
+            'Producto',
+            'Unidades',
+            'Precio unitario',
+            'Subtotal',
+            'Total de orden'
+          ],
+          rows: detailRows
+        }
+      ]}
       loading={loading}
       error={error}
       onBack={onBack}
@@ -376,40 +463,59 @@ export function ClientsReport({ onBack }: { onBack: () => void }): React.JSX.Ele
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async (): Promise<void> => {
-      setLoading(true)
-      setError(null)
-      try {
-        const response = await window.electronAPI?.getClientsReport()
-        if (!response?.success || !response.data)
-          throw new Error(response?.message ?? 'No se pudo cargar el reporte de clientes.')
-        if (!cancelled) setData(response.data)
-      } catch (loadError) {
-        if (!cancelled)
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : 'No se pudo cargar el reporte de clientes.'
-          )
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await window.electronAPI?.getClientsReport()
+      if (!response?.success || !response.data)
+        throw new Error(response?.message ?? 'No se pudo cargar el reporte de clientes.')
+      setData(response.data)
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error ? loadError.message : 'No se pudo cargar el reporte de clientes.'
+      )
+    } finally {
+      setLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    let active = true
+    const refresh = (): void => {
+      if (active) void load()
+    }
+    queueMicrotask(() => {
+      refresh()
+    })
+    const unsubscribe = window.electronAPI?.onReportsUpdated(refresh)
+    return () => {
+      active = false
+      unsubscribe?.()
+    }
+  }, [load])
 
   const rows = (data?.rows ?? []).map((row) => [
     row.clientName,
     numberFormat.format(row.purchases),
     currency.format(row.amountSpent)
   ])
+  const detailRows = (data?.details ?? []).flatMap((order) =>
+    order.items.map((item) => [
+      order.clientName,
+      `#${order.orderId}`,
+      formatReportDate(order.orderDate),
+      order.sellerName,
+      order.orderState,
+      item.productName,
+      numberFormat.format(item.quantity),
+      currency.format(item.unitPrice),
+      currency.format(item.lineTotal),
+      currency.format(order.orderTotal)
+    ])
+  )
   const chart = (data?.rows ?? [])
-    .slice(0, 8)
+    .slice(0, 5)
     .map((row) => ({ label: row.clientName, value: row.amountSpent }))
   const metrics = [
     { label: 'Compras registradas', value: numberFormat.format(data?.totalPurchases ?? 0) },
@@ -427,6 +533,25 @@ export function ClientsReport({ onBack }: { onBack: () => void }): React.JSX.Ele
       columns={['Cliente', 'Compras', 'Monto total gastado']}
       rows={rows}
       chart={chart}
+      recordCount={rows.length}
+      pdfSections={[
+        {
+          title: 'Compras por cliente — detalle de productos y precios',
+          columns: [
+            'Cliente',
+            'Orden',
+            'Fecha',
+            'Vendedor',
+            'Estado',
+            'Producto',
+            'Unidades',
+            'Precio unitario',
+            'Subtotal',
+            'Total de orden'
+          ],
+          rows: detailRows
+        }
+      ]}
       loading={loading}
       error={error}
       onBack={onBack}
@@ -442,32 +567,37 @@ export function OrdersReport({ onBack }: { onBack: () => void }): React.JSX.Elem
   const [to, setTo] = useState('')
   const [appliedFilters, setAppliedFilters] = useState({ from: '', to: '' })
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async (): Promise<void> => {
-      setLoading(true)
-      setError(null)
-      try {
-        const response = await window.electronAPI?.getOrdersReport(appliedFilters)
-        if (!response?.success || !response.data)
-          throw new Error(response?.message ?? 'No se pudo cargar el reporte de órdenes.')
-        if (!cancelled) setData(response.data)
-      } catch (loadError) {
-        if (!cancelled)
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : 'No se pudo cargar el reporte de órdenes.'
-          )
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await window.electronAPI?.getOrdersReport(appliedFilters)
+      if (!response?.success || !response.data)
+        throw new Error(response?.message ?? 'No se pudo cargar el reporte de órdenes.')
+      setData(response.data)
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error ? loadError.message : 'No se pudo cargar el reporte de órdenes.'
+      )
+    } finally {
+      setLoading(false)
     }
   }, [appliedFilters])
+
+  useEffect(() => {
+    let active = true
+    const refresh = (): void => {
+      if (active) void load()
+    }
+    queueMicrotask(() => {
+      refresh()
+    })
+    const unsubscribe = window.electronAPI?.onReportsUpdated(refresh)
+    return () => {
+      active = false
+      unsubscribe?.()
+    }
+  }, [load])
 
   const applyFilters = (): void => {
     if (from && to && from > to) {
@@ -486,12 +616,23 @@ export function OrdersReport({ onBack }: { onBack: () => void }): React.JSX.Elem
           : 'Período: histórico completo'
   const rows = (data?.rows ?? []).map((row) => [
     row.productName,
-    numberFormat.format(row.quantitySold),
     numberFormat.format(row.orderCount),
+    numberFormat.format(row.quantitySold),
     currency.format(row.salesTotal)
   ])
+  const detailRows = (data?.details ?? []).map((detail) => [
+    `#${detail.orderId}`,
+    formatReportDate(detail.orderDate),
+    detail.sellerName,
+    detail.clientName,
+    detail.productName,
+    numberFormat.format(detail.quantity),
+    currency.format(detail.unitPrice),
+    currency.format(detail.lineTotal),
+    currency.format(detail.orderTotal)
+  ])
   const chart = (data?.rows ?? [])
-    .slice(0, 8)
+    .slice(0, 5)
     .map((row) => ({ label: row.productName, value: row.quantitySold }))
   const metrics = [
     { label: 'Unidades vendidas', value: numberFormat.format(data?.totalUnits ?? 0) },
@@ -503,12 +644,30 @@ export function OrdersReport({ onBack }: { onBack: () => void }): React.JSX.Elem
     <ReportView
       kind="orders"
       title="Reporte de Órdenes"
-      description="Productos más vendidos dentro del rango de fechas seleccionado."
+      description="Productos vendidos en órdenes pagadas, despachadas o entregadas dentro del rango de fechas seleccionado."
       period={period}
       metrics={metrics}
-      columns={['Producto', 'Unidades vendidas', 'Órdenes', 'Ventas totales']}
+      columns={['Producto', 'Órdenes', 'Unidades vendidas', 'Ventas totales']}
       rows={rows}
       chart={chart}
+      recordCount={rows.length}
+      pdfSections={[
+        {
+          title: 'Detalle de productos por orden',
+          columns: [
+            'Orden',
+            'Fecha',
+            'Vendedor',
+            'Cliente',
+            'Producto',
+            'Unidades',
+            'Precio unitario',
+            'Subtotal',
+            'Total de orden'
+          ],
+          rows: detailRows
+        }
+      ]}
       loading={loading}
       error={error}
       onBack={onBack}
