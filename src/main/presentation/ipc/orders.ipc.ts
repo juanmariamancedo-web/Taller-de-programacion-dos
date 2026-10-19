@@ -1,7 +1,13 @@
-import { ipcMain } from 'electron';
+import { BrowserWindow, ipcMain } from 'electron';
 import { ordersService } from '../../services/orders.service';
 import { authService } from '../../services/auth.service'; // Tu servicio de auth/sesión
 import { SearchParams, CreateOrderPayload, UpdateOrderPayload } from '../../domain/types/electron-env';
+
+function notifyReportsUpdated(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('reports:updated');
+  }
+}
 
 export function registerOrderIPC(): void {
   // Obtener órdenes según rol
@@ -40,7 +46,9 @@ export function registerOrderIPC(): void {
         roleName: session.roleName,
       } : undefined;
 
-      return await ordersService.createOrder(payload, sessionContext);
+      const response = await ordersService.createOrder(payload, sessionContext);
+      if (response.success) notifyReportsUpdated();
+      return response;
     } catch (error) {
       console.error('Failed to create order:', error);
       return {
@@ -60,7 +68,9 @@ export function registerOrderIPC(): void {
         roleName: session.roleName,
       } : undefined;
 
-      return await ordersService.updateOrder(payload, sessionContext);
+      const response = await ordersService.updateOrder(payload, sessionContext);
+      if (response.success) notifyReportsUpdated();
+      return response;
     } catch (error) {
       console.error('Failed to update order:', error);
       return {
@@ -78,7 +88,9 @@ export function registerOrderIPC(): void {
             roleName: session.roleName,
             } : undefined
 
-            return await ordersService.updateOrderState(payload, sessionContext)
+            const response = await ordersService.updateOrderState(payload, sessionContext)
+            if (response.success) notifyReportsUpdated()
+            return response
         } catch (error) {
             console.error('Failed to update order state:', error)
             return {

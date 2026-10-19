@@ -6,6 +6,7 @@ import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { setCurrentTab } from "../../store/slices/appSlice";
 import LoginOut from "./Logout";
 import ProfileIcon from "../icons/ProfileIcon";
+import { useNavigate } from 'react-router-dom'
 
 interface Props {
     navItems: NavItem[]
@@ -14,6 +15,7 @@ interface Props {
 export function Header({navItems}: Props){
     const session = useAppSelector(state=>state.app.session)
     const dispatch = useAppDispatch()
+    const navigate = useNavigate()
 
     const currentTab = useAppSelector((state) => state.app.currentTab)
     const [open, setOpen] = useState(false)
@@ -68,7 +70,7 @@ export function Header({navItems}: Props){
                                         return(
                                             <li key={item.id} className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center">
                                                 <SwitchOpen setOpen={setOpen}>
-                                                    <button onClick={()=> dispatch(setCurrentTab(item.id))} className="px-3 py-1">
+                                                    <button onClick={()=> { navigate('/'); dispatch(setCurrentTab(item.id)) }} className="px-3 py-1">
                                                         <span className={`${currentTab === item.id ? "font-bold text-blue-600 dark:text-blue-400" : "font-medium"}`}>
                                                             {item.label}
                                                         </span>
@@ -89,7 +91,7 @@ export function Header({navItems}: Props){
                                                 </SwitchOpen>
                                             </li>
                                             <li className="hover:bg-black/10 dark:hover:bg-white/10 rounded-full transition flex justify-center items-center"
-                                                onClick={()=>dispatch(setCurrentTab("profile"))}
+                                                onClick={()=>{ navigate('/'); dispatch(setCurrentTab("profile")) }}
                                             >
                                                 <SwitchOpen setOpen={setOpen}>
                                                     <ProfileIcon />

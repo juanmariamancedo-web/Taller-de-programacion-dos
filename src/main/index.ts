@@ -13,6 +13,7 @@ import { registerDashboardIPC } from './presentation/ipc/dashboard.ipc'
 import { registerRoleIPC } from './presentation/ipc/roles.ipc'
 import { registerAddressIPC } from './presentation/ipc/address.ipc'
 import { registerProductsIPC } from './presentation/ipc/products.ipc'
+import { registerReportsIPC } from './presentation/ipc/reports.ipc'
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -61,6 +62,7 @@ function createWindow(): BrowserWindow {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
+    if (details.url === 'about:blank') return { action: 'allow' }
     shell.openExternal(details.url)
     return { action: 'deny' }
   })
@@ -84,6 +86,7 @@ registerDashboardIPC()
 registerRoleIPC()
 registerAddressIPC()
 registerProductsIPC()
+registerReportsIPC()
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')

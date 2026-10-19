@@ -5,6 +5,7 @@ import { useEffect, useState } from "react"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
 import { useAppDispatch, useAppSelector } from "../../store/hooks"
 import { setCurrentTab, setOrderToEdit } from "../../store/slices/appSlice"
+import { useReportNavigation } from './useReportNavigation'
 
 export default function OrdersPage() {
     const [orders, setOrders] = useState<OrderWithState[]>([]);
@@ -13,6 +14,7 @@ export default function OrdersPage() {
     const [pages, setPages] = useState(1);
 
     const dispatch = useAppDispatch();
+    const navigateToReport = useReportNavigation()
 
     const sort = useAppSelector((store) => store.app.sort);
     const search = useAppSelector((store) => store.app.search);
@@ -77,16 +79,25 @@ export default function OrdersPage() {
                     {isVendedor ? "Mis Órdenes" : isOperador ? "Despacho y Logística" : "Órdenes"}
                 </h1>
 
-                {canCreateOrder && (
+                <div className="flex flex-wrap items-center justify-center gap-3">
                     <button
                         type="button"
-                        onClick={handleCreateNew}
-                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700 shadow-sm"
+                        onClick={() => navigateToReport('ordenes')}
+                        className="rounded-lg border border-blue-600 px-4 py-2.5 font-semibold text-blue-700 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
                     >
-                        <span className="text-xl leading-none">+</span>
-                        Agregar Orden
+                        Reportes
                     </button>
-                )}
+                    {canCreateOrder && (
+                        <button
+                            type="button"
+                            onClick={handleCreateNew}
+                            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700 shadow-sm"
+                        >
+                            <span className="text-xl leading-none">+</span>
+                            Agregar Orden
+                        </button>
+                    )}
+                </div>
             </div>
 
             <Search />

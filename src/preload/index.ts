@@ -28,9 +28,11 @@ import {
   UpdateProductInput,
   Unsubscribe, 
   CreateOrderPayload, 
-  CreateOrderResponse,
   UpdateOrderPayload, 
-  UpdateProfileInput
+  UpdateProfileInput,
+  OrdersReportFilters,
+  ReportPdfInput,
+  ReportPdfResponse
 } from '../main/domain/types/electron-env'
 
 const api = {
@@ -38,6 +40,19 @@ const api = {
     ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
   getDashboardData: () => ipcRenderer.invoke('dashboard:getData'),
+  getProductsReport: () => ipcRenderer.invoke('reports:products'),
+  getClientsReport: () => ipcRenderer.invoke('reports:clients'),
+  getOrdersReport: (filters: OrdersReportFilters) =>
+    ipcRenderer.invoke('reports:orders', filters),
+  exportReportPdf: (input: ReportPdfInput): Promise<ReportPdfResponse> =>
+    ipcRenderer.invoke('reports:export-pdf', input),
+  onReportsUpdated: (callback: () => void): Unsubscribe => {
+    const subscription = (): void => callback()
+    ipcRenderer.on('reports:updated', subscription)
+    return () => {
+      ipcRenderer.removeListener('reports:updated', subscription)
+    }
+  },
   getOrders: (searchParams?: SearchParams) => 
     ipcRenderer.invoke('orders:getOrders', searchParams),
   createOrder: (payload: CreateOrderPayload) =>

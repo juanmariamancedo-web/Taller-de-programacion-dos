@@ -5,6 +5,7 @@ import Paginacion from '../Pagination'
 import { useAppDispatch, useAppSelector } from '../../store/hooks'
 import { setPage } from '../../store/slices/appSlice'
 import { Sort } from '../Sort'
+import { useReportNavigation } from './useReportNavigation'
 
 type Product = {
   id: string
@@ -107,6 +108,7 @@ export default function Catalogo(): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const { page, sort } = useAppSelector((state) => state.app)
   const dispatch = useAppDispatch()
+  const navigateToReport = useReportNavigation()
   const session = useAppSelector((state) => state.app.session)
   const canManageProducts = session?.roleName === 'admin' || session?.roleName === 'supervisor'
   const canEditProducts = canManageProducts
@@ -364,11 +366,20 @@ export default function Catalogo(): JSX.Element {
 
   return (
     <div className="flex flex-col items-center gap-5">
-      <div className="w-full flex flex-col gap-2 pb-3">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-white md:text-4xl">Productos</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Administrá el catálogo y el inventario.
-        </p>
+      <div className="w-full flex flex-col gap-3 pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white md:text-4xl">Productos</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Administrá el catálogo y el inventario.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => navigateToReport('productos')}
+          className="rounded-lg border border-blue-600 px-4 py-2.5 font-semibold text-blue-700 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+        >
+          Reportes
+        </button>
       </div>
       {productActionError && (
         <p role="alert" className="w-full text-sm text-rose-600 dark:text-rose-300">
