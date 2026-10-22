@@ -414,7 +414,8 @@ export interface UpdateOrderStatePayload {
 export interface CreateOrderPayload {
   clientId: number | string;
   sellerId?: number | string;
-  shippingAddressId?: number | string; // <-- Agregar esta línea
+  shippingAddressId?: number | string;
+  initialStateId?: number; // Creada (por defecto), Pendiente o Pagada
   total: number;
   items: Array<{
     productId: number;
@@ -443,6 +444,7 @@ export type Unsubscribe = () => void
 
 // --- INTERFAZ GLOBAL IPC (ELECTRON API) ---
 export interface IElectronAPI {
+  openOrderInvoice: (orderId: string) => Promise<{ success: boolean; message?: string }>
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
   getDashboardData: () => Promise<DashboardDataResponse>

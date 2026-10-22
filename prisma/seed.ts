@@ -1,6 +1,7 @@
 import { prisma } from '../src/main/infrastructure/db/prisma'
 import bcrypt from 'bcryptjs'
 import { seedProvinces } from './SeedProvincias'
+import { OrderState } from '../src/main/domain/orderStateRules'
 
 async function main() {
   console.log('Iniciando seeder general...')
@@ -171,26 +172,25 @@ async function main() {
     createdProducts.push(product)
   }
 
-  // 5. Estados de Orden
+  // 5. Estados de Orden (los IDs vienen de orderStateRules.ts para no desincronizarse)
   const orderStatesList = [
-    'created',
-    'pending',
-    'paid',
-    'dispatched',
-    'in_transit',
-    'delivered',
-    'rejected',
-    'stock_error'
+    { id: OrderState.Created, name: 'created' },
+    { id: OrderState.Pending, name: 'pending' },
+    { id: OrderState.Paid, name: 'paid' },
+    { id: OrderState.InTransit, name: 'in_transit' },
+    { id: OrderState.Delivered, name: 'delivered' },
+    { id: OrderState.Rejected, name: 'rejected' },
+    { id: OrderState.Cancelled, name: 'cancelled' }
   ]
 
   const statesMap: Record<string, bigint> = {}
 
   console.log('Cargando estados de orden...')
-  for (const name of orderStatesList) {
+  for (const { id, name } of orderStatesList) {
     const state = await prisma.orderState.upsert({
       where: { name },
       update: {},
-      create: { name }
+      create: { id: BigInt(id), name }
     })
     statesMap[name] = state.id
   }
@@ -272,11 +272,13 @@ async function main() {
   }
 
   // 8. Órdenes distribuidas entre múltiples vendedores ('seller_juan' y 'seller_maria')
+  // Una orden por estado, para poder probar cada flujo. El tracking solo existe desde 'in_transit'.
   const sellerJuan = createdUsers['seller_juan']
   const sellerMaria = createdUsers['seller_maria']
 
   const ordersData = [
     {
+      // Borrador: el seller todavía puede editar los ítems
       currentStateId: statesMap['created'],
       sellerId: sellerJuan.id,
       clientId: createdClients[0].id,
@@ -299,11 +301,12 @@ async function main() {
       }
     },
     {
+      // Confirmada, esperando pago: el seller puede marcarla como pagada
       currentStateId: statesMap['pending'],
       sellerId: sellerJuan.id,
       clientId: createdClients[1].id,
       shippingAddressId: createdAddresses[1].id,
-      trackingNumber: 'TRK-1002-B',
+      trackingNumber: null,
       total: 136000.0,
       itemOrders: {
         create: [
@@ -316,11 +319,12 @@ async function main() {
       }
     },
     {
+      // Pagada: el operator puede ponerla en camino o rechazarla
       currentStateId: statesMap['paid'],
       sellerId: sellerMaria.id,
       clientId: createdClients[2].id,
       shippingAddressId: createdAddresses[2].id,
-      trackingNumber: 'TRK-1003-C',
+      trackingNumber: null,
       total: 180000.0,
       itemOrders: {
         create: [
@@ -333,10 +337,11 @@ async function main() {
       }
     },
     {
-      currentStateId: statesMap['dispatched'],
+      // En camino: el operator puede marcarla como entregada
+      currentStateId: statesMap['in_transit'],
       sellerId: sellerMaria.id,
       clientId: createdClients[3].id,
-      shippingAddressId: null,
+      shippingAddressId: createdAddresses[3].id,
       trackingNumber: 'TRK-1004-D',
       total: 25001.0,
       itemOrders: {
@@ -350,6 +355,7 @@ async function main() {
       }
     },
     {
+      // Entregada: estado final
       currentStateId: statesMap['delivered'],
       sellerId: sellerMaria.id,
       clientId: createdClients[4].id,
@@ -361,6 +367,42 @@ async function main() {
           {
             productId: createdProducts[4].id,
             unitPrice: 245000.0,
+            amount: 1
+          }
+        ]
+      }
+    },
+    {
+      // Rechazada por la empresa (ej. sin stock): estado final
+      currentStateId: statesMap['rejected'],
+      sellerId: sellerJuan.id,
+      clientId: createdClients[0].id,
+      shippingAddressId: createdAddresses[0].id,
+      trackingNumber: null,
+      total: 180000.0,
+      itemOrders: {
+        create: [
+          {
+            productId: createdProducts[1].id,
+            unitPrice: 180000.0,
+            amount: 1
+          }
+        ]
+      }
+    },
+    {
+      // Cancelada por el cliente: estado final
+      currentStateId: statesMap['cancelled'],
+      sellerId: sellerMaria.id,
+      clientId: createdClients[1].id,
+      shippingAddressId: createdAddresses[1].id,
+      trackingNumber: null,
+      total: 32000.0,
+      itemOrders: {
+        create: [
+          {
+            productId: createdProducts[5].id,
+            unitPrice: 32000.0,
             amount: 1
           }
         ]

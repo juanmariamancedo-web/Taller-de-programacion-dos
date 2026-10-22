@@ -36,6 +36,7 @@ import {
 } from '../main/domain/types/electron-env'
 
 const api = {
+  openOrderInvoice: (orderId: string) => ipcRenderer.invoke('orders:open-invoice', orderId),
   login: (credentials: Credentials): Promise<AuthResponse> =>
     ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),

@@ -14,6 +14,7 @@ import { registerRoleIPC } from './presentation/ipc/roles.ipc'
 import { registerAddressIPC } from './presentation/ipc/address.ipc'
 import { registerProductsIPC } from './presentation/ipc/products.ipc'
 import { registerReportsIPC } from './presentation/ipc/reports.ipc'
+import { registerOrderInvoiceHandler } from "./presentation/ipc/invoce.ipc"
 
 function createWindow(): BrowserWindow {
   const isDarkInitial = nativeTheme.shouldUseDarkColors
@@ -87,6 +88,7 @@ registerRoleIPC()
 registerAddressIPC()
 registerProductsIPC()
 registerReportsIPC()
+registerOrderInvoiceHandler()
 
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.electron')

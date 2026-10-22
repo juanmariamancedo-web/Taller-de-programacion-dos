@@ -9,28 +9,36 @@ import {
   UpdateOrderStatePayload,
 } from '../domain/types/electron-env';
 import { Prisma } from '../infrastructure/db/generated/client/client';
+import {
+  OrderState,
+  canChangeState,
+  canEditOrderDetails,
+  getRole,
+  getStateLabel,
+  requiresReason,
+  requiresTracking,
+  type Role,
+} from '../domain/orderStateRules';
 
 export interface UserSessionContext {
   userId?: number | bigint;
   id?: number | bigint;
+  roleId?: number | bigint;
   roleName: 'admin' | 'supervisor' | 'operator' | 'seller' | string;
 }
 
+type Tx = Prisma.TransactionClient;
+
+/** Estados que cierran la orden sin entregarla: el stock vuelve al inventario. */
+const releasesStock = (stateId: number) =>
+  stateId === OrderState.Rejected || stateId === OrderState.Cancelled;
+
 export class OrdersService {
-  /**
-   * Define las transiciones de estado permitidas en el sistema logístico.
-   * Evita retrocesos o saltos inconsistentes (ej. pasar de 'delivered' a 'dispatched').
-   */
-  private static readonly ALLOWED_TRANSITIONS: Record<number, number[]> = {
-    1: [2, 3, 7, 8],    // 'created' -> 'pending', 'paid', 'rejected', 'stock_error'
-    2: [3, 7, 8],       // 'pending' -> 'paid', 'rejected', 'stock_error'
-    3: [4, 7, 8],       // 'paid'    -> 'dispatched', 'rejected', 'stock_error'
-    4: [5, 6, 7],       // 'dispatched' -> 'in_transit', 'delivered', 'rejected'
-    5: [6, 7],          // 'in_transit' -> 'delivered', 'rejected'
-    6: [],              // 'delivered' es estado terminal (no permite más cambios)
-    7: [],              // 'rejected' es estado terminal
-    8: [1, 2, 7],       // 'stock_error' -> reacondicionar o rechazar
-  };
+  // ─── Helpers ────────────────────────────────────────────────────────────
+
+  private async resolveSession(sessionContext?: UserSessionContext | null) {
+    return (sessionContext || (await authService.getActiveSession?.())) as UserSessionContext | null | undefined;
+  }
 
   private getSessionUserId(session: UserSessionContext | null | undefined): number | undefined {
     if (!session) return undefined;
@@ -38,8 +46,63 @@ export class OrdersService {
     return rawId !== undefined ? Number(rawId) : undefined;
   }
 
+  private getSessionRole(session: UserSessionContext | null | undefined): Role | null {
+    const roleId = session?.roleId !== undefined ? Number(session.roleId) : undefined;
+    return getRole(roleId, session?.roleName);
+  }
+
+  /** Un seller solo puede operar sobre sus propias órdenes. */
+  private assertSellerOwnsOrder(role: Role | null, orderSellerId: bigint, userId?: number) {
+    if (role === 'seller' && Number(orderSellerId) !== userId) {
+      throw new Error('No tenés permisos para modificar órdenes de otros vendedores.');
+    }
+  }
+
+  /** Verifica el stock de cada ítem y lo descuenta. */
+  private async reserveStock(
+    tx: Tx,
+    items: { productId: number | bigint | string; quantity: number | string }[]
+  ) {
+    for (const item of items) {
+      const productId = BigInt(item.productId);
+      const requestedQuantity = Number(item.quantity);
+
+      const product = await tx.product.findUnique({
+        where: { id: productId },
+        select: { id: true, name: true, stock: true },
+      });
+
+      if (!product) {
+        throw new Error(`El producto con ID ${item.productId} no existe.`);
+      }
+
+      if (product.stock < requestedQuantity) {
+        throw new Error(
+          `Stock insuficiente para el producto "${product.name}". Disponible: ${product.stock}, solicitado: ${requestedQuantity}.`
+        );
+      }
+
+      await tx.product.update({
+        where: { id: productId },
+        data: { stock: { decrement: requestedQuantity } },
+      });
+    }
+  }
+
+  /** Devuelve al inventario el stock de ítems ya guardados en la base. */
+  private async releaseStock(tx: Tx, items: { productId: bigint; amount: number | bigint }[]) {
+    for (const item of items) {
+      await tx.product.update({
+        where: { id: item.productId },
+        data: { stock: { increment: Number(item.amount) } },
+      });
+    }
+  }
+
+  // ─── Consultas ──────────────────────────────────────────────────────────
+
   async getOrders(searchParams?: SearchParams, sessionContext?: UserSessionContext | null) {
-    const activeSession = sessionContext || (await authService.getActiveSession?.());
+    const activeSession = await this.resolveSession(sessionContext);
     const page = searchParams?.page ?? 1;
     const limit = 5;
 
@@ -60,7 +123,7 @@ export class OrdersService {
         : { createdAt: 'desc' as const };
 
     const search = searchParams?.search?.trim();
-    const roleName = activeSession?.roleName?.toLowerCase();
+    const role = this.getSessionRole(activeSession);
     const currentUserId = this.getSessionUserId(activeSession);
 
     const where: Prisma.OrderWhereInput = {
@@ -74,12 +137,13 @@ export class OrdersService {
       }),
     };
 
-    if (roleName === 'seller' && currentUserId) {
+    if (role === 'seller' && currentUserId) {
       where.sellerId = BigInt(currentUserId);
     }
 
-    if (roleName === 'operator') {
-      where.currentStateId = { in: [BigInt(1), BigInt(2), BigInt(3), BigInt(4), BigInt(5)] };
+    // El operator solo ve las órdenes con las que puede trabajar: pagadas y en camino
+    if (role === 'operator') {
+      where.currentStateId = { in: [BigInt(OrderState.Paid), BigInt(OrderState.InTransit)] };
     }
 
     const [totalOrders, orders] = await prisma.$transaction([
@@ -144,12 +208,14 @@ export class OrdersService {
     };
   }
 
+  // ─── Crear ──────────────────────────────────────────────────────────────
+
   async createOrder(payload: CreateOrderPayload, sessionContext?: UserSessionContext | null): Promise<CreateOrderResponse> {
     try {
-      const activeSession = sessionContext || (await authService.getActiveSession?.());
-      const roleName = activeSession?.roleName?.toLowerCase();
+      const activeSession = await this.resolveSession(sessionContext);
+      const role = this.getSessionRole(activeSession);
 
-      if (roleName === 'operator' || roleName === 'supervisor') {
+      if (role !== 'seller' && role !== 'admin') {
         return {
           success: false,
           message: 'Tu rol no tiene permisos para emitir nuevas órdenes de compra',
@@ -159,7 +225,7 @@ export class OrdersService {
       const clientId = Number(payload.clientId);
       const shippingAddressId = payload.shippingAddressId ? Number(payload.shippingAddressId) : null;
       const currentUserId = this.getSessionUserId(activeSession);
-      const sellerId = roleName === 'seller' ? currentUserId : Number(payload.sellerId);
+      const sellerId = role === 'seller' ? currentUserId : Number(payload.sellerId);
       const { items, total } = payload;
 
       if (!clientId || !sellerId || !items || items.length === 0) {
@@ -169,39 +235,29 @@ export class OrdersService {
         };
       }
 
+      // Estado con el que nace la orden: borrador, pendiente de pago o pagada
+      const initialStateId = Number(payload.initialStateId ?? OrderState.Created);
+      const creatableStates: number[] = [OrderState.Created, OrderState.Pending, OrderState.Paid];
+      const isAllowedInitialState =
+        creatableStates.includes(initialStateId) &&
+        (initialStateId === OrderState.Created || canChangeState(OrderState.Created, initialStateId, role));
+
+      if (!isAllowedInitialState) {
+        return {
+          success: false,
+          message: `Tu rol no puede crear órdenes en estado "${getStateLabel(initialStateId)}".`,
+        };
+      }
+
       const newOrder = await prisma.$transaction(async (tx) => {
-        // 1. Verificar stock y restar por cada ítem
-        for (const item of items) {
-          const productId = BigInt(item.productId);
-          const requestedQuantity = Number(item.quantity);
+        await this.reserveStock(tx, items);
 
-          const product = await tx.product.findUnique({
-            where: { id: productId },
-            select: { id: true, name: true, stock: true },
-          });
-
-          if (!product) {
-            throw new Error(`El producto con ID ${item.productId} no existe.`);
-          }
-
-          if (product.stock < requestedQuantity) {
-            throw new Error(`Stock insuficiente para el producto "${product.name}". Disponible: ${product.stock}, solicitado: ${requestedQuantity}.`);
-          }
-
-          // Descontar stock del producto
-          await tx.product.update({
-            where: { id: productId },
-            data: { stock: { decrement: requestedQuantity } },
-          });
-        }
-
-        // 2. Crear la orden de compra
         const order = await tx.order.create({
           data: {
             clientId: BigInt(clientId),
             sellerId: BigInt(sellerId),
             total: Number(total),
-            currentStateId: BigInt(1), // 'created'
+            currentStateId: BigInt(initialStateId),
             ...(shippingAddressId && { shippingAddressId: BigInt(shippingAddressId) }),
             itemOrders: {
               create: items.map((item) => ({
@@ -217,9 +273,12 @@ export class OrdersService {
           await tx.orderStatusHistory.create({
             data: {
               orderId: order.id,
-              stateId: BigInt(1),
+              stateId: BigInt(initialStateId),
               addressId: BigInt(shippingAddressId),
-              notes: 'Creación de la orden de compra y descuento de stock',
+              notes:
+                initialStateId === OrderState.Created
+                  ? 'Creación de la orden de compra y descuento de stock'
+                  : `Creación de la orden en estado "${getStateLabel(initialStateId)}" y descuento de stock`,
             },
           });
         }
@@ -241,65 +300,50 @@ export class OrdersService {
     }
   }
 
+  // ─── Editar datos (solo mientras es borrador) ───────────────────────────
+
   async updateOrder(payload: UpdateOrderPayload, sessionContext?: UserSessionContext | null): Promise<OrderMutationResponse> {
     try {
-      const activeSession = sessionContext || (await authService.getActiveSession?.());
-      const { id, clientId, sellerId, shippingAddressId, items, total, currentStateId, trackingNumber } = payload;
-      const roleName = activeSession?.roleName?.toLowerCase();
-      const currentUserId = this.getSessionUserId(activeSession);
+      const activeSession = await this.resolveSession(sessionContext);
+      const role = this.getSessionRole(activeSession);
+      const { id, clientId, shippingAddressId, items, total } = payload;
       const orderId = BigInt(id);
 
-      const existingOrder = await prisma.order.findUnique({
-        where: { id: orderId },
-      });
-
+      const existingOrder = await prisma.order.findUnique({ where: { id: orderId } });
       if (!existingOrder) {
         return { success: false, message: 'La orden no existe' };
       }
 
-      if (roleName === 'seller') {
-        if (currentUserId && Number(existingOrder.sellerId) !== currentUserId) {
-          return { success: false, message: 'No tenés permisos para modificar órdenes de otros selleres' };
-        }
-        if (Number(existingOrder.currentStateId) !== 1) {
-          return { success: false, message: 'No podés editar una orden que ya inició procesamiento logístico' };
-        }
-      }
+      this.assertSellerOwnsOrder(role, existingOrder.sellerId, this.getSessionUserId(activeSession));
 
-      if (roleName === 'operator') {
-        if (currentStateId) {
-          return this.updateOrderState(
-            { id, currentStateId: Number(currentStateId), trackingNumber, location: (payload as any).location, notes: payload.notes },
-            activeSession
-          );
-        }
-        return { success: false, message: 'Los operatores solo pueden modificar el estado logístico de la orden' };
+      if (!canEditOrderDetails(Number(existingOrder.currentStateId), role)) {
+        return {
+          success: false,
+          message: 'La orden ya fue confirmada: solo se puede editar mientras es un borrador.',
+        };
       }
-
-      const parsedClientId = clientId ? BigInt(clientId) : existingOrder.clientId;
-      const parsedSellerId = sellerId ? BigInt(sellerId) : existingOrder.sellerId;
-      const parsedAddressId = shippingAddressId ? BigInt(shippingAddressId) : existingOrder.shippingAddressId;
-      const parsedTotal = total !== undefined ? Number(total) : Number(existingOrder.total);
 
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        if (items && items.length > 0) {
-          await tx.itemOrder.deleteMany({
-            where: { orderId },
-          });
+        const hasNewItems = Boolean(items && items.length > 0);
+
+        // Los ítems viejos devuelven su stock y los nuevos lo vuelven a descontar
+        if (hasNewItems) {
+          const previousItems = await tx.itemOrder.findMany({ where: { orderId } });
+          await this.releaseStock(tx, previousItems);
+          await tx.itemOrder.deleteMany({ where: { orderId } });
+          await this.reserveStock(tx, items!);
         }
 
-        const order = await tx.order.update({
+        // El estado y el tracking solo cambian por updateOrderState
+        return tx.order.update({
           where: { id: orderId },
           data: {
-            clientId: parsedClientId,
-            sellerId: parsedSellerId,
-            shippingAddressId: parsedAddressId,
-            total: parsedTotal,
-            ...(currentStateId && { currentStateId: BigInt(currentStateId) }),
-            ...(trackingNumber && { trackingNumber }),
-            ...(items && items.length > 0 && {
+            clientId: clientId ? BigInt(clientId) : existingOrder.clientId,
+            shippingAddressId: shippingAddressId ? BigInt(shippingAddressId) : existingOrder.shippingAddressId,
+            total: total !== undefined ? Number(total) : Number(existingOrder.total),
+            ...(hasNewItems && {
               itemOrders: {
-                create: items.map((item) => ({
+                create: items!.map((item) => ({
                   productId: BigInt(item.productId),
                   amount: Number(item.quantity),
                   unitPrice: Number(item.unitPrice),
@@ -308,8 +352,6 @@ export class OrdersService {
             }),
           },
         });
-
-        return order;
       });
 
       return {
@@ -326,31 +368,18 @@ export class OrdersService {
     }
   }
 
+  // ─── Cambiar estado ─────────────────────────────────────────────────────
+
   async updateOrderState(
     payload: UpdateOrderStatePayload & { location?: string },
     sessionContext?: UserSessionContext | null
   ): Promise<OrderMutationResponse> {
     try {
-      const activeSession = sessionContext || (await authService.getActiveSession?.());
+      const activeSession = await this.resolveSession(sessionContext);
+      const role = this.getSessionRole(activeSession);
       const { id, currentStateId, trackingNumber, notes, location } = payload;
-      const roleName = activeSession?.roleName?.toLowerCase();
       const orderId = BigInt(id);
       const targetStateId = Number(currentStateId);
-
-      if (roleName === 'seller') {
-        return {
-          success: false,
-          message: 'Los selleres no tienen permisos para modificar el estado logístico.',
-        };
-      }
-
-      // Restricción evaluada en backend: operatores no pueden marcar órdenes como rechazadas o canceladas (ID 7)
-      if (roleName === 'operator' && targetStateId === 7) {
-        return {
-          success: false,
-          message: 'Acción denegada: Los operatores no tienen permisos para marcar órdenes como rechazadas o canceladas.',
-        };
-      }
 
       const updatedOrder = await prisma.$transaction(async (tx) => {
         const existingOrder = await tx.order.findUnique({
@@ -362,63 +391,50 @@ export class OrdersService {
           throw new Error('La orden especificada no existe.');
         }
 
-        const currentStateInDb = Number(existingOrder.currentStateId);
+        this.assertSellerOwnsOrder(role, existingOrder.sellerId, this.getSessionUserId(activeSession));
 
-        // 1. REGLA ANTI-DUPLICADOS
-        if (currentStateInDb === targetStateId) {
-          throw new Error('La orden ya se encuentra en este estado.');
-        }
-
-        // 2. REGLA DE SECUENCIA ILÓGICA
-        const allowedNextStates = OrdersService.ALLOWED_TRANSITIONS[currentStateInDb] || [];
-        if (!allowedNextStates.includes(targetStateId)) {
+        // Una sola regla decide rol + transición (ver orderStateRules.ts)
+        const currentState = Number(existingOrder.currentStateId);
+        if (!canChangeState(currentState, targetStateId, role)) {
           throw new Error(
-            `Transición ilógica no permitida: no se puede pasar del estado ID ${currentStateInDb} al estado ID ${targetStateId}.`
+            `Tu rol no puede pasar la orden de "${getStateLabel(currentState)}" a "${getStateLabel(targetStateId)}".`
           );
         }
 
-        // 3. Validación de Tracking
-        if (targetStateId >= 4 && !trackingNumber && !existingOrder.trackingNumber) {
-          throw new Error('El número de seguimiento (tracking number) es obligatorio al despachar el paquete.');
+        if (requiresTracking(targetStateId) && !trackingNumber?.trim() && !existingOrder.trackingNumber) {
+          throw new Error('El número de seguimiento (tracking) es obligatorio para poner la orden en camino.');
         }
 
-        // 4. LIBERAR / DEVOLVER STOCK SI LA ORDEN ES RECHAZADA (ID 7) O DA ERROR DE STOCK (ID 8)
-        if ((targetStateId === 7 || targetStateId === 8) && currentStateInDb !== 7 && currentStateInDb !== 8) {
-          for (const item of existingOrder.itemOrders) {
-            await tx.product.update({
-              where: { id: item.productId },
-              data: { stock: { increment: Number(item.amount) } },
-            });
-          }
+        if (requiresReason(targetStateId) && !notes?.trim()) {
+          throw new Error('Indicá el motivo del rechazo o la cancelación.');
         }
 
-        // 5. Actualizar la orden principal
+        // Si la orden se cierra sin entregarse, el stock vuelve al inventario
+        if (releasesStock(targetStateId)) {
+          await this.releaseStock(tx, existingOrder.itemOrders);
+        }
+
         const updated = await tx.order.update({
           where: { id: orderId },
           data: {
             currentStateId: BigInt(targetStateId),
-            ...(trackingNumber && { trackingNumber }),
+            ...(trackingNumber?.trim() && { trackingNumber: trackingNumber.trim() }),
           },
         });
 
-        // 6. Registrar el hito en el historial
         if (updated.shippingAddressId) {
-          let statusSuffix = '';
-          if (targetStateId === 7) statusSuffix = ' (Stock devuelto por rechazo)';
-          if (targetStateId === 8) statusSuffix = ' (Stock devuelto por error de stock)';
-
-          const historyNote = location?.trim()
-            ? `Ubicación: ${location.trim()}.${notes?.trim() ? ` ${notes.trim()}` : ''}${statusSuffix}`
-            : notes?.trim() 
-              ? `${notes.trim()}${statusSuffix}`
-              : `Estado actualizado a ID ${targetStateId} por ${roleName}${statusSuffix}`;
+          const noteParts = [
+            location?.trim() && `Ubicación: ${location.trim()}.`,
+            notes?.trim(),
+            releasesStock(targetStateId) && '(Stock devuelto)',
+          ].filter(Boolean);
 
           await tx.orderStatusHistory.create({
             data: {
               orderId: updated.id,
               stateId: BigInt(targetStateId),
               addressId: updated.shippingAddressId,
-              notes: historyNote,
+              notes: noteParts.length > 0 ? noteParts.join(' ') : `Estado actualizado a "${getStateLabel(targetStateId)}"`,
             },
           });
         }
@@ -426,20 +442,18 @@ export class OrdersService {
         return updated;
       });
 
-      let successMessage = 'Estado logístico e historial actualizados correctamente.';
-      if (targetStateId === 7) successMessage = 'Orden rechazada y stock devuelto exitosamente.';
-      if (targetStateId === 8) successMessage = 'Estado marcado como Error de Stock y stock devuelto al inventario.';
-
       return {
         success: true,
         orderId: Number(updatedOrder.id),
-        message: successMessage,
+        message: releasesStock(targetStateId)
+          ? 'Orden cerrada y stock devuelto al inventario.'
+          : 'Estado de la orden actualizado correctamente.',
       };
     } catch (err: any) {
       console.error('Error en updateOrderState:', err);
       return {
         success: false,
-        message: err.message || 'Error al actualizar el estado logístico de la orden.',
+        message: err.message || 'Error al actualizar el estado de la orden.',
       };
     }
   }
