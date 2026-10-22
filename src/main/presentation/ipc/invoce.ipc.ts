@@ -16,7 +16,6 @@ async function renderPdf(html: string): Promise<Buffer> {
 }
 
 export function registerOrderInvoiceHandler() {
-  // Recibimos explícitamente docType como segundo parámetro desde el frontend
   ipcMain.handle(OPEN_INVOICE_CHANNEL, async (_event, orderId: string, docType?: 'invoice' | 'credit-note') => {
     try {
       const session = await authService.getActiveSession()
@@ -24,6 +23,11 @@ export function registerOrderInvoiceHandler() {
 
       const order = await invoiceService.findOrder(orderId)
       if (!order) return { success: false, message: 'Orden no encontrada.' }
+
+      // Si la orden nunca fue facturada/pagada, no tiene comprobante ni nota de crédito
+      if (!order.invoiceType) {
+        return { success: false, message: 'El comprobante no está disponible para esta orden.' }
+      }
 
       const currentStateId = Number(order.currentStateId)
 
@@ -35,7 +39,6 @@ export function registerOrderInvoiceHandler() {
         return { success: false, message: 'No tenés permiso para ver este comprobante.' }
       }
 
-      // Si docType es 'invoice', forzamos la factura original limpiando el estado de anulación
       const forceInvoice = docType === 'invoice'
       const isCancelledOrRejected = currentStateId === OrderState.Rejected || currentStateId === OrderState.Cancelled
       const isNC = !forceInvoice && isCancelledOrRejected

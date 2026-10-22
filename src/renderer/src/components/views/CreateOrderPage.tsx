@@ -121,7 +121,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const canEditDetails = !isEditing || canEditOrderDetails(orderStateId, role)
   const allowedNextStates = isEditing ? getAllowedNextStates(orderStateId, role) : []
   const canSubmit = canEditDetails || allowedNextStates.length > 0
-  const showInvoice = isEditing && canViewInvoice(orderStateId, role)
+
+  const hasInvoice = Boolean((initialOrder as any)?.invoiceType)
+  const showInvoice = isEditing && canViewInvoice(orderStateId, role) && hasInvoice
 
   const debugInfo = {
     role,
@@ -151,6 +153,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const isTargetStatePaid = formData.currentStateId === OrderState.Paid
   const isInitialStatePaid = !isEditing && initialStateId === OrderState.Paid
+
+  // Una vez que la orden ya fue marcada como Paid (o superior), el tipo de factura queda bloqueado
+  const isInvoiceLocked = (isEditing && orderStateId >= OrderState.Paid) || Boolean((initialOrder as any)?.invoiceType)
 
   const { clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients } =
     useSeletedUserOnOrder()
@@ -331,8 +336,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const statusHistory = (initialOrder as any)?.statusHistory ?? []
   const disabledFieldClass = "cursor-not-allowed opacity-60 bg-gray-100 dark:bg-zinc-800"
   const addressDisabled = !canEditDetails || formData.clientId <= 0
-
-  const hasInvoice = Boolean((initialOrder as any)?.invoiceType)
+  
   const isCancelledOrRejectedState = orderStateId === OrderState.Cancelled || orderStateId === OrderState.Rejected
 
   return (
@@ -391,6 +395,21 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         onSubmit={handleSubmit}
         className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm"
       >
+        {/* Selector de Tipo de Factura permanente si ya tiene factura o está en estado Pagado/posterior */}
+        {hasInvoice && (
+          <div className="rounded-xl bg-gray-50 dark:bg-zinc-800/50 p-4 border border-gray-200 dark:border-white/10">
+            <label className={labelClass}>Tipo de Factura (Bloqueado)</label>
+            <select
+              value={formData.invoiceType}
+              disabled={true}
+              className={`${inputClass} ${disabledFieldClass}`}
+            >
+              <option value="B">Factura B (Consumidor Final / Monotributo)</option>
+              <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
+            </select>
+          </div>
+        )}
+
         {allowedNextStates.length > 0 && (
           <div className="rounded-xl bg-blue-50/50 p-4 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 flex flex-col gap-4">
             <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300">Cambio de estado</h3>
@@ -412,13 +431,15 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 </select>
               </div>
 
-              {isTargetStatePaid && (
+              {/* Si estamos transicionando a Paid y aún no tenía factura */}
+              {isTargetStatePaid && !hasInvoice && (
                 <div>
                   <label className={labelClass}>Tipo de Factura</label>
                   <select
                     value={formData.invoiceType}
+                    disabled={isInvoiceLocked}
                     onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' }))}
-                    className={inputClass}
+                    className={`${inputClass} ${isInvoiceLocked ? disabledFieldClass : ""}`}
                   >
                     <option value="B">Factura B (Consumidor Final / Monotributo)</option>
                     <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
@@ -496,8 +517,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 <label className={labelClass}>Tipo de Factura</label>
                 <select
                   value={formData.invoiceType}
+                  disabled={isInvoiceLocked}
                   onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' }))}
-                  className={inputClass}
+                  className={`${inputClass} ${isInvoiceLocked ? disabledFieldClass : ""}`}
                 >
                   <option value="B">Factura B (Consumidor Final / Monotributo)</option>
                   <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
