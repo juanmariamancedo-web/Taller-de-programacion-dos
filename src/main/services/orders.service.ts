@@ -141,7 +141,6 @@ export class OrdersService {
       where.sellerId = BigInt(currentUserId);
     }
 
-    // El operator solo ve las órdenes con las que puede trabajar: pagadas y en camino
     if (role === 'operator') {
       where.currentStateId = { in: [BigInt(OrderState.Paid), BigInt(OrderState.InTransit)] };
     }
@@ -182,6 +181,7 @@ export class OrdersService {
       sellerId: Number(order.sellerId),
       currentStateId: Number(order.currentStateId),
       shippingAddressId: order.shippingAddressId ? Number(order.shippingAddressId) : null,
+      invoiceType: order.invoiceType ?? null, // Incluimos el tipo de factura (A o B)
       items: order.itemOrders.map((item) => ({
         id: Number(item.id),
         productId: Number(item.productId),
@@ -235,7 +235,6 @@ export class OrdersService {
         };
       }
 
-      // Estado con el que nace la orden: borrador, pendiente de pago o pagada
       const initialStateId = Number(payload.initialStateId ?? OrderState.Created);
       const creatableStates: number[] = [OrderState.Created, OrderState.Pending, OrderState.Paid];
       const isAllowedInitialState =
@@ -326,7 +325,6 @@ export class OrdersService {
       const updatedOrder = await prisma.$transaction(async (tx) => {
         const hasNewItems = Boolean(items && items.length > 0);
 
-        // Los ítems viejos devuelven su stock y los nuevos lo vuelven a descontar
         if (hasNewItems) {
           const previousItems = await tx.itemOrder.findMany({ where: { orderId } });
           await this.releaseStock(tx, previousItems);
@@ -334,7 +332,6 @@ export class OrdersService {
           await this.reserveStock(tx, items!);
         }
 
-        // El estado y el tracking solo cambian por updateOrderState
         return tx.order.update({
           where: { id: orderId },
           data: {
@@ -371,45 +368,95 @@ export class OrdersService {
   // ─── Cambiar estado ─────────────────────────────────────────────────────
 
   async updateOrderState(
-    payload: UpdateOrderStatePayload & { location?: string },
+    payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B' },
     sessionContext?: UserSessionContext | null
   ): Promise<OrderMutationResponse> {
     try {
       const activeSession = await this.resolveSession(sessionContext);
       const role = this.getSessionRole(activeSession);
-      const { id, currentStateId, trackingNumber, notes, location } = payload;
+      const { id, currentStateId, trackingNumber, notes, location, invoiceType } = payload;
       const orderId = BigInt(id);
       const targetStateId = Number(currentStateId);
 
+      const existingOrder = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { itemOrders: true },
+      });
+
+      if (!existingOrder) {
+        throw new Error('La orden especificada no existe.');
+      }
+
+      this.assertSellerOwnsOrder(role, existingOrder.sellerId, this.getSessionUserId(activeSession));
+
+      const currentState = Number(existingOrder.currentStateId);
+      if (!canChangeState(currentState, targetStateId, role)) {
+        throw new Error(
+          `Tu rol no puede pasar la orden de "${getStateLabel(currentState)}" a "${getStateLabel(targetStateId)}".`
+        );
+      }
+
+      if (requiresTracking(targetStateId) && !trackingNumber?.trim() && !existingOrder.trackingNumber) {
+        throw new Error('El número de seguimiento (tracking) es obligatorio para poner la orden en camino.');
+      }
+
+      if (requiresReason(targetStateId) && !notes?.trim()) {
+        throw new Error('Indicá el motivo del rechazo o la cancelación.');
+      }
+
+      // ─── LÓGICA DE PAGO CON PROCEDIMIENTO ALMACENADO (Factura A / B) ───────────
+      if (targetStateId === OrderState.Paid) {
+        const selectedInvoiceType = invoiceType?.toUpperCase();
+        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B') {
+          throw new Error('Debe especificar si la factura es de tipo A o B para marcar la orden como pagada.');
+        }
+
+        // Llamada al Stored Procedure en PostgreSQL
+        const spResult = await prisma.$queryRaw<Array<{
+          order_id: bigint;
+          total_amount: number;
+          invoice_type: string;
+          net_amount: number;
+          vat_amount: number;
+        }>>`
+          SELECT * FROM procesar_pago_orden(
+            ${orderId}::bigint, 
+            ${selectedInvoiceType}::varchar, 
+            ${BigInt(OrderState.Paid)}::bigint
+          )
+        `;
+
+        if (!spResult || spResult.length === 0) {
+          throw new Error('Error al ejecutar el procedimiento almacenado de facturación.');
+        }
+
+        const fiscalData = spResult[0];
+
+        // Registrar historial de estado de la orden con los datos de facturación
+        if (existingOrder.shippingAddressId || existingOrder.clientId) {
+          const addressIdToUse = existingOrder.shippingAddressId ?? (await prisma.address.findFirst({ where: { clientId: existingOrder.clientId } }))?.id;
+
+          if (addressIdToUse) {
+            await prisma.orderStatusHistory.create({
+              data: {
+                orderId: orderId,
+                stateId: BigInt(targetStateId),
+                addressId: addressIdToUse,
+                notes: `Orden pagada con Factura ${selectedInvoiceType}. Neto: $${fiscalData.net_amount}, IVA 21%: $${fiscalData.vat_amount}.`,
+              },
+            });
+          }
+        }
+
+        return {
+          success: true,
+          orderId: Number(orderId),
+          message: `Orden marcada como pagada con Factura ${selectedInvoiceType} exitosamente.`,
+        };
+      }
+
+      // ─── FLUJO ESTÁNDAR PARA OTROS ESTADOS ──────────────────────────────────
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        const existingOrder = await tx.order.findUnique({
-          where: { id: orderId },
-          include: { itemOrders: true },
-        });
-
-        if (!existingOrder) {
-          throw new Error('La orden especificada no existe.');
-        }
-
-        this.assertSellerOwnsOrder(role, existingOrder.sellerId, this.getSessionUserId(activeSession));
-
-        // Una sola regla decide rol + transición (ver orderStateRules.ts)
-        const currentState = Number(existingOrder.currentStateId);
-        if (!canChangeState(currentState, targetStateId, role)) {
-          throw new Error(
-            `Tu rol no puede pasar la orden de "${getStateLabel(currentState)}" a "${getStateLabel(targetStateId)}".`
-          );
-        }
-
-        if (requiresTracking(targetStateId) && !trackingNumber?.trim() && !existingOrder.trackingNumber) {
-          throw new Error('El número de seguimiento (tracking) es obligatorio para poner la orden en camino.');
-        }
-
-        if (requiresReason(targetStateId) && !notes?.trim()) {
-          throw new Error('Indicá el motivo del rechazo o la cancelación.');
-        }
-
-        // Si la orden se cierra sin entregarse, el stock vuelve al inventario
         if (releasesStock(targetStateId)) {
           await this.releaseStock(tx, existingOrder.itemOrders);
         }
