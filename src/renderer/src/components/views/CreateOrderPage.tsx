@@ -250,6 +250,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       const currentSession = (await fetchSession().catch(() => null)) ?? session
       const orderId = initialOrder?.id ? String(initialOrder.id) : null
 
+      let savedOrderId: string | null = orderId
+
       if (canEditDetails) {
         const sellerId =
           role === "seller"
@@ -271,6 +273,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           : await window.electronAPI?.createOrder?.({ ...details, initialStateId } as any)
 
         assertSuccess(response, "Error al guardar la orden.")
+        if (!orderId && response?.orderId) {
+          savedOrderId = String(response.orderId)
+        }
       }
 
       if (orderId && stateChanged) {
@@ -284,6 +289,20 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         } as any)
 
         assertSuccess(response, "Error al actualizar el estado de la orden.")
+      }
+
+      // ─── APERTURA AUTOMÁTICA DEL PDF DE LA FACTURA ────────────────────────
+      const isPaidNow = (!isEditing && initialStateId === OrderState.Paid) || (isEditing && formData.currentStateId === OrderState.Paid)
+      
+      if (isPaidNow && savedOrderId) {
+        try {
+          const invoiceResponse = await window.electronAPI?.openOrderInvoice?.(savedOrderId)
+          if (!invoiceResponse?.success) {
+            console.error("No se pudo abrir la factura automáticamente:", invoiceResponse?.message)
+          }
+        } catch (invoiceErr) {
+          console.error("Error al intentar abrir el PDF de la factura:", invoiceErr)
+        }
       }
 
       goToOrders()
