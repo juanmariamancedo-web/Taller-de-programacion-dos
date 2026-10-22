@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useAppDispatch } from "../../store/hooks"
-import { setCurrentTab, setOrderToEdit } from "../../store/slices/appSlice"
+import { setCurrentTab, setOrderToEdit, setGlobalAlert } from "../../store/slices/appSlice"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
 import {
   OrderState,
@@ -226,7 +226,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       const response = await window.electronAPI?.openOrderInvoice?.(String(initialOrder?.id), docType)
       assertSuccess(response, "No se pudo abrir el comprobante.")
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Error al abrir el comprobante.")
+      dispatch(setGlobalAlert(err instanceof Error ? err.message : "Error al abrir el comprobante."));
     }
   }
 
@@ -249,7 +249,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     e.preventDefault()
 
     const validationError = validate()
-    if (validationError) return alert(validationError)
+    if (validationError) return dispatch(setGlobalAlert(validationError))
 
     try {
       const currentSession = (await fetchSession().catch(() => null)) ?? session
@@ -309,7 +309,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       goToOrders()
     } catch (err) {
       console.error("Error al guardar la orden:", err)
-      alert(err instanceof Error ? err.message : "Error de comunicación con el proceso principal de Electron.")
+      dispatch(setGlobalAlert(err instanceof Error ? err.message : "Error de comunicación con el proceso principal de Electron."))
     }
   }
 
