@@ -139,6 +139,15 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const [formData, setFormData] = useState<FormData>(() => buildFormData(initialOrder))
   const [items, setItems] = useState<FormOrderItem[]>([newItem()])
 
+  // Estado con el que nace una orden nueva: borrador, pendiente de pago o pagada
+  const [initialStateId, setInitialStateId] = useState<number>(OrderState.Created)
+  const initialStateOptions = [
+    OrderState.Created,
+    ...getAllowedNextStates(OrderState.Created, role).filter(
+      (stateId) => stateId === OrderState.Pending || stateId === OrderState.Paid
+    ),
+  ]
+
   const stateChanged = formData.currentStateId !== orderStateId
   const nextStateNeedsTracking = stateChanged && requiresTracking(formData.currentStateId)
   const nextStateNeedsReason = stateChanged && requiresReason(formData.currentStateId)
@@ -157,6 +166,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       setSearchTermClients("")
       setSearchTermAddress("")
       setItems([newItem()])
+      setInitialStateId(OrderState.Created)
       return
     }
 
@@ -264,7 +274,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
         const response = orderId
           ? await window.electronAPI?.updateOrder?.({ id: orderId, ...details } as any)
-          : await window.electronAPI?.createOrder?.(details as any)
+          : await window.electronAPI?.createOrder?.({ ...details, initialStateId } as any)
 
         assertSuccess(response, "Error al guardar la orden.")
       }
@@ -420,6 +430,24 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Estado inicial: solo al crear una orden nueva */}
+        {!isEditing && initialStateOptions.length > 1 && (
+          <div className="sm:w-1/2">
+            <label className={labelClass}>Estado inicial</label>
+            <select
+              value={initialStateId}
+              onChange={(e) => setInitialStateId(Number(e.target.value))}
+              className={inputClass}
+            >
+              {initialStateOptions.map((stateId) => (
+                <option key={stateId} value={stateId}>
+                  {STATE_LABELS[stateId]}
+                </option>
+              ))}
+            </select>
           </div>
         )}
 

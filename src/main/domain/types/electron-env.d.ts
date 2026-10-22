@@ -414,7 +414,8 @@ export interface UpdateOrderStatePayload {
 export interface CreateOrderPayload {
   clientId: number | string;
   sellerId?: number | string;
-  shippingAddressId?: number | string; // <-- Agregar esta línea
+  shippingAddressId?: number | string;
+  initialStateId?: number; // Creada (por defecto), Pendiente o Pagada
   total: number;
   items: Array<{
     productId: number;

@@ -235,6 +235,20 @@ export class OrdersService {
         };
       }
 
+      // Estado con el que nace la orden: borrador, pendiente de pago o pagada
+      const initialStateId = Number(payload.initialStateId ?? OrderState.Created);
+      const creatableStates: number[] = [OrderState.Created, OrderState.Pending, OrderState.Paid];
+      const isAllowedInitialState =
+        creatableStates.includes(initialStateId) &&
+        (initialStateId === OrderState.Created || canChangeState(OrderState.Created, initialStateId, role));
+
+      if (!isAllowedInitialState) {
+        return {
+          success: false,
+          message: `Tu rol no puede crear órdenes en estado "${getStateLabel(initialStateId)}".`,
+        };
+      }
+
       const newOrder = await prisma.$transaction(async (tx) => {
         await this.reserveStock(tx, items);
 
@@ -243,7 +257,7 @@ export class OrdersService {
             clientId: BigInt(clientId),
             sellerId: BigInt(sellerId),
             total: Number(total),
-            currentStateId: BigInt(OrderState.Created),
+            currentStateId: BigInt(initialStateId),
             ...(shippingAddressId && { shippingAddressId: BigInt(shippingAddressId) }),
             itemOrders: {
               create: items.map((item) => ({
@@ -259,9 +273,12 @@ export class OrdersService {
           await tx.orderStatusHistory.create({
             data: {
               orderId: order.id,
-              stateId: BigInt(OrderState.Created),
+              stateId: BigInt(initialStateId),
               addressId: BigInt(shippingAddressId),
-              notes: 'Creación de la orden de compra y descuento de stock',
+              notes:
+                initialStateId === OrderState.Created
+                  ? 'Creación de la orden de compra y descuento de stock'
+                  : `Creación de la orden en estado "${getStateLabel(initialStateId)}" y descuento de stock`,
             },
           });
         }
