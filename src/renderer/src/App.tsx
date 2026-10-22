@@ -14,6 +14,7 @@ import CreateOrderPage from "./components/views/CreateOrderPage"
 import Profile from './components/views/Profile'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ClientsReport, OrdersReport, ProductsReport } from './components/views/Reports'
+import GlobalAlert from './components/GlobalAlert'
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
@@ -89,23 +90,26 @@ function App(): React.JSX.Element {
   }
 
   return (
-    <div className="relative min-h-screen flex flex-col justify-between">
-      {/* Fondo arreglado con fixed para cubrir toda la pantalla en todo momento */}
-      <div
-        className="fixed inset-0 z-[-1] bg-neutral-100 dark:bg-neutral-950
-        bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(217,216,255,0.5),rgba(255,255,255,0.9))]
-        dark:bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.3),rgba(255,255,255,0))]"
-      ></div>
+    <>
+      <div className="relative min-h-screen flex flex-col justify-between">
+        {/* Fondo arreglado con fixed para cubrir toda la pantalla en todo momento */}
+        <div
+          className="fixed inset-0 z-[-1] bg-neutral-100 dark:bg-neutral-950
+          bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(217,216,255,0.5),rgba(255,255,255,0.9))]
+          dark:bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.3),rgba(255,255,255,0))]"
+        ></div>
 
-      {session && <Header navItems={navItems} />}
+        {session && <Header navItems={navItems} />}
 
-      {/* Margen pt-20/pt-24 para despegar el título y contenido del Header */}
-      <main className={`container mx-auto ${session ? 'pt-24' : 'pt-0'} pb-10 px-4 flex-1 flex flex-col`}>
-        <LoginPanel>
-          {renderPanel()}
-        </LoginPanel>
-      </main>
-    </div>
+        {/* Margen pt-20/pt-24 para despegar el título y contenido del Header */}
+        <main className={`container mx-auto ${session ? 'pt-24' : 'pt-0'} pb-10 px-4 flex-1 flex flex-col`}>
+          <LoginPanel>
+            {renderPanel()}
+          </LoginPanel>
+        </main>
+      </div>
+      <GlobalAlert />
+    </>
   )
 }
 

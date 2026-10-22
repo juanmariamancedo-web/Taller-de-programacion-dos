@@ -19,7 +19,8 @@ export interface AppState {
   loadingSession: boolean;
   clientToEdit: ClientListItem | null;
   orderToEdit: OrderWithState | null;
-  userToEdit: UserListItem | null; // <-- Estado para el usuario a editar
+  userToEdit: UserListItem | null;
+  globalAlert: string | null; // <-- Estado global para las alertas
 }
 
 const initialState: AppState = {
@@ -32,6 +33,7 @@ const initialState: AppState = {
   clientToEdit: null,
   orderToEdit: null,
   userToEdit: null,
+  globalAlert: null, 
 }
 
 export const appSlice = createSlice({
@@ -59,6 +61,10 @@ export const appSlice = createSlice({
     setUserToEdit: (state, action: PayloadAction<UserListItem | null>) => {
       state.userToEdit = action.payload
     },
+    // --- Reducer de Alerta Global ---
+    setGlobalAlert: (state, action: PayloadAction<string | null>) => {
+      state.globalAlert = action.payload
+    },
     // --- Reducers de Sesión ---
     setSession: (state, action: PayloadAction<Session | null | undefined>) => {
       state.session = action.payload
@@ -82,8 +88,9 @@ export const {
   setClientToEdit,
   setOrderToEdit,
   setUserToEdit,
+  setGlobalAlert,
   setSession, 
-  setLoadingSession, 
+  setLoadingSession,
   logoutSession 
 } = appSlice.actions
 
