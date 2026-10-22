@@ -1,8 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/main/infrastructure/db/generated/client"
@@ -11,7 +9,6 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
-
 
 // ==========================================
 // TABLAS DE DOMINIO / CATÁLOGOS
@@ -163,23 +160,24 @@ model Product {
 // ==========================================
 
 model Order {
-  id                BigInt               @id @default(autoincrement())
-  currentStateId    BigInt               @map("current_state_id")
-  currentState      OrderState           @relation(fields: [currentStateId], references: [id])
-  trackingNumber    String?              @map("tracking_number")
-  total             Decimal              @default(0.0)
-  sellerId          BigInt               @map("seller_id")
-  seller            User                 @relation(fields: [sellerId], references: [id])
-  clientId          BigInt               @map("client_id")
-  client            Client               @relation(fields: [clientId], references: [id])
-  shippingAddressId BigInt?              @map("shipping_address_id")
-  shippingAddress   Address?             @relation(fields: [shippingAddressId], references: [id])
-  createdAt         DateTime?            @default(now()) @map("created_at")
-  updatedAt         DateTime?            @updatedAt @map("updated_at")
+  id                BigInt             @id @default(autoincrement())
+  currentStateId    BigInt             @map("current_state_id")
+  currentState      OrderState         @relation(fields: [currentStateId], references: [id])
+  trackingNumber    String?            @map("tracking_number")
+  total             Decimal            @default(0.0)
+  invoiceType       String?            @map("invoice_type") // 'A' o 'B' para discriminación fiscal
+  sellerId          BigInt             @map("seller_id")
+  seller            User               @relation(fields: [sellerId], references: [id])
+  clientId          BigInt             @map("client_id")
+  client            Client             @relation(fields: [clientId], references: [id])
+  shippingAddressId BigInt?            @map("shipping_address_id")
+  shippingAddress   Address?           @relation(fields: [shippingAddressId], references: [id])
+  createdAt         DateTime?          @default(now()) @map("created_at")
+  updatedAt         DateTime?          @updatedAt @map("updated_at")
 
-  payments           Payment[]
+  payments          Payment[]
   orderStatusHistory OrderStatusHistory[]
-  itemOrders         ItemOrder[]
+  itemOrders        ItemOrder[]
 
   @@map("orders")
 }
