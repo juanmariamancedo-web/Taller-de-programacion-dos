@@ -420,11 +420,13 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 <select
                   value={formData.currentStateId}
                   onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))}
-                  className={inputClass}
+                  className="w-full rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-zinc-900 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value={orderStateId}>{getStateLabel(orderStateId)} (actual)</option>
+                  <option value={orderStateId} className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                    {getStateLabel(orderStateId)} (actual)
+                  </option>
                   {allowedNextStates.map((stateId) => (
-                    <option key={stateId} value={stateId}>
+                    <option key={stateId} value={stateId} className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
                       {STATE_LABELS[stateId]}
                     </option>
                   ))}
@@ -439,10 +441,14 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                     value={formData.invoiceType}
                     disabled={isInvoiceLocked}
                     onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' }))}
-                    className={`${inputClass} ${isInvoiceLocked ? disabledFieldClass : ""}`}
+                    className={`${inputClass} bg-white dark:bg-zinc-900 ${isInvoiceLocked ? disabledFieldClass : ""}`}
                   >
-                    <option value="B">Factura B (Consumidor Final / Monotributo)</option>
-                    <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
+                    <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                      Factura B (Consumidor Final / Monotributo)
+                    </option>
+                    <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                      Factura A (Responsable Inscripto - IVA 21%)
+                    </option>
                   </select>
                 </div>
               )}
@@ -502,10 +508,10 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
               <select
                 value={initialStateId}
                 onChange={(e) => setInitialStateId(Number(e.target.value))}
-                className={inputClass}
+                className="w-full rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-zinc-900 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {initialStateOptions.map((stateId) => (
-                  <option key={stateId} value={stateId}>
+                  <option key={stateId} value={stateId} className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
                     {STATE_LABELS[stateId]}
                   </option>
                 ))}
@@ -519,10 +525,14 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                   value={formData.invoiceType}
                   disabled={isInvoiceLocked}
                   onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' }))}
-                  className={`${inputClass} ${isInvoiceLocked ? disabledFieldClass : ""}`}
+                  className={`${inputClass} bg-white dark:bg-zinc-900 ${isInvoiceLocked ? disabledFieldClass : ""}`}
                 >
-                  <option value="B">Factura B (Consumidor Final / Monotributo)</option>
-                  <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
+                  <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                    Factura B (Consumidor Final / Monotributo)
+                  </option>
+                  <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                    Factura A (Responsable Inscripto - IVA 21%)
+                  </option>
                 </select>
               </div>
             )}
