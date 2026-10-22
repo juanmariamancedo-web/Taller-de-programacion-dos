@@ -148,7 +148,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const stateChanged = formData.currentStateId !== orderStateId
   const nextStateNeedsTracking = stateChanged && requiresTracking(formData.currentStateId)
   const nextStateNeedsReason = stateChanged && requiresReason(formData.currentStateId)
-  
+
   const isTargetStatePaid = formData.currentStateId === OrderState.Paid
   const isInitialStatePaid = !isEditing && initialStateId === OrderState.Paid
 
@@ -219,9 +219,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const handleViewInvoice = async () => {
     try {
       const response = await window.electronAPI?.openOrderInvoice?.(String(initialOrder?.id))
-      assertSuccess(response, "No se pudo abrir la factura.")
+      assertSuccess(response, "No se pudo abrir el comprobante.")
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Error al abrir la factura.")
+      alert(err instanceof Error ? err.message : "Error al abrir el comprobante.")
     }
   }
 
@@ -249,7 +249,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     try {
       const currentSession = (await fetchSession().catch(() => null)) ?? session
       const orderId = initialOrder?.id ? String(initialOrder.id) : null
-
       let savedOrderId: string | null = orderId
 
       if (canEditDetails) {
@@ -291,17 +290,15 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         assertSuccess(response, "Error al actualizar el estado de la orden.")
       }
 
-      // ─── APERTURA AUTOMÁTICA DEL PDF DE LA FACTURA ────────────────────────
+      // Apertura automática de comprobante (Factura si pasó a Pagada, o Nota de Crédito si se canceló/rechazó)
       const isPaidNow = (!isEditing && initialStateId === OrderState.Paid) || (isEditing && formData.currentStateId === OrderState.Paid)
-      
-      if (isPaidNow && savedOrderId) {
+      const isCancelledOrRejected = isEditing && (formData.currentStateId === OrderState.Cancelled || formData.currentStateId === OrderState.Rejected)
+
+      if ((isPaidNow || isCancelledOrRejected) && savedOrderId) {
         try {
-          const invoiceResponse = await window.electronAPI?.openOrderInvoice?.(savedOrderId)
-          if (!invoiceResponse?.success) {
-            console.error("No se pudo abrir la factura automáticamente:", invoiceResponse?.message)
-          }
+          await window.electronAPI?.openOrderInvoice?.(savedOrderId)
         } catch (invoiceErr) {
-          console.error("Error al intentar abrir el PDF de la factura:", invoiceErr)
+          console.error("No se pudo abrir el comprobante automáticamente:", invoiceErr)
         }
       }
 
@@ -351,7 +348,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
               onClick={handleViewInvoice}
               className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
             >
-              Ver factura
+              Ver comprobante
             </button>
           )}
           <button
