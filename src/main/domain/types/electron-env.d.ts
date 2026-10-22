@@ -443,6 +443,7 @@ export type Unsubscribe = () => void
 
 // --- INTERFAZ GLOBAL IPC (ELECTRON API) ---
 export interface IElectronAPI {
+  openOrderInvoice: (orderId: string) => Promise<{ success: boolean; message?: string }>
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
   getDashboardData: () => Promise<DashboardDataResponse>

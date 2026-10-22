@@ -2,6 +2,18 @@ import { useEffect, useState } from "react"
 import { useAppDispatch } from "../../store/hooks"
 import { setCurrentTab, setOrderToEdit } from "../../store/slices/appSlice"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
+import {
+  OrderState,
+  STATE_LABELS,
+  canEditOrderDetails,
+  canViewInvoice,
+  getAllowedNextStates,
+  getRole,
+  getStateLabel,
+  isLogisticsRole,
+  requiresReason,
+  requiresTracking,
+} from "../../../../main/domain/orderStateRules"
 import { useSeletedAddressOnOrder } from "../../hooks/useSeletedAddressOnOrder"
 import useSeletedUserOnOrder from "../../hooks/useSeletedUserOnOrder"
 import { ItemOrder } from "../ItemOrder"
@@ -18,286 +30,252 @@ interface OrderFormProps {
   initialOrder?: OrderWithState | null
 }
 
+interface SessionInfo {
+  id?: number
+  roleId?: number
+  roleName?: string
+}
 
+interface FormData {
+  clientId: number
+  shippingAddressId: number
+  currentStateId: number // estado elegido en el selector
+  trackingNumber: string
+  location: string
+  notes: string
+}
 
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+const inputClass =
+  "w-full rounded-xl border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
+
+const labelClass = "mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+
+const newItem = (): FormOrderItem => ({
+  id: crypto.randomUUID(),
+  productId: 0,
+  description: "",
+  quantity: 1,
+  unitPrice: 0,
+})
+
+const buildFormData = (order?: OrderWithState | null): FormData => ({
+  clientId: Number(order?.client?.id ?? -1),
+  shippingAddressId: Number(order?.shippingAddressId ?? -1),
+  currentStateId: Number(order?.currentState?.id ?? OrderState.Created),
+  trackingNumber: order?.trackingNumber || "",
+  location: "",
+  notes: "",
+})
+
+const mapOrderItems = (order: OrderWithState): FormOrderItem[] => {
+  const rawItems = (order as any).items ?? (order as any).itemOrders ?? []
+  if (rawItems.length === 0) return [newItem()]
+
+  return rawItems.map((item: any) => ({
+    id: item.id ? String(item.id) : crypto.randomUUID(),
+    productId: Number(item.productId ?? item.product?.id ?? 0),
+    description: item.description ?? item.product?.name ?? "",
+    quantity: Number(item.quantity ?? item.amount ?? 1),
+    unitPrice: Number(item.unitPrice ?? item.price ?? 0),
+  }))
+}
+
+const fetchSession = async (): Promise<SessionInfo | null> => {
+  const data = await window.electronAPI?.getSession?.()
+  if (!data) return null
+  return { ...data, id: Number(data.id), roleId: Number(data.roleId) }
+}
+
+/** Lanza un error si el proceso principal respondió con fallo. */
+const assertSuccess = (response: any, fallbackMessage: string) => {
+  if (!response?.success) throw new Error(response?.message || fallbackMessage)
+}
+
+// ─── Componente ───────────────────────────────────────────────────────────
 
 export default function OrderForm({ initialOrder }: OrderFormProps) {
   const dispatch = useAppDispatch()
-  
-  const [session, setSession] = useState<{ id?: number; roleId?: number; roleName?: string } | null>(null)
-  const [loadingSession, setLoadingSession] = useState<boolean>(true)
-  
-  
+
+  // Sesión y rol
+  const [session, setSession] = useState<SessionInfo | null>(null)
+  const [loadingSession, setLoadingSession] = useState(true)
+
   useEffect(() => {
-    const fetchSession = async () => {
-      try {
-        const sessionData = await window.electronAPI?.getSession?.()
-        if (sessionData) {
-          setSession({
-            ...sessionData,
-            id: Number(sessionData.id),
-            roleId: Number(sessionData.roleId),
-          })
-        }
-      } catch (err) {
-        console.error("Error al obtener la sesión activa:", err)
-      } finally {
-        setLoadingSession(false)
-      }
-    }
     fetchSession()
+      .then(setSession)
+      .catch((err) => console.error("Error al obtener la sesión activa:", err))
+      .finally(() => setLoadingSession(false))
   }, [])
-  
-  const roleName = session?.roleName?.toLowerCase() || ''
-  const roleId = Number(session?.roleId)
-  
-  const isAdmin = roleName === 'admin' || roleId === 1
-  const isSupervisor = roleName === 'supervisor' || roleId === 2
-  const isVendedor = roleName === 'seller' || roleName === 'vendedor' || roleId === 3
-  const isOperador = roleName === 'operator' || roleName === 'operador' || roleId === 4
-  
-  const isAdvancedOrder = Boolean(initialOrder?.id) && Number(initialOrder?.currentState?.id ?? 1) !== 1
-  const isReadOnlyDetails = Boolean(initialOrder?.id) && (isOperador || (isVendedor && isAdvancedOrder))
-  
-  const currentOrderStateId = Number(initialOrder?.currentState?.id ?? 1)
-  
-  const [formData, setFormData] = useState({
-    clientId: initialOrder?.client?.id != null ? Number(initialOrder.client.id) : -1,
-    shippingAddressId: initialOrder?.shippingAddressId != null ? Number(initialOrder.shippingAddressId) : -1,
-    currentStateId: currentOrderStateId,
-    trackingNumber: initialOrder?.trackingNumber || '',
-    location: '',
-    notes: '',
-  })
-  
-  const {
-    clients,
-    searchTermClients,
-    setSearchTermClients,
-    isOpenClients,
-    setIsOpenClients,
-  } = useSeletedUserOnOrder()
 
-  const {
-    addresses,
-    searchTermAddress,
-    setSearchTermAddress,
-    isOpenAddress,
-    setIsOpenAddress,
-  } = useSeletedAddressOnOrder(formData)
+  const role = getRole(session?.roleId, session?.roleName)
 
-  const [items, setItems] = useState<FormOrderItem[]>([
-    { id: crypto.randomUUID(), productId: 0, description: "", quantity: 1, unitPrice: 0 },
-  ])
+  // Estado de la orden y qué puede hacer este rol con ella
+  const isEditing = Boolean(initialOrder?.id)
+  const orderStateId = Number(initialOrder?.currentState?.id ?? OrderState.Created)
 
+  const canEditDetails = !isEditing || canEditOrderDetails(orderStateId, role)
+  const allowedNextStates = isEditing ? getAllowedNextStates(orderStateId, role) : []
+  const canSubmit = canEditDetails || allowedNextStates.length > 0
+  const showInvoice = isEditing && canViewInvoice(orderStateId, role)
+
+  // Formulario
+  const [formData, setFormData] = useState<FormData>(() => buildFormData(initialOrder))
+  const [items, setItems] = useState<FormOrderItem[]>([newItem()])
+
+  const stateChanged = formData.currentStateId !== orderStateId
+  const nextStateNeedsTracking = stateChanged && requiresTracking(formData.currentStateId)
+  const nextStateNeedsReason = stateChanged && requiresReason(formData.currentStateId)
+
+  const { clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients } =
+    useSeletedUserOnOrder()
+
+  const { addresses, searchTermAddress, setSearchTermAddress, isOpenAddress, setIsOpenAddress } =
+    useSeletedAddressOnOrder(formData)
+
+  // Carga (o limpia) el formulario cuando cambia la orden a editar
   useEffect(() => {
-    if (initialOrder?.id) {
-      const clientId = initialOrder.client?.id != null ? Number(initialOrder.client.id) : -1
-      const shippingAddressId = initialOrder.shippingAddressId != null ? Number(initialOrder.shippingAddressId) : -1
-      const currentStateId = initialOrder.currentState?.id != null ? Number(initialOrder.currentState.id) : 1
-      
-      setFormData({
-        clientId,
-        shippingAddressId,
-        currentStateId,
-        trackingNumber: initialOrder.trackingNumber || '',
-        location: '',
-        notes: '',
-      })
-      
-      if (initialOrder.client) {
-        setSearchTermClients(`${initialOrder.client.name} ${initialOrder.client.lastname}`)
-      }
+    setFormData(buildFormData(initialOrder))
 
-      const addr = (initialOrder as any).shippingAddress
-      if (addr) {
-        const city = addr.city?.name ? `, ${addr.city.name}` : ""
-        setSearchTermAddress(`${addr.street ?? ""} ${addr.number ?? ""}${city}`.trim())
-      }
-      
-      const orderItems = (initialOrder as any).items ?? (initialOrder as any).itemOrders
-      if (orderItems && orderItems.length > 0) {
-        setItems(
-          orderItems.map((item: any) => ({
-            id: item.id ? String(item.id) : crypto.randomUUID(),
-            productId: Number(item.productId ?? item.product?.id ?? 0),
-            description: item.description ?? item.product?.name ?? "",
-            quantity: Number(item.quantity ?? item.amount ?? 1),
-            unitPrice: Number(item.unitPrice ?? item.price ?? 0),
-          }))
-        )
-      }
-    } else {
-      setFormData({ clientId: -1, shippingAddressId: -1, currentStateId: 1, trackingNumber: '', location: '', notes: '' })
+    if (!initialOrder?.id) {
       setSearchTermClients("")
       setSearchTermAddress("")
-      setItems([{ id: crypto.randomUUID(), productId: 0, description: "", quantity: 1, unitPrice: 0 }])
+      setItems([newItem()])
+      return
     }
+
+    if (initialOrder.client) {
+      setSearchTermClients(`${initialOrder.client.name} ${initialOrder.client.lastname}`)
+    }
+
+    const addr = (initialOrder as any).shippingAddress
+    if (addr) {
+      const city = addr.city?.name ? `, ${addr.city.name}` : ""
+      setSearchTermAddress(`${addr.street ?? ""} ${addr.number ?? ""}${city}`.trim())
+    }
+
+    setItems(mapOrderItems(initialOrder))
   }, [initialOrder])
 
-  const handleAddItem = () => {
-    if (isReadOnlyDetails) return
-    setItems((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), productId: 0, description: "", quantity: 1, unitPrice: 0 },
-    ])
-  }
+  // ─── Handlers de ítems, cliente y dirección ─────────────────────────────
 
-  const handleRemoveItem = (id: string) => {
-    if (isReadOnlyDetails || items.length === 1) return
-    setItems((prev) => prev.filter((item) => item.id !== id))
-  }
-  
-  const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) => {
-    if (isReadOnlyDetails) return
-    setItems((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item))
-    )
-  }
+  const handleAddItem = () => setItems((prev) => [...prev, newItem()])
+
+  const handleRemoveItem = (id: string) =>
+    setItems((prev) => (prev.length === 1 ? prev : prev.filter((item) => item.id !== id)))
+
+  const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) =>
+    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item)))
 
   const handleClientSelect = (client: (typeof clients)[number]) => {
-    if (isReadOnlyDetails) return
     setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
     setSearchTermClients(`${client.name} ${client.lastname}`)
     setSearchTermAddress("")
     setIsOpenClients(false)
   }
-  
-  const handleAddressSelect = (ubic: (typeof addresses)[number]) => {
-    if (isReadOnlyDetails) return
-    setFormData((prev) => ({ ...prev, shippingAddressId: Number(ubic.id) }))
-    const cityName = ubic.city?.name ? `, ${ubic.city.name}` : ""
-    setSearchTermAddress(`${ubic.street} ${ubic.number}${cityName}`)
+
+  const handleAddressSelect = (address: (typeof addresses)[number]) => {
+    const cityName = address.city?.name ? `, ${address.city.name}` : ""
+    setFormData((prev) => ({ ...prev, shippingAddressId: Number(address.id) }))
+    setSearchTermAddress(`${address.street} ${address.number}${cityName}`)
     setIsOpenAddress(false)
   }
 
   const total = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
+
+  // ─── Acciones ───────────────────────────────────────────────────────────
+
+  const goToOrders = () => {
+    dispatch(setOrderToEdit(null))
+    setTimeout(() => dispatch(setCurrentTab("orders")), 150)
+  }
 
   const handleCancel = () => {
     dispatch(setOrderToEdit(null))
     dispatch(setCurrentTab("orders"))
   }
 
+  const handleViewInvoice = async () => {
+    try {
+      // Requiere exponer openOrderInvoice en el preload y tipar en electron-env
+      const response = await window.electronAPI?.openOrderInvoice?.(String(initialOrder?.id))
+      assertSuccess(response, "No se pudo abrir la factura.")
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Error al abrir la factura.")
+    }
+  }
+
+  /** Devuelve el mensaje de error, o null si el formulario es válido. */
+  const validate = (): string | null => {
+    if (canEditDetails) {
+      if (formData.clientId <= 0) return "Debe seleccionar un cliente"
+      if (formData.shippingAddressId <= 0) return "Debe seleccionar una dirección"
+      if (items.some((i) => i.productId <= 0)) return "Todos los ítems deben tener un producto seleccionado"
+    }
+    if (nextStateNeedsTracking && !formData.trackingNumber.trim()) {
+      return "El número de seguimiento (tracking) es obligatorio para poner la orden en camino."
+    }
+    if (nextStateNeedsReason && !formData.notes.trim()) {
+      return "Indicá el motivo del rechazo o la cancelación en Observaciones."
+    }
+    return null
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    let currentSession = session
+    const validationError = validate()
+    if (validationError) return alert(validationError)
+
     try {
-      const freshSession = await window.electronAPI?.getSession?.()
-      if (freshSession) {
-        currentSession = {
-          ...freshSession,
-          id: Number(freshSession.id),
-          roleId: Number(freshSession.roleId),
+      const currentSession = (await fetchSession().catch(() => null)) ?? session
+      const orderId = initialOrder?.id ? String(initialOrder.id) : null
+
+      if (canEditDetails) {
+        const sellerId =
+          role === "seller"
+            ? Number(currentSession?.id)
+            : Number(initialOrder?.sellerId || currentSession?.id || 0)
+
+        const details = {
+          clientId: formData.clientId,
+          shippingAddressId: formData.shippingAddressId,
+          sellerId,
+          currentStateId: orderStateId,
+          total,
+          items: items.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
         }
+
+        const response = orderId
+          ? await window.electronAPI?.updateOrder?.({ id: orderId, ...details } as any)
+          : await window.electronAPI?.createOrder?.(details as any)
+
+        assertSuccess(response, "Error al guardar la orden.")
       }
-    } catch (err) {
-      console.error("Error al refrescar sesión en submit:", err)
-    }
 
-    if (isVendedor && isAdvancedOrder) {
-      return alert("Esta orden ya fue procesada y se encuentra en modo de solo lectura.")
-    }
-
-    const isLogisticsAction = (isOperador || isSupervisor || isAdmin) && Boolean(initialOrder?.id)
-
-    if (isLogisticsAction && initialOrder?.id) {
-      if (formData.currentStateId >= 4 && !formData.trackingNumber.trim()) {
-        return alert("El número de seguimiento (tracking) es obligatorio al despachar el paquete.")
-      }
-      
-      try {
-        // Se envía directamente al backend y este validará si la transición o rol son correctos
+      // El backend vuelve a validar rol y transición
+      if (orderId && stateChanged) {
         const response = await window.electronAPI?.updateOrderState?.({
-          id: String(initialOrder.id),
+          id: orderId,
           currentStateId: formData.currentStateId,
           trackingNumber: formData.trackingNumber.trim(),
           location: formData.location.trim() || undefined,
           notes: formData.notes.trim() || undefined,
         } as any)
-        
-        if (!response?.success) {
-          return alert(response?.message || "Error al actualizar el estado logístico.")
-        }
 
-        dispatch(setOrderToEdit(null))
-        setTimeout(() => {
-          dispatch(setCurrentTab("orders"))
-        }, 150)
-        return
-      } catch (err) {
-        console.error("Error al actualizar estado logístico:", err)
-        return alert("Ocurrió un error inesperado al actualizar el estado de la orden.")
-      }
-    }
-
-    if (formData.clientId <= 0) return alert("Debe seleccionar un cliente")
-    if (formData.shippingAddressId <= 0) return alert("Debe seleccionar una dirección")
-    if (items.some((i) => i.productId <= 0)) return alert("Todos los ítems deben tener un producto seleccionado")
-
-    const sellerId = isVendedor ? Number(currentSession?.id) : Number(initialOrder?.sellerId || currentSession?.id || 0)
-
-    const payload = {
-      clientId: formData.clientId,
-      shippingAddressId: formData.shippingAddressId,
-      sellerId: sellerId,
-      currentStateId: formData.currentStateId,
-      trackingNumber: formData.trackingNumber,
-      location: formData.location.trim() || undefined,
-      notes: formData.notes.trim() || undefined,
-      total: total,
-      items: items.map((i) => ({
-        productId: i.productId,
-        quantity: i.quantity,
-        unitPrice: i.unitPrice,
-      })),
-    }
-
-    try {
-      let response: any
-
-      if (initialOrder?.id) {
-        response = await window.electronAPI?.updateOrder?.({
-          id: String(initialOrder.id),
-          ...payload,
-        } as any)
-      } else {
-        response = await window.electronAPI?.createOrder?.(payload as any)
-      }
-      
-      if (!response?.success) {
-        return alert(response?.message || "Error al procesar la orden")
+        assertSuccess(response, "Error al actualizar el estado de la orden.")
       }
 
-      dispatch(setOrderToEdit(null))
-      setTimeout(() => {
-        dispatch(setCurrentTab("orders"))
-      }, 150)
+      goToOrders()
     } catch (err) {
       console.error("Error al guardar la orden:", err)
-      alert("Error de comunicación con el proceso principal de Electron.")
+      alert(err instanceof Error ? err.message : "Error de comunicación con el proceso principal de Electron.")
     }
   }
 
-  const formatStateLabel = (name: string, stateId: number) => {
-    const map: Record<number, string> = {
-      1: "Creada / Borrador",
-      2: "Pendiente",
-      3: "Pagada",
-      4: "Despachado",
-      5: "En Camino",
-      6: "Entregado",
-      7: "Rechazado / Cancelado",
-      8: "Error de Stock",
-    }
-    return map[stateId] || name
-  }
+  // ─── Render ─────────────────────────────────────────────────────────────
 
-  const inputClass =
-    "w-full rounded-xl border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-
-  const statusHistoryList = (initialOrder as any)?.statusHistory || []
-  
   if (loadingSession) {
     return (
       <div className="flex h-96 items-center justify-center">
@@ -305,147 +283,138 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       </div>
     )
   }
-  
-  const ALL_STATUSES = [
-    { id: 1, label: "Creada / Borrador (created)" },
-    { id: 2, label: "Pendiente (pending)" },
-    { id: 3, label: "Pagada (paid)" },
-    { id: 4, label: "Despachado (dispatched)" },
-    { id: 5, label: "En Camino (in_transit)" },
-    { id: 6, label: "Entregado (delivered)" },
-  ]
-  
-  const sliceStatuses = ALL_STATUSES.slice(currentOrderStateId - 1, currentOrderStateId + 1);
-  
-  if(currentOrderStateId == 7 || session?.roleId !== 3 && (currentOrderStateId !== 6)){
-    sliceStatuses.push({ id: 7, label: "Rechazado / Cancelado (rejected)" })
-  }
-  
-  if((currentOrderStateId == 8 || session?.roleId == 1 || session?.roleId === 2) && currentOrderStateId !== 6){
-    sliceStatuses.push({ id: 8, label: "Error de Stock (stock_error)" },)
-  }
+
+  const title = !isEditing
+    ? "Nueva Orden"
+    : `Orden #${initialOrder?.id}${canEditDetails ? "" : " (ítems bloqueados)"}`
+
+  const subtitle = !isEditing
+    ? "Ingresá los datos necesarios para registrar una nueva orden."
+    : canEditDetails
+    ? "Mientras la orden esté en borrador podés modificar sus datos."
+    : "La orden ya fue confirmada: los datos y los ítems no se pueden modificar."
+
+  const statusHistory = (initialOrder as any)?.statusHistory ?? []
+  const disabledFieldClass = "cursor-not-allowed opacity-60 bg-gray-100 dark:bg-zinc-800"
+  const addressDisabled = !canEditDetails || formData.clientId <= 0
 
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col gap-6 p-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-            {initialOrder?.id
-              ? isOperador
-                ? `Gestión Logística - Orden #${initialOrder.id}`
-                : isVendedor && isAdvancedOrder
-                ? `Detalles de Orden #${initialOrder.id} (Solo Lectura)`
-                : `Editar Órden #${initialOrder.id}`
-              : "Nueva Órden"}
-          </h1>
-          <p className="text-gray-500 text-sm mt-1">
-            {initialOrder?.id
-              ? isOperador
-                ? "Actualiza el estado logístico, punto geográfico y datos de despacho."
-                : isVendedor && isAdvancedOrder
-                ? "La orden está en proceso logístico. Podés consultar la información pero no modificarla."
-                : "Modifica los datos necesarios de la orden existente."
-                : "Ingresá los datos necesarios para registrar una nueva orden."}
-          </p>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{title}</h1>
+          <p className="text-gray-500 text-sm mt-1">{subtitle}</p>
         </div>
-        <button
-          type="button"
-          onClick={handleCancel}
-          className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
-        >
-          ← Volver
-        </button>
+
+        <div className="flex gap-2">
+          {showInvoice && (
+            <button
+              type="button"
+              onClick={handleViewInvoice}
+              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+            >
+              Ver factura
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
+          >
+            ← Volver
+          </button>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm">
-        
-        {/* Sección de Gestión Logística: Muestra todos los estados sin restricciones visuales */}
-        {(isOperador || isSupervisor || isAdmin) && initialOrder?.id && (
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm"
+      >
+        {/* Cambio de estado: solo aparece si este rol puede avanzar la orden */}
+        {allowedNextStates.length > 0 && (
           <div className="rounded-xl bg-blue-50/50 p-4 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 flex flex-col gap-4">
-            <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300 uppercase tracking-wide">
-              Actualización de Estado Logístico y Tracking
-            </h3>
+            <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300">Cambio de estado</h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                  Estado Logístico
-                </label>
+                <label className={labelClass}>Estado</label>
                 <select
                   value={formData.currentStateId}
                   onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))}
                   className={inputClass}
                 >
-                  {sliceStatuses.map((status) => (
-                    <option key={status.id} value={status.id}>
-                      {status.label}
+                  <option value={orderStateId}>{getStateLabel(orderStateId)} (actual)</option>
+                  {allowedNextStates.map((stateId) => (
+                    <option key={stateId} value={stateId}>
+                      {STATE_LABELS[stateId]}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                  Número de Seguimiento (Tracking)
-                </label>
-                <input
-                  type="text"
-                  value={formData.trackingNumber}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, trackingNumber: e.target.value }))}
-                  placeholder="Ej. TRK-98234123"
-                  className={inputClass}
-                  required={isOperador && formData.currentStateId >= 4}
-                />
-              </div>
+              {nextStateNeedsTracking && (
+                <div>
+                  <label className={labelClass}>Número de seguimiento (tracking)</label>
+                  <input
+                    type="text"
+                    value={formData.trackingNumber}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, trackingNumber: e.target.value }))}
+                    placeholder="Ej. TRK-98234123"
+                    className={inputClass}
+                    required
+                  />
+                </div>
+              )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                  Ubicación Física Actual (Opcional)
-                </label>
-                <input
-                  type="text"
-                  value={formData.location}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
-                  placeholder="Ej. Depósito Central Corrientes"
-                  className={inputClass}
-                />
-              </div>
+            {stateChanged && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {isLogisticsRole(role) && (
+                  <div>
+                    <label className={labelClass}>Ubicación física actual (opcional)</label>
+                    <input
+                      type="text"
+                      value={formData.location}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
+                      placeholder="Ej. Depósito Central Corrientes"
+                      className={inputClass}
+                    />
+                  </div>
+                )}
 
-              <div>
-                <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                  Observaciones / Novedad (Opcional)
-                </label>
-                <input
-                  type="text"
-                  value={formData.notes}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
-                  placeholder="Ej. Paquete embalado y listo para transporte"
-                  className={inputClass}
-                />
+                <div>
+                  <label className={labelClass}>
+                    {nextStateNeedsReason ? "Motivo (obligatorio)" : "Observaciones (opcional)"}
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.notes}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
+                    placeholder={nextStateNeedsReason ? "Ej. Sin stock del producto" : "Ej. Paquete listo para transporte"}
+                    className={inputClass}
+                    required={nextStateNeedsReason}
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </div>
         )}
 
-        {/* Desplegables de Cliente y Dirección */}
+        {/* Cliente y dirección */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div className="relative w-full">
-            <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
-              Cliente
-            </label>
+            <label className={labelClass}>Cliente</label>
             <input
               type="text"
-              disabled={isReadOnlyDetails}
-              className={`${inputClass} ${isReadOnlyDetails ? "cursor-not-allowed opacity-60 bg-gray-100 dark:bg-zinc-800" : ""}`}
+              disabled={!canEditDetails}
+              className={`${inputClass} ${!canEditDetails ? disabledFieldClass : ""}`}
               placeholder="Buscar cliente por nombre o DNI..."
               value={searchTermClients}
               onChange={(e) => setSearchTermClients(e.target.value)}
-              onFocus={() => !isReadOnlyDetails && setIsOpenClients(true)}
+              onFocus={() => setIsOpenClients(true)}
               onBlur={() => setTimeout(() => setIsOpenClients(false), 200)}
             />
-            {isOpenClients && !isReadOnlyDetails && (
+            {isOpenClients && canEditDetails && (
               <ul className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 text-gray-900 dark:text-white">
                 {clients.length > 0 ? (
                   clients.map((client) => (
@@ -469,32 +438,30 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           </div>
 
           <div className="relative w-full">
-            <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
-              Dirección de Envío
-            </label>
+            <label className={labelClass}>Dirección de envío</label>
             <input
               type="text"
-              disabled={isReadOnlyDetails || formData.clientId <= 0}
-              className={`${inputClass} ${(isReadOnlyDetails || formData.clientId <= 0) ? "cursor-not-allowed opacity-60 bg-gray-100 dark:bg-zinc-800" : ""}`}
-              placeholder={formData.clientId > 0 ? "Buscar dirección..." : "Selecciona un cliente primero"}
+              disabled={addressDisabled}
+              className={`${inputClass} ${addressDisabled ? disabledFieldClass : ""}`}
+              placeholder={formData.clientId > 0 ? "Buscar dirección..." : "Seleccioná un cliente primero"}
               value={searchTermAddress}
               onChange={(e) => setSearchTermAddress(e.target.value)}
-              onFocus={() => !isReadOnlyDetails && formData.clientId > 0 && setIsOpenAddress(true)}
+              onFocus={() => setIsOpenAddress(true)}
               onBlur={() => setTimeout(() => setIsOpenAddress(false), 200)}
             />
-            {isOpenAddress && !isReadOnlyDetails && formData.clientId > 0 && (
+            {isOpenAddress && !addressDisabled && (
               <ul className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 text-gray-900 dark:text-white">
                 {addresses.length > 0 ? (
-                  addresses.map((ubic) => (
-                    <li key={String(ubic.id)}>
+                  addresses.map((address) => (
+                    <li key={String(address.id)}>
                       <button
                         type="button"
                         onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => handleAddressSelect(ubic)}
+                        onClick={() => handleAddressSelect(address)}
                         className="flex w-full items-center justify-between px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-zinc-800"
                       >
-                        <span>{`${ubic.street} ${ubic.number}`}</span>
-                        <span className="text-xs text-gray-400">#{String(ubic.id)}</span>
+                        <span>{`${address.street} ${address.number}`}</span>
+                        <span className="text-xs text-gray-400">#{String(address.id)}</span>
                       </button>
                     </li>
                   ))
@@ -508,17 +475,17 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           </div>
         </div>
 
-        {/* Tabla de Productos */}
+        {/* Ítems */}
         <div className="mt-4">
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Items de la Orden</h2>
-            {!isReadOnlyDetails && (
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Ítems de la orden</h2>
+            {canEditDetails && (
               <button
                 type="button"
                 onClick={handleAddItem}
                 className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-100 dark:border-white/10 dark:bg-white/5 dark:text-gray-200 dark:hover:bg-white/10"
               >
-                + Agregar Ítem
+                + Agregar ítem
               </button>
             )}
           </div>
@@ -529,7 +496,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 <tr>
                   <th className="px-4 py-3">Producto</th>
                   <th className="w-28 px-4 py-3">Cantidad</th>
-                  <th className="w-36 px-4 py-3">Precio Unit.</th>
+                  <th className="w-36 px-4 py-3">Precio unit.</th>
                   <th className="w-32 px-4 py-3 text-right">Subtotal</th>
                   <th className="w-12 px-4 py-3 text-center"></th>
                 </tr>
@@ -539,11 +506,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                   <ItemOrder
                     key={item.id}
                     item={item}
-                    disabled={isReadOnlyDetails}
-                    isOnlyItem={items.length === 1 || isReadOnlyDetails}
-                    selectedProductIds={items
-                      .map((i) => i.productId)
-                      .filter((id) => id > 0)}
+                    disabled={!canEditDetails}
+                    isOnlyItem={items.length === 1 || !canEditDetails}
+                    selectedProductIds={items.map((i) => i.productId).filter((id) => id > 0)}
                     onUpdateItem={handleUpdateItem}
                     onRemoveItem={handleRemoveItem}
                   />
@@ -562,60 +527,61 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           </div>
         </div>
 
-        {/* Historial de Seguimiento / Ubicaciones (Timeline) */}
-        {statusHistoryList.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-gray-200 dark:border-white/10">
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
-              Historial de Seguimiento Logístico
-            </h2>
-            <div className="relative border-l-2 border-blue-500 ml-3 flex flex-col gap-6 pl-6 py-2">
-              {statusHistoryList.map((event: any) => (
-                <div key={String(event.id)} className="relative">
-                  <span className="absolute -left-[31px] top-1.5 h-4 w-4 rounded-full bg-blue-600 ring-4 ring-white dark:ring-zinc-900" />
-                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center">
-                    <span className="font-semibold text-gray-900 dark:text-white">
-                      {formatStateLabel(event.stateName, Number(event.stateId))}
-                    </span>
-                    <span className="text-xs text-gray-400">
-                      {event.createdAt ? new Date(event.createdAt).toLocaleString('es-AR') : ''}
-                    </span>
-                  </div>
+        <StatusTimeline history={statusHistory} />
 
-                  {event.notes && (
-                    <p className="text-sm font-medium text-blue-600 dark:text-blue-400 mt-1">
-                      {event.notes}
-                    </p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Botones de acción */}
+        {/* Acciones */}
         <div className="flex justify-end gap-4 border-t border-gray-200 pt-4 dark:border-white/10">
           <button
             type="button"
             onClick={handleCancel}
             className="rounded-xl px-5 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"
           >
-            {isVendedor && isAdvancedOrder ? "Volver a la Lista" : "Cancelar"}
+            {canSubmit ? "Cancelar" : "Volver a la lista"}
           </button>
 
-          {!(isVendedor && isAdvancedOrder) && (
+          {canSubmit && (
             <button
               type="submit"
               className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
             >
-              {initialOrder?.id && (isOperador || isSupervisor || isAdmin)
-                ? "Actualizar Estado Logístico"
-                : initialOrder?.id
-                ? "Actualizar Orden"
-                : "Guardar Orden"}
+              {isEditing ? "Guardar cambios" : "Guardar orden"}
             </button>
           )}
         </div>
       </form>
+    </div>
+  )
+}
+
+// ─── Historial de seguimiento ─────────────────────────────────────────────
+
+function StatusTimeline({ history }: { history: any[] }) {
+  if (history.length === 0) return null
+
+  return (
+    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-white/10">
+      <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Historial de seguimiento</h2>
+
+      <div className="relative border-l-2 border-blue-500 ml-3 flex flex-col gap-6 pl-6 py-2">
+        {history.map((event) => (
+          <div key={String(event.id)} className="relative">
+            <span className="absolute -left-[31px] top-1.5 h-4 w-4 rounded-full bg-blue-600 ring-4 ring-white dark:ring-zinc-900" />
+
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center">
+              <span className="font-semibold text-gray-900 dark:text-white">
+                {getStateLabel(Number(event.stateId), event.stateName)}
+              </span>
+              <span className="text-xs text-gray-400">
+                {event.createdAt ? new Date(event.createdAt).toLocaleString("es-AR") : ""}
+              </span>
+            </div>
+
+            {event.notes && (
+              <p className="text-sm font-medium text-blue-600 dark:text-blue-400 mt-1">{event.notes}</p>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
