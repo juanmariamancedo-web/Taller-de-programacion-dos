@@ -23,7 +23,7 @@ export class InvoiceService {
     })
   }
 
-  buildInvoiceHtml(order: NonNullable<Awaited<ReturnType<InvoiceService['findOrder']>>>): string {
+  buildInvoiceHtml(order: NonNullable<Awaited<ReturnType<InvoiceService['findOrder']>>>, forceInvoice = false): string {
     const number = String(order.id).padStart(8, '0')
     const address = order.shippingAddress
     const addressText = address
@@ -34,8 +34,8 @@ export class InvoiceService {
     const isInvoiceA = invoiceType === 'A'
 
     const currentStateId = Number(order.currentStateId)
-    const isCancelledOrRejected =
-      currentStateId === OrderState.Rejected || currentStateId === OrderState.Cancelled
+    // Si forceInvoice es true, ignoramos el estado cancelado/rechazado para mostrar la factura original
+    const isCancelledOrRejected = !forceInvoice && (currentStateId === OrderState.Rejected || currentStateId === OrderState.Cancelled)
 
     const documentTitle =
       isCancelledOrRejected && order.invoiceType
@@ -126,11 +126,10 @@ export class InvoiceService {
 </html>`
   }
 
-  async savePdf(orderId: bigint, isNC: boolean, pdf: Buffer): Promise<string> {
+  async savePdf(orderId: bigint, prefix: string, pdf: Buffer): Promise<string> {
     const folder = path.join(app.getPath('userData'), 'invoices')
     await mkdir(folder, { recursive: true })
 
-    const prefix = isNC ? 'nota-credito' : 'orden'
     const filePath = path.join(folder, `${prefix}-${orderId}.pdf`)
     await writeFile(filePath, pdf)
     return filePath

@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain, shell } from 'electron'
-import { canViewInvoice, getRole, OrderState } from '../../domain/orderStateRules'
 import { invoiceService } from '../../services/invoce.service'
+import { canViewInvoice, getRole, OrderState } from '../../domain/orderStateRules'
 import { authService } from '../../services/auth.service'
 
 const OPEN_INVOICE_CHANNEL = 'orders:open-invoice'
@@ -16,7 +16,8 @@ async function renderPdf(html: string): Promise<Buffer> {
 }
 
 export function registerOrderInvoiceHandler() {
-  ipcMain.handle(OPEN_INVOICE_CHANNEL, async (_event, orderId: string) => {
+  // Recibimos explícitamente docType como segundo parámetro desde el frontend
+  ipcMain.handle(OPEN_INVOICE_CHANNEL, async (_event, orderId: string, docType?: 'invoice' | 'credit-note') => {
     try {
       const session = await authService.getActiveSession()
       const role = getRole(Number(session?.roleId), session?.roleName)
@@ -25,7 +26,6 @@ export function registerOrderInvoiceHandler() {
       if (!order) return { success: false, message: 'Orden no encontrada.' }
 
       const currentStateId = Number(order.currentStateId)
-      const isNC = currentStateId === OrderState.Rejected || currentStateId === OrderState.Cancelled
 
       if (!canViewInvoice(currentStateId, role)) {
         return { success: false, message: 'El comprobante no está disponible para esta orden.' }
@@ -35,9 +35,16 @@ export function registerOrderInvoiceHandler() {
         return { success: false, message: 'No tenés permiso para ver este comprobante.' }
       }
 
-      const html = invoiceService.buildInvoiceHtml(order)
+      // Si docType es 'invoice', forzamos la factura original limpiando el estado de anulación
+      const forceInvoice = docType === 'invoice'
+      const isCancelledOrRejected = currentStateId === OrderState.Rejected || currentStateId === OrderState.Cancelled
+      const isNC = !forceInvoice && isCancelledOrRejected
+
+      const html = invoiceService.buildInvoiceHtml(order, forceInvoice)
       const pdf = await renderPdf(html)
-      const filePath = await invoiceService.savePdf(order.id, isNC, pdf)
+      
+      const filePrefix = isNC ? 'nota-credito' : 'factura'
+      const filePath = await invoiceService.savePdf(order.id, filePrefix, pdf)
 
       const openError = await shell.openPath(filePath)
       return openError ? { success: false, message: openError } : { success: true }

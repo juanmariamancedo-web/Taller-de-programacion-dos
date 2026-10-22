@@ -48,7 +48,7 @@ interface FormData {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-const SHOW_DEBUG = true
+const SHOW_DEBUG = false
 
 const inputClass =
   "w-full rounded-xl border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
@@ -216,9 +216,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     dispatch(setCurrentTab("orders"))
   }
 
-  const handleViewInvoice = async () => {
+  const handleViewInvoice = async (docType?: 'invoice' | 'credit-note') => {
     try {
-      const response = await window.electronAPI?.openOrderInvoice?.(String(initialOrder?.id))
+      const response = await window.electronAPI?.openOrderInvoice?.(String(initialOrder?.id), docType)
       assertSuccess(response, "No se pudo abrir el comprobante.")
     } catch (err) {
       alert(err instanceof Error ? err.message : "Error al abrir el comprobante.")
@@ -290,7 +290,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         assertSuccess(response, "Error al actualizar el estado de la orden.")
       }
 
-      // Apertura automática de comprobante (Factura si pasó a Pagada, o Nota de Crédito si se canceló/rechazó)
       const isPaidNow = (!isEditing && initialStateId === OrderState.Paid) || (isEditing && formData.currentStateId === OrderState.Paid)
       const isCancelledOrRejected = isEditing && (formData.currentStateId === OrderState.Cancelled || formData.currentStateId === OrderState.Rejected)
 
@@ -333,6 +332,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const disabledFieldClass = "cursor-not-allowed opacity-60 bg-gray-100 dark:bg-zinc-800"
   const addressDisabled = !canEditDetails || formData.clientId <= 0
 
+  const hasInvoice = Boolean((initialOrder as any)?.invoiceType)
+  const isCancelledOrRejectedState = orderStateId === OrderState.Cancelled || orderStateId === OrderState.Rejected
+
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col gap-6 p-6">
       <div className="flex justify-between items-center gap-4">
@@ -342,15 +344,33 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         </div>
 
         <div className="flex gap-2">
-          {showInvoice && (
+          {showInvoice && hasInvoice && isCancelledOrRejectedState ? (
+            <>
+              <button
+                type="button"
+                onClick={() => handleViewInvoice('invoice')}
+                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                Ver factura original
+              </button>
+              <button
+                type="button"
+                onClick={() => handleViewInvoice('credit-note')}
+                className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700"
+              >
+                Ver nota de crédito
+              </button>
+            </>
+          ) : showInvoice ? (
             <button
               type="button"
-              onClick={handleViewInvoice}
+              onClick={() => handleViewInvoice()}
               className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
             >
               Ver comprobante
             </button>
-          )}
+          ) : null}
+
           <button
             type="button"
             onClick={handleCancel}

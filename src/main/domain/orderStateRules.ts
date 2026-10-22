@@ -65,7 +65,6 @@ export const isLogisticsRole = (role: Role | null) =>
 const { Created, Pending, Paid, InTransit, Delivered, Rejected, Cancelled } = OrderState
 
 const TRANSITIONS: Partial<Record<OrderStateId, Partial<Record<Role, OrderStateId[]>>>> = {
-  // El seller puede saltear Pendiente y marcarla como pagada directamente
     [Created]: {
         seller: [Pending, Paid, Cancelled],
         admin: [Pending, Paid, Cancelled],
@@ -76,8 +75,6 @@ const TRANSITIONS: Partial<Record<OrderStateId, Partial<Record<Role, OrderStateI
         supervisor: [Rejected, Cancelled],
         admin: [Paid, Cancelled],
     },
-  // Cancelar una orden pagada implica reembolso: solo supervisor y admin.
-  // El supervisor puede todo lo que puede el operator, más cancelar.
   [Paid]: {
     operator: [InTransit],
     supervisor: [InTransit, Rejected, Cancelled],
@@ -88,7 +85,6 @@ const TRANSITIONS: Partial<Record<OrderStateId, Partial<Record<Role, OrderStateI
     supervisor: [Delivered, Rejected],
     admin: [Delivered, Rejected],
   },
-  // Delivered, Rejected y Cancelled son estados finales
 }
 
 export function getAllowedNextStates(currentStateId: number, role: Role | null): OrderStateId[] {
@@ -107,11 +103,13 @@ export function canEditOrderDetails(currentStateId: number, role: Role | null): 
   return currentStateId === Created && (role === "seller" || role === "admin")
 }
 
-const INVOICE_STATES: OrderStateId[] = [Paid, InTransit, Delivered]
+// Incluimos Cancelled y Rejected para permitir visualizar la Nota de Crédito superficial
+const INVOICE_STATES: OrderStateId[] = [Paid, InTransit, Delivered, Cancelled, Rejected]
 
-/** La factura existe desde que la orden está pagada. La ven seller y admin. */
+/** El comprobante (Factura o Nota de Crédito) se puede visualizar según el estado y rol. */
 export function canViewInvoice(currentStateId: number, role: Role | null): boolean {
-  return (role === "seller" || role === "admin") && INVOICE_STATES.includes(currentStateId as OrderStateId)
+  const allowedRoles = role === "seller" || role === "admin" || role === "supervisor"
+  return allowedRoles && INVOICE_STATES.includes(currentStateId as OrderStateId)
 }
 
 export const requiresTracking = (nextStateId: number) => nextStateId === InTransit
