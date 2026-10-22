@@ -39,15 +39,15 @@ interface SessionInfo {
 interface FormData {
   clientId: number
   shippingAddressId: number
-  currentStateId: number // estado elegido en el selector
+  currentStateId: number
   trackingNumber: string
   location: string
   notes: string
+  invoiceType: 'A' | 'B'
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-// Poné en false para ocultar el recuadro amarillo de depuración
 const SHOW_DEBUG = true
 
 const inputClass =
@@ -70,6 +70,7 @@ const buildFormData = (order?: OrderWithState | null): FormData => ({
   trackingNumber: order?.trackingNumber || "",
   location: "",
   notes: "",
+  invoiceType: (order as any)?.invoiceType ?? 'B',
 })
 
 const mapOrderItems = (order: OrderWithState): FormOrderItem[] => {
@@ -91,7 +92,6 @@ const fetchSession = async (): Promise<SessionInfo | null> => {
   return { ...data, id: Number(data.id), roleId: Number(data.roleId) }
 }
 
-/** Lanza un error si el proceso principal respondió con fallo. */
 const assertSuccess = (response: any, fallbackMessage: string) => {
   if (!response?.success) throw new Error(response?.message || fallbackMessage)
 }
@@ -101,7 +101,6 @@ const assertSuccess = (response: any, fallbackMessage: string) => {
 export default function OrderForm({ initialOrder }: OrderFormProps) {
   const dispatch = useAppDispatch()
 
-  // Sesión y rol
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [loadingSession, setLoadingSession] = useState(true)
 
@@ -114,7 +113,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const role = getRole(session?.roleId, session?.roleName)
 
-  // Estado de la orden y qué puede hacer este rol con ella
   const isEditing = Boolean(initialOrder?.id)
   const orderStateId = Number(
     (initialOrder as any)?.currentStateId ?? initialOrder?.currentState?.id ?? OrderState.Created
@@ -135,12 +133,11 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     rawStateId: (initialOrder as any)?.currentStateId,
   }
 
-  // Formulario
   const [formData, setFormData] = useState<FormData>(() => buildFormData(initialOrder))
   const [items, setItems] = useState<FormOrderItem[]>([newItem()])
 
-  // Estado con el que nace una orden nueva: borrador, pendiente de pago o pagada
   const [initialStateId, setInitialStateId] = useState<number>(OrderState.Created)
+
   const initialStateOptions = [
     OrderState.Created,
     ...getAllowedNextStates(OrderState.Created, role).filter(
@@ -151,6 +148,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const stateChanged = formData.currentStateId !== orderStateId
   const nextStateNeedsTracking = stateChanged && requiresTracking(formData.currentStateId)
   const nextStateNeedsReason = stateChanged && requiresReason(formData.currentStateId)
+  
+  const isTargetStatePaid = formData.currentStateId === OrderState.Paid
+  const isInitialStatePaid = !isEditing && initialStateId === OrderState.Paid
 
   const { clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients } =
     useSeletedUserOnOrder()
@@ -158,7 +158,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const { addresses, searchTermAddress, setSearchTermAddress, isOpenAddress, setIsOpenAddress } =
     useSeletedAddressOnOrder(formData)
 
-  // Carga (o limpia) el formulario cuando cambia la orden a editar
   useEffect(() => {
     setFormData(buildFormData(initialOrder))
 
@@ -182,8 +181,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
     setItems(mapOrderItems(initialOrder))
   }, [initialOrder])
-
-  // ─── Handlers de ítems, cliente y dirección ─────────────────────────────
 
   const handleAddItem = () => setItems((prev) => [...prev, newItem()])
 
@@ -209,8 +206,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const total = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
 
-  // ─── Acciones ───────────────────────────────────────────────────────────
-
   const goToOrders = () => {
     dispatch(setOrderToEdit(null))
     setTimeout(() => dispatch(setCurrentTab("orders")), 150)
@@ -223,7 +218,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const handleViewInvoice = async () => {
     try {
-      // Requiere exponer openOrderInvoice en el preload y tipar en electron-env
       const response = await window.electronAPI?.openOrderInvoice?.(String(initialOrder?.id))
       assertSuccess(response, "No se pudo abrir la factura.")
     } catch (err) {
@@ -231,7 +225,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     }
   }
 
-  /** Devuelve el mensaje de error, o null si el formulario es válido. */
   const validate = (): string | null => {
     if (canEditDetails) {
       if (formData.clientId <= 0) return "Debe seleccionar un cliente"
@@ -257,6 +250,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       const currentSession = (await fetchSession().catch(() => null)) ?? session
       const orderId = initialOrder?.id ? String(initialOrder.id) : null
 
+      let savedOrderId: string | null = orderId
+
       if (canEditDetails) {
         const sellerId =
           role === "seller"
@@ -269,6 +264,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           sellerId,
           currentStateId: orderStateId,
           total,
+          invoiceType: isInitialStatePaid ? formData.invoiceType : undefined,
           items: items.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
         }
 
@@ -277,9 +273,11 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           : await window.electronAPI?.createOrder?.({ ...details, initialStateId } as any)
 
         assertSuccess(response, "Error al guardar la orden.")
+        if (!orderId && response?.orderId) {
+          savedOrderId = String(response.orderId)
+        }
       }
 
-      // El backend vuelve a validar rol y transición
       if (orderId && stateChanged) {
         const response = await window.electronAPI?.updateOrderState?.({
           id: orderId,
@@ -287,9 +285,24 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           trackingNumber: formData.trackingNumber.trim(),
           location: formData.location.trim() || undefined,
           notes: formData.notes.trim() || undefined,
+          invoiceType: isTargetStatePaid ? formData.invoiceType : undefined,
         } as any)
 
         assertSuccess(response, "Error al actualizar el estado de la orden.")
+      }
+
+      // ─── APERTURA AUTOMÁTICA DEL PDF DE LA FACTURA ────────────────────────
+      const isPaidNow = (!isEditing && initialStateId === OrderState.Paid) || (isEditing && formData.currentStateId === OrderState.Paid)
+      
+      if (isPaidNow && savedOrderId) {
+        try {
+          const invoiceResponse = await window.electronAPI?.openOrderInvoice?.(savedOrderId)
+          if (!invoiceResponse?.success) {
+            console.error("No se pudo abrir la factura automáticamente:", invoiceResponse?.message)
+          }
+        } catch (invoiceErr) {
+          console.error("Error al intentar abrir el PDF de la factura:", invoiceErr)
+        }
       }
 
       goToOrders()
@@ -298,8 +311,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       alert(err instanceof Error ? err.message : "Error de comunicación con el proceso principal de Electron.")
     }
   }
-
-  // ─── Render ─────────────────────────────────────────────────────────────
 
   if (loadingSession) {
     return (
@@ -363,7 +374,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         onSubmit={handleSubmit}
         className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm"
       >
-        {/* Cambio de estado: solo aparece si este rol puede avanzar la orden */}
         {allowedNextStates.length > 0 && (
           <div className="rounded-xl bg-blue-50/50 p-4 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 flex flex-col gap-4">
             <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300">Cambio de estado</h3>
@@ -384,6 +394,20 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                   ))}
                 </select>
               </div>
+
+              {isTargetStatePaid && (
+                <div>
+                  <label className={labelClass}>Tipo de Factura</label>
+                  <select
+                    value={formData.invoiceType}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' }))}
+                    className={inputClass}
+                  >
+                    <option value="B">Factura B (Consumidor Final / Monotributo)</option>
+                    <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
+                  </select>
+                </div>
+              )}
 
               {nextStateNeedsTracking && (
                 <div>
@@ -433,25 +457,39 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           </div>
         )}
 
-        {/* Estado inicial: solo al crear una orden nueva */}
         {!isEditing && initialStateOptions.length > 1 && (
-          <div className="sm:w-1/2">
-            <label className={labelClass}>Estado inicial</label>
-            <select
-              value={initialStateId}
-              onChange={(e) => setInitialStateId(Number(e.target.value))}
-              className={inputClass}
-            >
-              {initialStateOptions.map((stateId) => (
-                <option key={stateId} value={stateId}>
-                  {STATE_LABELS[stateId]}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={labelClass}>Estado inicial</label>
+              <select
+                value={initialStateId}
+                onChange={(e) => setInitialStateId(Number(e.target.value))}
+                className={inputClass}
+              >
+                {initialStateOptions.map((stateId) => (
+                  <option key={stateId} value={stateId}>
+                    {STATE_LABELS[stateId]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {isInitialStatePaid && (
+              <div>
+                <label className={labelClass}>Tipo de Factura</label>
+                <select
+                  value={formData.invoiceType}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' }))}
+                  className={inputClass}
+                >
+                  <option value="B">Factura B (Consumidor Final / Monotributo)</option>
+                  <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
+                </select>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Cliente y dirección */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div className="relative w-full">
             <label className={labelClass}>Cliente</label>
@@ -526,7 +564,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           </div>
         </div>
 
-        {/* Ítems */}
         <div className="mt-4">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">Ítems de la orden</h2>
@@ -580,7 +617,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
         <StatusTimeline history={statusHistory} />
 
-        {/* Acciones */}
         <div className="flex justify-end gap-4 border-t border-gray-200 pt-4 dark:border-white/10">
           <button
             type="button"
@@ -603,8 +639,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     </div>
   )
 }
-
-// ─── Historial de seguimiento ─────────────────────────────────────────────
 
 function StatusTimeline({ history }: { history: any[] }) {
   if (history.length === 0) return null

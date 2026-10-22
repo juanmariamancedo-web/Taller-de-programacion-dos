@@ -141,7 +141,6 @@ export class OrdersService {
       where.sellerId = BigInt(currentUserId);
     }
 
-    // El operator solo ve las órdenes con las que puede trabajar: pagadas y en camino
     if (role === 'operator') {
       where.currentStateId = { in: [BigInt(OrderState.Paid), BigInt(OrderState.InTransit)] };
     }
@@ -182,6 +181,7 @@ export class OrdersService {
       sellerId: Number(order.sellerId),
       currentStateId: Number(order.currentStateId),
       shippingAddressId: order.shippingAddressId ? Number(order.shippingAddressId) : null,
+      invoiceType: order.invoiceType ?? null,
       items: order.itemOrders.map((item) => ({
         id: Number(item.id),
         productId: Number(item.productId),
@@ -210,7 +210,7 @@ export class OrdersService {
 
   // ─── Crear ──────────────────────────────────────────────────────────────
 
-  async createOrder(payload: CreateOrderPayload, sessionContext?: UserSessionContext | null): Promise<CreateOrderResponse> {
+  async createOrder(payload: CreateOrderPayload & { invoiceType?: 'A' | 'B' }, sessionContext?: UserSessionContext | null): Promise<CreateOrderResponse> {
     try {
       const activeSession = await this.resolveSession(sessionContext);
       const role = this.getSessionRole(activeSession);
@@ -226,7 +226,7 @@ export class OrdersService {
       const shippingAddressId = payload.shippingAddressId ? Number(payload.shippingAddressId) : null;
       const currentUserId = this.getSessionUserId(activeSession);
       const sellerId = role === 'seller' ? currentUserId : Number(payload.sellerId);
-      const { items, total } = payload;
+      const { items, total, invoiceType } = payload;
 
       if (!clientId || !sellerId || !items || items.length === 0) {
         return {
@@ -235,7 +235,6 @@ export class OrdersService {
         };
       }
 
-      // Estado con el que nace la orden: borrador, pendiente de pago o pagada
       const initialStateId = Number(payload.initialStateId ?? OrderState.Created);
       const creatableStates: number[] = [OrderState.Created, OrderState.Pending, OrderState.Paid];
       const isAllowedInitialState =
@@ -249,15 +248,27 @@ export class OrdersService {
         };
       }
 
+      if (initialStateId === OrderState.Paid) {
+        const selectedInvoiceType = invoiceType?.toUpperCase();
+        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B') {
+          return {
+            success: false,
+            message: 'Debe especificar si la factura es de tipo A o B para crear una orden pagada.',
+          };
+        }
+      }
+
       const newOrder = await prisma.$transaction(async (tx) => {
         await this.reserveStock(tx, items);
 
+        // Creamos la orden asignando directamente el tipo de factura si nace pagada
         const order = await tx.order.create({
           data: {
             clientId: BigInt(clientId),
             sellerId: BigInt(sellerId),
             total: Number(total),
             currentStateId: BigInt(initialStateId),
+            invoiceType: initialStateId === OrderState.Paid ? invoiceType?.toUpperCase() : null,
             ...(shippingAddressId && { shippingAddressId: BigInt(shippingAddressId) }),
             itemOrders: {
               create: items.map((item) => ({
@@ -269,16 +280,27 @@ export class OrdersService {
           },
         });
 
+        // Si nace pagada, registramos la nota fiscal en el historial directamente sin llamar al SP que busca por ID separado
         if (shippingAddressId) {
+          let historyNotes = initialStateId === OrderState.Created
+            ? 'Creación de la orden de compra y descuento de stock'
+            : `Creación de la orden en estado "${getStateLabel(initialStateId)}" y descuento de stock`;
+
+          if (initialStateId === OrderState.Paid) {
+            const selectedInv = invoiceType?.toUpperCase() || 'B';
+            const numericTotal = Number(total);
+            const netAmount = selectedInv === 'A' ? Number((numericTotal / 1.21).toFixed(2)) : numericTotal;
+            const vatAmount = selectedInv === 'A' ? Number((numericTotal - netAmount).toFixed(2)) : 0.00;
+
+            historyNotes = `Orden creada y pagada con Factura ${selectedInv}. Neto: $${netAmount}, IVA 21%: $${vatAmount}.`;
+          }
+
           await tx.orderStatusHistory.create({
             data: {
               orderId: order.id,
               stateId: BigInt(initialStateId),
               addressId: BigInt(shippingAddressId),
-              notes:
-                initialStateId === OrderState.Created
-                  ? 'Creación de la orden de compra y descuento de stock'
-                  : `Creación de la orden en estado "${getStateLabel(initialStateId)}" y descuento de stock`,
+              notes: historyNotes,
             },
           });
         }
@@ -326,7 +348,6 @@ export class OrdersService {
       const updatedOrder = await prisma.$transaction(async (tx) => {
         const hasNewItems = Boolean(items && items.length > 0);
 
-        // Los ítems viejos devuelven su stock y los nuevos lo vuelven a descontar
         if (hasNewItems) {
           const previousItems = await tx.itemOrder.findMany({ where: { orderId } });
           await this.releaseStock(tx, previousItems);
@@ -334,7 +355,6 @@ export class OrdersService {
           await this.reserveStock(tx, items!);
         }
 
-        // El estado y el tracking solo cambian por updateOrderState
         return tx.order.update({
           where: { id: orderId },
           data: {
@@ -371,45 +391,93 @@ export class OrdersService {
   // ─── Cambiar estado ─────────────────────────────────────────────────────
 
   async updateOrderState(
-    payload: UpdateOrderStatePayload & { location?: string },
+    payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B' },
     sessionContext?: UserSessionContext | null
   ): Promise<OrderMutationResponse> {
     try {
       const activeSession = await this.resolveSession(sessionContext);
       const role = this.getSessionRole(activeSession);
-      const { id, currentStateId, trackingNumber, notes, location } = payload;
+      const { id, currentStateId, trackingNumber, notes, location, invoiceType } = payload;
       const orderId = BigInt(id);
       const targetStateId = Number(currentStateId);
 
+      const existingOrder = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: { itemOrders: true },
+      });
+
+      if (!existingOrder) {
+        throw new Error('La orden especificada no existe.');
+      }
+
+      this.assertSellerOwnsOrder(role, existingOrder.sellerId, this.getSessionUserId(activeSession));
+
+      const currentState = Number(existingOrder.currentStateId);
+      if (!canChangeState(currentState, targetStateId, role)) {
+        throw new Error(
+          `Tu rol no puede pasar la orden de "${getStateLabel(currentState)}" a "${getStateLabel(targetStateId)}".`
+        );
+      }
+
+      if (requiresTracking(targetStateId) && !trackingNumber?.trim() && !existingOrder.trackingNumber) {
+        throw new Error('El número de seguimiento (tracking) es obligatorio para poner la orden en camino.');
+      }
+
+      if (requiresReason(targetStateId) && !notes?.trim()) {
+        throw new Error('Indicá el motivo del rechazo o la cancelación.');
+      }
+
+      // ─── LÓGICA DE PAGO CON PROCEDIMIENTO ALMACENADO (Factura A / B) ───────────
+      if (targetStateId === OrderState.Paid) {
+        const selectedInvoiceType = invoiceType?.toUpperCase();
+        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B') {
+          throw new Error('Debe especificar si la factura es de tipo A o B para marcar la orden como pagada.');
+        }
+
+        const spResult = await prisma.$queryRaw<Array<{
+          order_id: bigint;
+          total_amount: number;
+          invoice_type: string;
+          net_amount: number;
+          vat_amount: number;
+        }>>`
+          SELECT * FROM procesar_pago_orden(
+            ${orderId}::bigint, 
+            ${selectedInvoiceType}::varchar, 
+            ${BigInt(OrderState.Paid)}::bigint
+          )
+        `;
+
+        if (!spResult || spResult.length === 0) {
+          throw new Error('Error al ejecutar el procedimiento almacenado de facturación.');
+        }
+
+        const fiscalData = spResult[0];
+
+        if (existingOrder.shippingAddressId || existingOrder.clientId) {
+          const addressIdToUse = existingOrder.shippingAddressId ?? (await prisma.address.findFirst({ where: { clientId: existingOrder.clientId } }))?.id;
+
+          if (addressIdToUse) {
+            await prisma.orderStatusHistory.create({
+              data: {
+                orderId: orderId,
+                stateId: BigInt(targetStateId),
+                addressId: addressIdToUse,
+                notes: `Orden pagada con Factura ${selectedInvoiceType}. Neto: $${fiscalData.net_amount}, IVA 21%: $${fiscalData.vat_amount}.`,
+              },
+            });
+          }
+        }
+
+        return {
+          success: true,
+          orderId: Number(orderId),
+          message: `Orden marcada como pagada con Factura ${selectedInvoiceType} exitosamente.`,
+        };
+      }
+
+      // ─── FLUJO ESTÁNDAR PARA OTROS ESTADOS ──────────────────────────────────
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        const existingOrder = await tx.order.findUnique({
-          where: { id: orderId },
-          include: { itemOrders: true },
-        });
-
-        if (!existingOrder) {
-          throw new Error('La orden especificada no existe.');
-        }
-
-        this.assertSellerOwnsOrder(role, existingOrder.sellerId, this.getSessionUserId(activeSession));
-
-        // Una sola regla decide rol + transición (ver orderStateRules.ts)
-        const currentState = Number(existingOrder.currentStateId);
-        if (!canChangeState(currentState, targetStateId, role)) {
-          throw new Error(
-            `Tu rol no puede pasar la orden de "${getStateLabel(currentState)}" a "${getStateLabel(targetStateId)}".`
-          );
-        }
-
-        if (requiresTracking(targetStateId) && !trackingNumber?.trim() && !existingOrder.trackingNumber) {
-          throw new Error('El número de seguimiento (tracking) es obligatorio para poner la orden en camino.');
-        }
-
-        if (requiresReason(targetStateId) && !notes?.trim()) {
-          throw new Error('Indicá el motivo del rechazo o la cancelación.');
-        }
-
-        // Si la orden se cierra sin entregarse, el stock vuelve al inventario
         if (releasesStock(targetStateId)) {
           await this.releaseStock(tx, existingOrder.itemOrders);
         }

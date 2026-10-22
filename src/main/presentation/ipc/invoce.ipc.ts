@@ -4,7 +4,6 @@ import path from 'node:path'
 import { prisma } from '../../infrastructure/db/prisma';
 
 import { canViewInvoice, getRole } from '../../domain/orderStateRules'
-// Adaptá este import a lo que ya usa tu handler "getSession" para leer la sesión activa
 import { authService } from '../../services/auth.service'
 
 const OPEN_INVOICE_CHANNEL = 'orders:open-invoice'
@@ -40,6 +39,13 @@ function buildInvoiceHtml(order: InvoiceOrder): string {
     ? `${address.street} ${address.number}${address.city?.name ? `, ${address.city.name}` : ''}`
     : '-'
 
+  const invoiceType = (order.invoiceType ?? 'B').toUpperCase()
+  const isInvoiceA = invoiceType === 'A'
+
+  const total = Number(order.total)
+  const netAmount = isInvoiceA ? total / 1.21 : total
+  const vatAmount = isInvoiceA ? total - netAmount : 0
+
   const rows = order.itemOrders
     .map((item) => {
       const subtotal = Number(item.unitPrice) * Number(item.amount)
@@ -59,18 +65,29 @@ function buildInvoiceHtml(order: InvoiceOrder): string {
   <meta charset="utf-8" />
   <style>
     body { font-family: Arial, sans-serif; color: #111; padding: 32px; font-size: 13px; }
-    h1 { font-size: 22px; margin: 0 0 4px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #333; padding-bottom: 12px; margin-bottom: 20px; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    .invoice-badge { font-size: 24px; font-weight: bold; border: 2px solid #333; padding: 4px 12px; text-align: center; }
     .muted { color: #666; }
-    .block { margin: 20px 0; }
+    .block { margin: 16px 0; }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; }
     th, td { padding: 8px; border-bottom: 1px solid #ddd; text-align: left; }
     .right { text-align: right; }
-    .total { margin-top: 16px; text-align: right; font-size: 18px; font-weight: bold; }
+    .totals-box { margin-top: 20px; float: right; width: 280px; }
+    .totals-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
+    .totals-row.final { font-size: 18px; font-weight: bold; border-top: 2px solid #333; margin-top: 6px; padding-top: 6px; }
   </style>
 </head>
 <body>
-  <h1>Comprobante de orden</h1>
-  <div class="muted">N.º ${number} · ${new Date().toLocaleDateString('es-AR')}</div>
+  <div class="header">
+    <div>
+      <h1>Comprobante de Orden</h1>
+      <div class="muted">N.º ${number} · Fecha: ${new Date().toLocaleDateString('es-AR')}</div>
+    </div>
+    <div class="invoice-badge">
+      FACTURA ${invoiceType}
+    </div>
+  </div>
 
   <div class="block">
     <strong>Cliente:</strong> ${escapeHtml(order.client?.name)} ${escapeHtml(order.client?.lastname)}<br />
@@ -85,7 +102,13 @@ function buildInvoiceHtml(order: InvoiceOrder): string {
     <tbody>${rows}</tbody>
   </table>
 
-  <div class="total">Total: ${money(order.total)}</div>
+  <div class="totals-box">
+    ${isInvoiceA ? `
+      <div class="totals-row"><span>Neto Gravado:</span> <span>${money(netAmount)}</span></div>
+      <div class="totals-row"><span>IVA (21%):</span> <span>${money(vatAmount)}</span></div>
+    ` : ''}
+    <div class="totals-row final"><span>Total:</span> <span>${money(total)}</span></div>
+  </div>
 </body>
 </html>`
 }
@@ -120,12 +143,10 @@ export function registerOrderInvoiceHandler() {
       const order = await findOrder(orderId)
       if (!order) return { success: false, message: 'Orden no encontrada.' }
 
-      // Misma regla que usa el formulario, pero acá se valida de verdad
       if (!canViewInvoice(Number(order.currentStateId), role)) {
         return { success: false, message: 'La factura no está disponible para esta orden.' }
       }
 
-      // Un seller solo ve las facturas de sus propias órdenes
       if (role === 'seller' && Number(order.sellerId) !== Number(session?.id)) {
         return { success: false, message: 'No tenés permiso para ver esta factura.' }
       }
