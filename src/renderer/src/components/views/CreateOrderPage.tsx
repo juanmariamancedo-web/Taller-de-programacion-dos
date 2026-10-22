@@ -39,11 +39,11 @@ interface SessionInfo {
 interface FormData {
   clientId: number
   shippingAddressId: number
-  currentStateId: number // estado elegido en el selector
+  currentStateId: number
   trackingNumber: string
   location: string
   notes: string
-  invoiceType: 'A' | 'B' // Tipo de factura requerido al marcar como pagada
+  invoiceType: 'A' | 'B'
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -70,7 +70,7 @@ const buildFormData = (order?: OrderWithState | null): FormData => ({
   trackingNumber: order?.trackingNumber || "",
   location: "",
   notes: "",
-  invoiceType: (order as any)?.invoiceType ?? 'B', // Por defecto B o el guardado
+  invoiceType: (order as any)?.invoiceType ?? 'B',
 })
 
 const mapOrderItems = (order: OrderWithState): FormOrderItem[] => {
@@ -149,8 +149,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const nextStateNeedsTracking = stateChanged && requiresTracking(formData.currentStateId)
   const nextStateNeedsReason = stateChanged && requiresReason(formData.currentStateId)
   
-  // Detectar si el estado seleccionado es "Pagado" (ID 3 o OrderState.Paid)
   const isTargetStatePaid = formData.currentStateId === OrderState.Paid
+  const isInitialStatePaid = !isEditing && initialStateId === OrderState.Paid
 
   const { clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients } =
     useSeletedUserOnOrder()
@@ -262,6 +262,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           sellerId,
           currentStateId: orderStateId,
           total,
+          invoiceType: isInitialStatePaid ? formData.invoiceType : undefined,
           items: items.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
         }
 
@@ -279,7 +280,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           trackingNumber: formData.trackingNumber.trim(),
           location: formData.location.trim() || undefined,
           notes: formData.notes.trim() || undefined,
-          invoiceType: isTargetStatePaid ? formData.invoiceType : undefined, // Enviamos Factura A o B si está pagando
+          invoiceType: isTargetStatePaid ? formData.invoiceType : undefined,
         } as any)
 
         assertSuccess(response, "Error al actualizar el estado de la orden.")
@@ -375,7 +376,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 </select>
               </div>
 
-              {/* Selector de Tipo de Factura (A o B) si se marca como Pagado */}
               {isTargetStatePaid && (
                 <div>
                   <label className={labelClass}>Tipo de Factura</label>
@@ -439,19 +439,35 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         )}
 
         {!isEditing && initialStateOptions.length > 1 && (
-          <div className="sm:w-1/2">
-            <label className={labelClass}>Estado inicial</label>
-            <select
-              value={initialStateId}
-              onChange={(e) => setInitialStateId(Number(e.target.value))}
-              className={inputClass}
-            >
-              {initialStateOptions.map((stateId) => (
-                <option key={stateId} value={stateId}>
-                  {STATE_LABELS[stateId]}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={labelClass}>Estado inicial</label>
+              <select
+                value={initialStateId}
+                onChange={(e) => setInitialStateId(Number(e.target.value))}
+                className={inputClass}
+              >
+                {initialStateOptions.map((stateId) => (
+                  <option key={stateId} value={stateId}>
+                    {STATE_LABELS[stateId]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {isInitialStatePaid && (
+              <div>
+                <label className={labelClass}>Tipo de Factura</label>
+                <select
+                  value={formData.invoiceType}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' }))}
+                  className={inputClass}
+                >
+                  <option value="B">Factura B (Consumidor Final / Monotributo)</option>
+                  <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
+                </select>
+              </div>
+            )}
           </div>
         )}
 

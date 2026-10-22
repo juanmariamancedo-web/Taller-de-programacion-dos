@@ -181,7 +181,7 @@ export class OrdersService {
       sellerId: Number(order.sellerId),
       currentStateId: Number(order.currentStateId),
       shippingAddressId: order.shippingAddressId ? Number(order.shippingAddressId) : null,
-      invoiceType: order.invoiceType ?? null, // Incluimos el tipo de factura (A o B)
+      invoiceType: order.invoiceType ?? null,
       items: order.itemOrders.map((item) => ({
         id: Number(item.id),
         productId: Number(item.productId),
@@ -210,7 +210,7 @@ export class OrdersService {
 
   // ─── Crear ──────────────────────────────────────────────────────────────
 
-  async createOrder(payload: CreateOrderPayload, sessionContext?: UserSessionContext | null): Promise<CreateOrderResponse> {
+  async createOrder(payload: CreateOrderPayload & { invoiceType?: 'A' | 'B' }, sessionContext?: UserSessionContext | null): Promise<CreateOrderResponse> {
     try {
       const activeSession = await this.resolveSession(sessionContext);
       const role = this.getSessionRole(activeSession);
@@ -226,7 +226,7 @@ export class OrdersService {
       const shippingAddressId = payload.shippingAddressId ? Number(payload.shippingAddressId) : null;
       const currentUserId = this.getSessionUserId(activeSession);
       const sellerId = role === 'seller' ? currentUserId : Number(payload.sellerId);
-      const { items, total } = payload;
+      const { items, total, invoiceType } = payload;
 
       if (!clientId || !sellerId || !items || items.length === 0) {
         return {
@@ -248,15 +248,27 @@ export class OrdersService {
         };
       }
 
+      if (initialStateId === OrderState.Paid) {
+        const selectedInvoiceType = invoiceType?.toUpperCase();
+        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B') {
+          return {
+            success: false,
+            message: 'Debe especificar si la factura es de tipo A o B para crear una orden pagada.',
+          };
+        }
+      }
+
       const newOrder = await prisma.$transaction(async (tx) => {
         await this.reserveStock(tx, items);
 
+        // Creamos la orden asignando directamente el tipo de factura si nace pagada
         const order = await tx.order.create({
           data: {
             clientId: BigInt(clientId),
             sellerId: BigInt(sellerId),
             total: Number(total),
             currentStateId: BigInt(initialStateId),
+            invoiceType: initialStateId === OrderState.Paid ? invoiceType?.toUpperCase() : null,
             ...(shippingAddressId && { shippingAddressId: BigInt(shippingAddressId) }),
             itemOrders: {
               create: items.map((item) => ({
@@ -268,16 +280,27 @@ export class OrdersService {
           },
         });
 
+        // Si nace pagada, registramos la nota fiscal en el historial directamente sin llamar al SP que busca por ID separado
         if (shippingAddressId) {
+          let historyNotes = initialStateId === OrderState.Created
+            ? 'Creación de la orden de compra y descuento de stock'
+            : `Creación de la orden en estado "${getStateLabel(initialStateId)}" y descuento de stock`;
+
+          if (initialStateId === OrderState.Paid) {
+            const selectedInv = invoiceType?.toUpperCase() || 'B';
+            const numericTotal = Number(total);
+            const netAmount = selectedInv === 'A' ? Number((numericTotal / 1.21).toFixed(2)) : numericTotal;
+            const vatAmount = selectedInv === 'A' ? Number((numericTotal - netAmount).toFixed(2)) : 0.00;
+
+            historyNotes = `Orden creada y pagada con Factura ${selectedInv}. Neto: $${netAmount}, IVA 21%: $${vatAmount}.`;
+          }
+
           await tx.orderStatusHistory.create({
             data: {
               orderId: order.id,
               stateId: BigInt(initialStateId),
               addressId: BigInt(shippingAddressId),
-              notes:
-                initialStateId === OrderState.Created
-                  ? 'Creación de la orden de compra y descuento de stock'
-                  : `Creación de la orden en estado "${getStateLabel(initialStateId)}" y descuento de stock`,
+              notes: historyNotes,
             },
           });
         }
@@ -411,7 +434,6 @@ export class OrdersService {
           throw new Error('Debe especificar si la factura es de tipo A o B para marcar la orden como pagada.');
         }
 
-        // Llamada al Stored Procedure en PostgreSQL
         const spResult = await prisma.$queryRaw<Array<{
           order_id: bigint;
           total_amount: number;
@@ -432,7 +454,6 @@ export class OrdersService {
 
         const fiscalData = spResult[0];
 
-        // Registrar historial de estado de la orden con los datos de facturación
         if (existingOrder.shippingAddressId || existingOrder.clientId) {
           const addressIdToUse = existingOrder.shippingAddressId ?? (await prisma.address.findFirst({ where: { clientId: existingOrder.clientId } }))?.id;
 
