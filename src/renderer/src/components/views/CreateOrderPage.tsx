@@ -301,12 +301,14 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const title = !isEditing
     ? "Nueva Orden"
-    : `Orden #${initialOrder?.id}${canEditDetails ? "" : " (ítems bloqueados)"}`
+    : `Orden #${initialOrder?.id}${canEditDetails ? "" : " (solo lectura)"}`
 
   const subtitle = !isEditing
     ? "Ingresá los datos necesarios para registrar una nueva orden."
     : canEditDetails
     ? "Mientras la orden esté en borrador podés modificar sus datos."
+    : orderStateId === OrderState.Created
+    ? "La orden es un borrador del vendedor: no podés modificar sus datos, pero sí cambiar su estado."
     : "La orden ya fue confirmada: los datos y los ítems no se pueden modificar."
 
   const statusHistory = (initialOrder as any)?.statusHistory ?? []

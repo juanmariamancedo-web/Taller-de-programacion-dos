@@ -79,12 +79,12 @@ const TRANSITIONS: Partial<Record<OrderStateId, Partial<Record<Role, OrderStateI
   // Cancelar una orden pagada implica reembolso: solo supervisor y admin.
   // El supervisor puede todo lo que puede el operator, más cancelar.
   [Paid]: {
-    operator: [InTransit, Rejected],
+    operator: [InTransit],
     supervisor: [InTransit, Rejected, Cancelled],
     admin: [InTransit, Rejected, Cancelled],
   },
   [InTransit]: {
-    operator: [Delivered, Rejected],
+    operator: [Delivered],
     supervisor: [Delivered, Rejected],
     admin: [Delivered, Rejected],
   },
