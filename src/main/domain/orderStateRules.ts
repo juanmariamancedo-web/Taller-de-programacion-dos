@@ -65,23 +65,27 @@ export const isLogisticsRole = (role: Role | null) =>
 const { Created, Pending, Paid, InTransit, Delivered, Rejected, Cancelled } = OrderState
 
 const TRANSITIONS: Partial<Record<OrderStateId, Partial<Record<Role, OrderStateId[]>>>> = {
-  [Created]: {
-    seller: [Pending, Cancelled],
-    admin: [Pending, Cancelled],
-  },
-  [Pending]: {
-    seller: [Paid, Cancelled],
-    admin: [Paid, Cancelled],
-  },
-  // Una orden pagada solo la cancela el admin (implica reembolso)
+  // El seller puede saltear Pendiente y marcarla como pagada directamente
+    [Created]: {
+        seller: [Pending, Paid, Cancelled],
+        admin: [Pending, Paid, Cancelled],
+        supervisor: [Rejected, Cancelled],
+    },
+    [Pending]: {
+        seller: [Paid, Cancelled],
+        supervisor: [Rejected, Cancelled],
+        admin: [Paid, Cancelled],
+    },
+  // Cancelar una orden pagada implica reembolso: solo supervisor y admin.
+  // El supervisor puede todo lo que puede el operator, más cancelar.
   [Paid]: {
     operator: [InTransit, Rejected],
-    supervisor: [InTransit],
+    supervisor: [InTransit, Rejected, Cancelled],
     admin: [InTransit, Rejected, Cancelled],
   },
   [InTransit]: {
     operator: [Delivered, Rejected],
-    supervisor: [Delivered],
+    supervisor: [Delivered, Rejected],
     admin: [Delivered, Rejected],
   },
   // Delivered, Rejected y Cancelled son estados finales

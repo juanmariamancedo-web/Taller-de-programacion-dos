@@ -47,6 +47,9 @@ interface FormData {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
+// Poné en false para ocultar el recuadro amarillo de depuración
+const SHOW_DEBUG = true
+
 const inputClass =
   "w-full rounded-xl border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
 
@@ -113,12 +116,24 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   // Estado de la orden y qué puede hacer este rol con ella
   const isEditing = Boolean(initialOrder?.id)
-  const orderStateId = Number(initialOrder?.currentState?.id ?? OrderState.Created)
+  const orderStateId = Number(
+    (initialOrder as any)?.currentStateId ?? initialOrder?.currentState?.id ?? OrderState.Created
+  )
 
   const canEditDetails = !isEditing || canEditOrderDetails(orderStateId, role)
   const allowedNextStates = isEditing ? getAllowedNextStates(orderStateId, role) : []
   const canSubmit = canEditDetails || allowedNextStates.length > 0
   const showInvoice = isEditing && canViewInvoice(orderStateId, role)
+
+  const debugInfo = {
+    role,
+    roleName: session?.roleName,
+    roleId: session?.roleId,
+    orderStateId,
+    allowedNextStates,
+    rawState: initialOrder?.currentState,
+    rawStateId: (initialOrder as any)?.currentStateId,
+  }
 
   // Formulario
   const [formData, setFormData] = useState<FormData>(() => buildFormData(initialOrder))
@@ -325,6 +340,12 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           </button>
         </div>
       </div>
+
+      {SHOW_DEBUG && (
+        <pre className="rounded bg-yellow-100 p-2 text-xs text-black">
+          {JSON.stringify(debugInfo, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2)}
+        </pre>
+      )}
 
       <form
         onSubmit={handleSubmit}
