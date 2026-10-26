@@ -4,6 +4,7 @@ import type {
   ClientReportData,
   OrdersReportData,
   OrdersReportFilters,
+  ReportDateFilters,
   ProductReportData
 } from '../domain/types/electron-env'
 
@@ -20,6 +21,23 @@ function parseReportDate(value: string | undefined, label: string): Date | undef
   return date
 }
 
+function getCreatedAtFilter(filters: ReportDateFilters): { gte?: Date; lt?: Date } | undefined {
+  const from = parseReportDate(filters.from, 'Desde')
+  const to = parseReportDate(filters.to, 'Hasta')
+  if (from && to && from > to) {
+    throw new Error('La fecha "Desde" no puede ser posterior a "Hasta".')
+  }
+
+  const createdAt: { gte?: Date; lt?: Date } = {}
+  if (from) createdAt.gte = from
+  if (to) {
+    const exclusiveEnd = new Date(to)
+    exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1)
+    createdAt.lt = exclusiveEnd
+  }
+  return Object.keys(createdAt).length ? createdAt : undefined
+}
+
 export class ReportsService {
   private async getSellerFilter(): Promise<{ sellerId?: bigint }> {
     const session = await authService.getActiveSession()
@@ -32,12 +50,14 @@ export class ReportsService {
     return {}
   }
 
-  async getProductsReport(): Promise<ProductReportData> {
+  async getProductsReport(filters: ReportDateFilters): Promise<ProductReportData> {
     const sellerFilter = await this.getSellerFilter()
+    const createdAt = getCreatedAtFilter(filters)
     const orders = await prisma.order.findMany({
       where: {
         ...sellerFilter,
-        seller: { role: { name: { in: ['seller', 'vendedor'] } } }
+        seller: { role: { name: { in: ['seller', 'vendedor'] } } },
+        ...(createdAt ? { createdAt } : {})
       },
       select: {
         id: true,
@@ -108,10 +128,14 @@ export class ReportsService {
     }
   }
 
-  async getClientsReport(): Promise<ClientReportData> {
+  async getClientsReport(filters: ReportDateFilters): Promise<ClientReportData> {
     const sellerFilter = await this.getSellerFilter()
+    const createdAt = getCreatedAtFilter(filters)
     const orders = await prisma.order.findMany({
-      where: sellerFilter,
+      where: {
+        ...sellerFilter,
+        ...(createdAt ? { createdAt } : {})
+      },
       select: {
         id: true,
         createdAt: true,
@@ -182,27 +206,15 @@ export class ReportsService {
   }
 
   async getOrdersReport(filters: OrdersReportFilters): Promise<OrdersReportData> {
-    const from = parseReportDate(filters.from, 'Desde')
-    const to = parseReportDate(filters.to, 'Hasta')
-    if (from && to && from > to) {
-      throw new Error('La fecha "Desde" no puede ser posterior a "Hasta".')
-    }
-
     const sellerFilter = await this.getSellerFilter()
-    const createdAt: { gte?: Date; lt?: Date } = {}
-    if (from) createdAt.gte = from
-    if (to) {
-      const exclusiveEnd = new Date(to)
-      exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1)
-      createdAt.lt = exclusiveEnd
-    }
+    const createdAt = getCreatedAtFilter(filters)
 
     const items = await prisma.itemOrder.findMany({
       where: {
         order: {
           ...sellerFilter,
           currentState: { name: { in: ['paid', 'dispatched', 'in_transit', 'delivered'] } },
-          ...(Object.keys(createdAt).length ? { createdAt } : {})
+          ...(createdAt ? { createdAt } : {})
         }
       },
       select: {

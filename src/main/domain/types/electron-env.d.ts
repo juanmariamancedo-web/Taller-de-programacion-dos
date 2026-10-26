@@ -197,6 +197,11 @@ export interface OrdersReportFilters {
   to?: string
 }
 
+export interface ReportDateFilters {
+  from?: string
+  to?: string
+}
+
 export interface OrdersReportRow {
   productId: string
   productName: string
@@ -462,8 +467,8 @@ export interface IElectronAPI {
   setTheme: (theme: ThemeSource) => Promise<boolean>
   getInitialTheme: () => Promise<Theme>
   getDashboardData: () => Promise<DashboardDataResponse>
-  getProductsReport: () => Promise<ReportResponse<ProductReportData>>
-  getClientsReport: () => Promise<ReportResponse<ClientReportData>>
+  getProductsReport: (filters: ReportDateFilters) => Promise<ReportResponse<ProductReportData>>
+  getClientsReport: (filters: ReportDateFilters) => Promise<ReportResponse<ClientReportData>>
   getOrdersReport: (filters: OrdersReportFilters) => Promise<ReportResponse<OrdersReportData>>
   exportReportPdf: (input: ReportPdfInput) => Promise<ReportPdfResponse>
   onReportsUpdated: (callback: () => void) => Unsubscribe

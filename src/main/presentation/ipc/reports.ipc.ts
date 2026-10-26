@@ -2,13 +2,13 @@ import { BrowserWindow, ipcMain, shell } from 'electron'
 import { randomUUID } from 'crypto'
 import { createServer } from 'http'
 import type { Server } from 'http'
-import type { OrdersReportFilters, ReportPdfInput } from '../../domain/types/electron-env'
+import type { OrdersReportFilters, ReportDateFilters, ReportPdfInput } from '../../domain/types/electron-env'
 import { reportsService } from '../../services/reports.service'
 
 export function registerReportsIPC(): void {
-  ipcMain.handle('reports:products', async () => {
+  ipcMain.handle('reports:products', async (_event, filters: ReportDateFilters) => {
     try {
-      return { success: true, data: await reportsService.getProductsReport() }
+      return { success: true, data: await reportsService.getProductsReport(filters) }
     } catch (error) {
       console.error('Failed to generate products report:', error)
       return {
@@ -19,9 +19,9 @@ export function registerReportsIPC(): void {
     }
   })
 
-  ipcMain.handle('reports:clients', async () => {
+  ipcMain.handle('reports:clients', async (_event, filters: ReportDateFilters) => {
     try {
-      return { success: true, data: await reportsService.getClientsReport() }
+      return { success: true, data: await reportsService.getClientsReport(filters) }
     } catch (error) {
       console.error('Failed to generate clients report:', error)
       return {
