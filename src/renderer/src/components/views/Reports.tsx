@@ -359,12 +359,15 @@ export function ProductsReport({ onBack }: { onBack: () => void }): React.JSX.El
   const [data, setData] = useState<ProductReportData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [appliedFilters, setAppliedFilters] = useState({ from: '', to: '' })
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
     setError(null)
     try {
-      const response = await window.electronAPI?.getProductsReport()
+      const response = await window.electronAPI?.getProductsReport(appliedFilters)
       if (!response?.success || !response.data)
         throw new Error(response?.message ?? 'No se pudo cargar el reporte de productos.')
       setData(response.data)
@@ -377,7 +380,7 @@ export function ProductsReport({ onBack }: { onBack: () => void }): React.JSX.El
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [appliedFilters])
 
   useEffect(() => {
     let active = true
@@ -421,13 +424,28 @@ export function ProductsReport({ onBack }: { onBack: () => void }): React.JSX.El
     { label: 'Ventas acumuladas', value: currency.format(data?.totalSales ?? 0) },
     { label: 'Vendedores activos en ventas', value: numberFormat.format(data?.sellerCount ?? 0) }
   ]
+  const applyFilters = (): void => {
+    if (from && to && from > to) {
+      setError('La fecha "Desde" no puede ser posterior a "Hasta".')
+      return
+    }
+    setAppliedFilters({ from, to })
+  }
+  const period =
+    appliedFilters.from && appliedFilters.to
+      ? `Período: ${appliedFilters.from} al ${appliedFilters.to}`
+      : appliedFilters.from
+        ? `Período: desde ${appliedFilters.from}`
+        : appliedFilters.to
+          ? `Período: hasta ${appliedFilters.to}`
+          : 'Período: histórico completo'
 
   return (
     <ReportView
       kind="products"
       title="Reporte de Productos"
       description="Vendedores con mayor cantidad de órdenes registradas y el total vendido."
-      period="Período: histórico completo"
+      period={period}
       metrics={metrics}
       columns={['Vendedor', 'Órdenes registradas', 'Ventas totales']}
       rows={rows}
@@ -454,6 +472,13 @@ export function ProductsReport({ onBack }: { onBack: () => void }): React.JSX.El
       loading={loading}
       error={error}
       onBack={onBack}
+      dateFilters={{
+        from,
+        to,
+        onFromChange: setFrom,
+        onToChange: setTo,
+        onSearch: applyFilters
+      }}
     />
   )
 }
@@ -462,12 +487,15 @@ export function ClientsReport({ onBack }: { onBack: () => void }): React.JSX.Ele
   const [data, setData] = useState<ClientReportData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const [appliedFilters, setAppliedFilters] = useState({ from: '', to: '' })
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
     setError(null)
     try {
-      const response = await window.electronAPI?.getClientsReport()
+      const response = await window.electronAPI?.getClientsReport(appliedFilters)
       if (!response?.success || !response.data)
         throw new Error(response?.message ?? 'No se pudo cargar el reporte de clientes.')
       setData(response.data)
@@ -478,7 +506,7 @@ export function ClientsReport({ onBack }: { onBack: () => void }): React.JSX.Ele
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [appliedFilters])
 
   useEffect(() => {
     let active = true
@@ -522,13 +550,28 @@ export function ClientsReport({ onBack }: { onBack: () => void }): React.JSX.Ele
     { label: 'Monto total facturado', value: currency.format(data?.totalSpent ?? 0) },
     { label: 'Clientes con compras', value: numberFormat.format(data?.clientCount ?? 0) }
   ]
+  const applyFilters = (): void => {
+    if (from && to && from > to) {
+      setError('La fecha "Desde" no puede ser posterior a "Hasta".')
+      return
+    }
+    setAppliedFilters({ from, to })
+  }
+  const period =
+    appliedFilters.from && appliedFilters.to
+      ? `Período: ${appliedFilters.from} al ${appliedFilters.to}`
+      : appliedFilters.from
+        ? `Período: desde ${appliedFilters.from}`
+        : appliedFilters.to
+          ? `Período: hasta ${appliedFilters.to}`
+          : 'Período: histórico completo'
 
   return (
     <ReportView
       kind="clients"
       title="Reporte de Clientes"
       description="Clientes con mayor número de compras y el monto total gastado."
-      period="Período: histórico completo"
+      period={period}
       metrics={metrics}
       columns={['Cliente', 'Compras', 'Monto total gastado']}
       rows={rows}
@@ -555,6 +598,13 @@ export function ClientsReport({ onBack }: { onBack: () => void }): React.JSX.Ele
       loading={loading}
       error={error}
       onBack={onBack}
+      dateFilters={{
+        from,
+        to,
+        onFromChange: setFrom,
+        onToChange: setTo,
+        onSearch: applyFilters
+      }}
     />
   )
 }

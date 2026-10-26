@@ -30,6 +30,7 @@ import {
   CreateOrderPayload, 
   UpdateOrderPayload, 
   UpdateProfileInput,
+  ReportDateFilters,
   OrdersReportFilters,
   ReportPdfInput,
   ReportPdfResponse
@@ -42,8 +43,10 @@ const api = {
     ipcRenderer.invoke('auth:login', credentials),
   getSession: () => ipcRenderer.invoke('auth:get-session'),
   getDashboardData: () => ipcRenderer.invoke('dashboard:getData'),
-  getProductsReport: () => ipcRenderer.invoke('reports:products'),
-  getClientsReport: () => ipcRenderer.invoke('reports:clients'),
+  getProductsReport: (filters: ReportDateFilters) =>
+    ipcRenderer.invoke('reports:products', filters),
+  getClientsReport: (filters: ReportDateFilters) =>
+    ipcRenderer.invoke('reports:clients', filters),
   getOrdersReport: (filters: OrdersReportFilters) =>
     ipcRenderer.invoke('reports:orders', filters),
   exportReportPdf: (input: ReportPdfInput): Promise<ReportPdfResponse> =>
