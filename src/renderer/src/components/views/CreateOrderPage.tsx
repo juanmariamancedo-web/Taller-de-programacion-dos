@@ -199,6 +199,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
     setSearchTermClients(`${client.name} ${client.lastname}`)
     setSearchTermAddress("")
+    setIsOpenAddress(false)
     setIsOpenClients(false)
   }
 
@@ -249,7 +250,10 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     e.preventDefault()
 
     const validationError = validate()
-    if (validationError) return dispatch(setGlobalAlert(validationError))
+    if (validationError) {
+      dispatch(setGlobalAlert(validationError))
+      return
+    }
 
     try {
       const currentSession = (await fetchSession().catch(() => null)) ?? session

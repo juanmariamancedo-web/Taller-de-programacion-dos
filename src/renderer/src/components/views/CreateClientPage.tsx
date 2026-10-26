@@ -14,7 +14,12 @@ type FormData = {
   number: string
 }
 
+type AddressFormData = Pick<FormData, 'province' | 'city' | 'postcode' | 'street' | 'number'> & {
+  id?: string
+}
+
 type FormErrors = Partial<Record<keyof FormData, string>>
+type AddressErrors = Partial<Record<keyof AddressFormData, string>>
 
 const emptyFormData: FormData = {
   name: '',
@@ -46,11 +51,9 @@ function isValidCuil(value: string): boolean {
 
 function validateForm(data: FormData, provinceNames: string[]): FormErrors {
   const errors: FormErrors = {}
-  const textFields: Array<keyof Pick<FormData, 'name' | 'lastname' | 'province' | 'city'>> = [
+  const textFields: Array<keyof Pick<FormData, 'name' | 'lastname'>> = [
     'name',
-    'lastname',
-    'province',
-    'city',
+    'lastname'
   ]
 
   textFields.forEach((field) => {
@@ -60,20 +63,30 @@ function validateForm(data: FormData, provinceNames: string[]): FormErrors {
     }
   })
 
-  if (!provinceNames.includes(data.province)) {
-    errors.province = 'Seleccioná una provincia de la lista.'
-  }
-
   if (!isValidCuil(data.cuil_cuit)) errors.cuil_cuit = 'Debe tener 11 dígitos y un CUIT/CUIL válido.'
   const email = data.email.trim()
   if (!email || !emailPattern.test(email)) errors.email = 'Ingresá un email válido terminado en .com.'
+  Object.assign(errors, validateAddress(data, provinceNames))
+
+  return errors
+}
+
+function validateAddress(data: AddressFormData, provinceNames: string[]): AddressErrors {
+  const errors: AddressErrors = {}
+  const province = data.province.trim()
+  const city = data.city.trim()
+  if (!province || province.length < 2 || province.length > 50 || !lettersPattern.test(province)) {
+    errors.province = 'Seleccioná una provincia válida.'
+  } else if (!provinceNames.includes(province)) {
+    errors.province = 'Seleccioná una provincia de la lista.'
+  }
+  if (!city || city.length < 2 || city.length > 50 || !lettersPattern.test(city)) {
+    errors.city = 'Usa entre 2 y 50 letras, espacios o guiones.'
+  }
   if (!/^\d{4,8}$/.test(data.postcode)) errors.postcode = 'Usa entre 4 y 8 números.'
   const street = data.street.trim()
-  if (!street || street.length < 2 || street.length > 80) {
-    errors.street = 'Usa entre 2 y 80 caracteres.'
-  }
+  if (!street || street.length < 2 || street.length > 80) errors.street = 'Usa entre 2 y 80 caracteres.'
   if (!/^\d{1,6}$/.test(data.number)) errors.number = 'Usa entre 1 y 6 números.'
-
   return errors
 }
 
@@ -98,6 +111,7 @@ export default function CreateClientPage() {
   const clientToEdit = useAppSelector((state) => state.app.clientToEdit)
 
   const [formData, setFormData] = useState<FormData>(emptyFormData)
+  const [additionalAddresses, setAdditionalAddresses] = useState<AddressFormData[]>([])
   const [errors, setErrors] = useState<FormErrors>({})
   const [hasSubmitted, setHasSubmitted] = useState(false)
   const [provinces, setProvinces] = useState<Array<{ id: string; name: string }>>([])
@@ -125,19 +139,30 @@ export default function CreateClientPage() {
 
   useEffect(() => {
     if (clientToEdit) {
+      const addresses = clientToEdit.addresses ?? []
+      const firstAddress = addresses[0] ?? clientToEdit.address
       setFormData({
         name: clientToEdit.name,
         lastname: clientToEdit.lastname,
         cuil_cuit: clientToEdit.cuil,
         email: clientToEdit.email,
-        province: clientToEdit.address?.province ?? '',
-        city: clientToEdit.address?.city ?? '',
-        postcode: clientToEdit.address?.postalCode ?? '',
-        street: clientToEdit.address?.street ?? '',
-        number: clientToEdit.address?.number?.toString() ?? ''
+        province: firstAddress?.province ?? '',
+        city: firstAddress?.city ?? '',
+        postcode: firstAddress?.postalCode ?? '',
+        street: firstAddress?.street ?? '',
+        number: firstAddress?.number?.toString() ?? ''
       })
+      setAdditionalAddresses(addresses.slice(1).map((address) => ({
+        id: address.id,
+        province: address.province,
+        city: address.city,
+        postcode: address.postalCode,
+        street: address.street,
+        number: address.number.toString()
+      })))
     } else {
       setFormData(emptyFormData)
+      setAdditionalAddresses([])
     }
     setErrors({})
     setHasSubmitted(false)
@@ -165,15 +190,44 @@ export default function CreateClientPage() {
   if (/^\d$/.test(e.key)) {
     e.preventDefault()
   }
-}
+  }
+
+  const handleAdditionalAddressChange = (
+    index: number,
+    field: keyof AddressFormData,
+    value: string
+  ) => {
+    const nextValue = field === 'postcode' || field === 'number'
+      ? value.replace(/\D/g, '')
+      : field === 'city'
+        ? value.replace(invalidTextCharactersPattern, '')
+        : value
+    setAdditionalAddresses((current) => current.map((address, addressIndex) =>
+      addressIndex === index ? { ...address, [field]: nextValue } : address
+    ))
+  }
+
+  const addAddress = () => setAdditionalAddresses((current) => [...current, {
+    province: '',
+    city: '',
+    postcode: '',
+    street: '',
+    number: ''
+  }])
+
+  const removeAddress = (index: number) =>
+    setAdditionalAddresses((current) => current.filter((_, addressIndex) => addressIndex !== index))
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     const validationErrors = validateForm(formData, provinces.map((province) => province.name))
+    const additionalErrors = additionalAddresses.map((address) =>
+      validateAddress(address, provinces.map((province) => province.name))
+    )
     setHasSubmitted(true)
     setErrors(validationErrors)
 
-    if (Object.keys(validationErrors).length > 0) return
+    if (Object.keys(validationErrors).length > 0 || additionalErrors.some((addressErrors) => Object.keys(addressErrors).length > 0)) return
 
     setSaving(true)
     setSaveError(null)
@@ -184,11 +238,26 @@ export default function CreateClientPage() {
         lastname: formData.lastname.trim(),
         cuil: formData.cuil_cuit,
         email: formData.email.trim(),
-        province: formData.province,
-        city: formData.city.trim(),
-        postalCode: formData.postcode,
-        street: formData.street.trim(),
-        number: Number(formData.number)
+        addresses: [
+          {
+            ...(clientToEdit?.addresses?.[0]?.id ?? clientToEdit?.address?.id
+              ? { id: clientToEdit?.addresses?.[0]?.id ?? clientToEdit?.address?.id }
+              : {}),
+            province: formData.province,
+            city: formData.city.trim(),
+            postalCode: formData.postcode,
+            street: formData.street.trim(),
+            number: Number(formData.number)
+          },
+          ...additionalAddresses.map((address) => ({
+            ...(address.id ? { id: address.id } : {}),
+            province: address.province,
+            city: address.city.trim(),
+            postalCode: address.postcode,
+            street: address.street.trim(),
+            number: Number(address.number)
+          }))
+        ]
       }
       const response = clientToEdit
         ? await window.electronAPI?.updateClient({ id: clientToEdit.id, ...input })
@@ -216,6 +285,9 @@ export default function CreateClientPage() {
   }
 
   const fieldMessage = (field: keyof FormData) => errors[field] || (hasSubmitted && hasValue(field) ? 'Campo válido' : '')
+  const hasAddressErrors = additionalAddresses.some((address) =>
+    Object.keys(validateAddress(address, provinces.map((province) => province.name))).length > 0
+  )
 
   return (
     <div className="max-w-4xl mx-auto p-6 w-full">
@@ -252,7 +324,7 @@ export default function CreateClientPage() {
           <p>Completá los datos con información real. Los campos numéricos aceptan únicamente dígitos.</p>
         </div>
 
-        {hasSubmitted && Object.keys(errors).length > 0 && (
+        {hasSubmitted && (Object.keys(errors).length > 0 || hasAddressErrors) && (
           <div role="alert" className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-400/20 dark:bg-amber-500/10 dark:text-amber-100">
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white">!</span>
             <p>Revisá los campos marcados antes de guardar el cliente.</p>
@@ -478,6 +550,119 @@ export default function CreateClientPage() {
             <p className={`mt-1.5 text-xs ${errors.city ? 'text-rose-600 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'}`}>{fieldMessage('city')}</p>
           </div>
         </div>
+
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={addAddress}
+            className="rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+          >
+            + Agregar otra dirección
+          </button>
+        </div>
+
+        {additionalAddresses.map((address, index) => {
+          const addressErrors = validateAddress(address, provinces.map((province) => province.name))
+          const fieldClass = 'w-full rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:text-white'
+          const addressNumber = index + 2
+
+          return (
+            <section
+              key={address.id ?? index}
+              className="rounded-xl border border-slate-200 p-4 dark:border-white/10"
+            >
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-semibold text-slate-800 dark:text-slate-200">Dirección {addressNumber}</h2>
+                <button
+                  type="button"
+                  onClick={() => removeAddress(index)}
+                  className="rounded-lg px-3 py-1.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10"
+                  aria-label={`Quitar dirección ${addressNumber}`}
+                >
+                  Quitar
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <label htmlFor={`street-${addressNumber}`} className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Calle</label>
+                  <input
+                    id={`street-${addressNumber}`}
+                    value={address.street}
+                    onChange={(event) => handleAdditionalAddressChange(index, 'street', event.target.value)}
+                    placeholder="Ej. San Martín"
+                    required
+                    className={fieldClass}
+                    aria-invalid={Boolean(addressErrors.street)}
+                  />
+                  {hasSubmitted && addressErrors.street && <p className="mt-1.5 text-xs text-rose-600">{addressErrors.street}</p>}
+                </div>
+                <div>
+                  <label htmlFor={`number-${addressNumber}`} className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Número</label>
+                  <input
+                    id={`number-${addressNumber}`}
+                    value={address.number}
+                    onChange={(event) => handleAdditionalAddressChange(index, 'number', event.target.value)}
+                    placeholder="Ej. 1234"
+                    inputMode="numeric"
+                    maxLength={6}
+                    required
+                    className={fieldClass}
+                    aria-invalid={Boolean(addressErrors.number)}
+                  />
+                  {hasSubmitted && addressErrors.number && <p className="mt-1.5 text-xs text-rose-600">{addressErrors.number}</p>}
+                </div>
+                <div>
+                  <label htmlFor={`postcode-${addressNumber}`} className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Código Postal</label>
+                  <input
+                    id={`postcode-${addressNumber}`}
+                    value={address.postcode}
+                    onChange={(event) => handleAdditionalAddressChange(index, 'postcode', event.target.value)}
+                    placeholder="Ej. 3400"
+                    inputMode="numeric"
+                    maxLength={8}
+                    required
+                    className={fieldClass}
+                    aria-invalid={Boolean(addressErrors.postcode)}
+                  />
+                  {hasSubmitted && addressErrors.postcode && <p className="mt-1.5 text-xs text-rose-600">{addressErrors.postcode}</p>}
+                </div>
+                <div>
+                  <label htmlFor={`province-${addressNumber}`} className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Provincia</label>
+                  <select
+                    id={`province-${addressNumber}`}
+                    value={address.province}
+                    onChange={(event) => handleAdditionalAddressChange(index, 'province', event.target.value)}
+                    required
+                    disabled={loadingProvinces || Boolean(provinceLoadError)}
+                    className={`${fieldClass} cursor-pointer`}
+                    aria-invalid={Boolean(addressErrors.province)}
+                  >
+                    <option value="" disabled>Seleccioná una provincia</option>
+                    {provinces.map((province) => (
+                      <option key={province.id} value={province.name}>{province.name}</option>
+                    ))}
+                  </select>
+                  {hasSubmitted && addressErrors.province && <p className="mt-1.5 text-xs text-rose-600">{addressErrors.province}</p>}
+                </div>
+                <div>
+                  <label htmlFor={`city-${addressNumber}`} className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-300">Ciudad</label>
+                  <input
+                    id={`city-${addressNumber}`}
+                    value={address.city}
+                    onChange={(event) => handleAdditionalAddressChange(index, 'city', event.target.value)}
+                    onKeyDown={blockNumbers}
+                    placeholder="Ej. Corrientes"
+                    required
+                    className={fieldClass}
+                    aria-invalid={Boolean(addressErrors.city)}
+                  />
+                  {hasSubmitted && addressErrors.city && <p className="mt-1.5 text-xs text-rose-600">{addressErrors.city}</p>}
+                </div>
+              </div>
+            </section>
+          )
+        })}
 
         {saveError && (
           <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/20 dark:bg-rose-500/10 dark:text-rose-200">

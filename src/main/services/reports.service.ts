@@ -23,7 +23,10 @@ function parseReportDate(value: string | undefined, label: string): Date | undef
 export class ReportsService {
   private async getSellerFilter(): Promise<{ sellerId?: bigint }> {
     const session = await authService.getActiveSession()
-    if (session?.roleName.toLowerCase() === 'seller') {
+    if (session && (
+      session.roleId === 3 ||
+      ['seller', 'vendedor'].includes(session.roleName.toLowerCase())
+    )) {
       return { sellerId: BigInt(session.id) }
     }
     return {}
@@ -32,7 +35,10 @@ export class ReportsService {
   async getProductsReport(): Promise<ProductReportData> {
     const sellerFilter = await this.getSellerFilter()
     const orders = await prisma.order.findMany({
-      where: sellerFilter,
+      where: {
+        ...sellerFilter,
+        seller: { role: { name: { in: ['seller', 'vendedor'] } } }
+      },
       select: {
         id: true,
         createdAt: true,

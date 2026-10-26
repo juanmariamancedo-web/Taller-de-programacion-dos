@@ -17,8 +17,12 @@ export default function ClientsPanel() {
   const [error, setError] = useState<string | null>(null)
 
   const session = useAppSelector(store => store.app.session)
-  const canManageClients = session?.roleId == 1 || session?.roleId == 3
-  const canChangeClientStatus = session?.roleId == 1
+  const roleName = session?.roleName?.toLowerCase()
+  const isAdmin = session?.roleId === 1 || roleName === 'admin'
+  const isSeller = session?.roleId === 3 || roleName === 'seller' || roleName === 'vendedor'
+  const canCreateClients = isAdmin || isSeller
+  const canEditClients = isAdmin
+  const canChangeClientStatus = isAdmin
   
   useEffect(() => {
     const loadClients = async () => {
@@ -61,6 +65,7 @@ export default function ClientsPanel() {
   }
 
   const handleEdit = (client: ClientListItem) => {
+    if (!canEditClients) return
     dispatch(setClientToEdit(client))
     dispatch(setCurrentTab('clients-create'))
   }
@@ -77,7 +82,7 @@ export default function ClientsPanel() {
           >
             Reportes
           </button>
-          {canManageClients && (
+          {canCreateClients && (
           <button
             type="button"
             onClick={() => {
@@ -109,12 +114,12 @@ export default function ClientsPanel() {
               <th className="px-4 py-3">Código postal</th>
               <th className="px-4 py-3">Estado</th>
                 {canChangeClientStatus && <th className="px-4 py-3">Acción</th>}
-                {canManageClients && <th className="px-4 py-3">Editar</th>}
+                {canEditClients && <th className="px-4 py-3">Editar</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-white/10">
             {loading ? (
-              <tr><td colSpan={10} className="py-6 text-center text-gray-500">Cargando clientes...</td></tr>
+              <tr><td colSpan={8 + Number(canChangeClientStatus) + Number(canEditClients)} className="py-6 text-center text-gray-500">Cargando clientes...</td></tr>
             ) : clients.length ? clients.map((client) => (
               <tr key={client.id} className="transition hover:bg-gray-50 dark:hover:bg-white/5">
                 <td className="px-4 py-3 font-medium">#{client.id}</td>
@@ -150,7 +155,7 @@ export default function ClientsPanel() {
                     )}
                   </td>
                 )}
-                {canManageClients && (
+                {canEditClients && (
                   <td className="px-4 py-3">
                     <button
                       type="button"
@@ -165,7 +170,7 @@ export default function ClientsPanel() {
                 )}
               </tr>
             )) : (
-              <tr><td colSpan={10} className="py-6 text-center text-gray-500">No hay clientes encontrados</td></tr>
+              <tr><td colSpan={8 + Number(canChangeClientStatus) + Number(canEditClients)} className="py-6 text-center text-gray-500">No hay clientes encontrados</td></tr>
             )}
           </tbody>
         </table>

@@ -2,10 +2,15 @@ import { ipcMain } from 'electron'
 import { CreateClientInput, SearchParams, ToggleClientStatusInput, UpdateClientInput } from '../../domain/types/electron-env'
 import { Prisma } from '../../infrastructure/db/generated/client/client'
 import { clientsService } from '../../services/clients.service'
+import { authService } from '../../services/auth.service'
 
 export function registerClientIPC(): void {
   ipcMain.handle('clients:update', async (_event, input: UpdateClientInput) => {
     try {
+      const session = await authService.getActiveSession()
+      const isAdmin = session?.roleId === 1 || session?.roleName.toLowerCase() === 'admin'
+      if (!isAdmin) throw new Error('Solo un administrador puede editar los datos de clientes.')
+
       const data = await clientsService.updateClient(input)
       return { success: true, data }
     } catch (error) {
