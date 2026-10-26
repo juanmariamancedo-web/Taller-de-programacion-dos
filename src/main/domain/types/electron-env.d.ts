@@ -264,16 +264,21 @@ export interface ProvinceOption {
 }
 
 // --- CLIENTES ---
-export interface CreateClientInput {
-  name: string
-  lastname: string
-  cuil: string
-  email: string
+export interface ClientAddressInput {
+  id?: string
   province: string
   city: string
   postalCode: string
   street: string
   number: number
+}
+
+export interface CreateClientInput {
+  name: string
+  lastname: string
+  cuil: string
+  email: string
+  addresses: ClientAddressInput[]
 }
 
 export interface CreateClientResponse {
@@ -299,7 +304,16 @@ export interface ClientListItem {
   cuil: string
   email: string
   isActive: boolean
+  addresses?: Array<{
+    id: string
+    street: string
+    number: number
+    postalCode: string
+    city: string
+    province: string
+  }>
   address?: {
+    id?: string
     street: string
     number: number
     postalCode: string

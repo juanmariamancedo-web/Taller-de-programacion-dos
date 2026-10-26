@@ -22,6 +22,7 @@ function App(): React.JSX.Element {
   const session = useAppSelector((state) => state.app.session)
   const roleId = useAppSelector((state) => state.app.session?.roleId)
   const roleName = useAppSelector((state) => state.app.session?.roleName?.toLowerCase())
+  const clientToEdit = useAppSelector((state) => state.app.clientToEdit)
   const orderToEdit = useAppSelector((state)=> state.app.orderToEdit)
   const location = useLocation()
   const navigate = useNavigate()
@@ -64,7 +65,10 @@ function App(): React.JSX.Element {
       case "clients":
         return <ClientsPanel />
       case "clients-create": 
-        if(roleId == 1 || roleId == 3 || roleName === 'admin' || roleName === 'vendedor'){
+        if(
+          roleId == 1 || roleName === 'admin' ||
+          (!clientToEdit && (roleId == 3 || roleName === 'seller' || roleName === 'vendedor'))
+        ){
           return <CreateClientPage />
         }
         return <ClientsPanel />

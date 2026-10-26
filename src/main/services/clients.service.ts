@@ -1,9 +1,38 @@
 import { prisma } from '../infrastructure/db/prisma'
-import { CreateClientInput, SearchParams, UpdateClientInput } from '../domain/types/electron-env'
+import { ClientAddressInput, CreateClientInput, SearchParams, UpdateClientInput } from '../domain/types/electron-env'
+import { Prisma } from '../infrastructure/db/generated/client/client'
+
+async function resolveCityId(
+  transaction: Prisma.TransactionClient,
+  input: ClientAddressInput
+): Promise<bigint> {
+  const province = await transaction.province.findUnique({
+    where: { name: input.province },
+    select: { id: true }
+  })
+  if (!province) throw new Error('La provincia seleccionada no existe.')
+
+  const city = await transaction.city.findFirst({
+    where: { name: input.city, provinceId: province.id },
+    select: { id: true }
+  }) ?? await transaction.city.create({
+    data: { name: input.city, provinceId: province.id },
+    select: { id: true }
+  })
+
+  return city.id
+}
+
+function validateAddresses(addresses: ClientAddressInput[]): void {
+  if (!Array.isArray(addresses) || addresses.length === 0) {
+    throw new Error('El cliente debe tener al menos una dirección.')
+  }
+}
 
 export class ClientsService {
   async updateClient(input: UpdateClientInput): Promise<{ id: string }> {
     return prisma.$transaction(async (transaction) => {
+      validateAddresses(input.addresses)
       const clientId = BigInt(input.id)
       const duplicate = await transaction.client.findFirst({
         where: {
@@ -18,23 +47,10 @@ export class ClientsService {
       if (duplicate?.cuil === input.cuil) throw new Error('Ya existe otro cliente con ese CUIL/CUIT.')
       if (duplicate?.email === input.email) throw new Error('Ya existe otro cliente con ese email.')
 
-      const province = await transaction.province.findUnique({
-        where: { name: input.province },
-        select: { id: true }
-      })
-      if (!province) throw new Error('La provincia seleccionada no existe.')
-
-      const city = await transaction.city.findFirst({
-        where: { name: input.city, provinceId: province.id },
-        select: { id: true }
-      }) ?? await transaction.city.create({
-        data: { name: input.city, provinceId: province.id },
-        select: { id: true }
-      })
-
-      const address = await transaction.address.findFirst({
+      const existingAddresses = await transaction.address.findMany({
         where: { clientId },
-        select: { id: true }
+        select: { id: true },
+        orderBy: { id: 'asc' }
       })
 
       await transaction.client.update({
@@ -47,26 +63,46 @@ export class ClientsService {
         }
       })
 
-      if (address) {
-        await transaction.address.update({
-          where: { id: address.id },
-          data: {
-            street: input.street,
-            number: input.number,
-            postalCode: input.postalCode,
-            cityId: city.id
-          }
-        })
-      } else {
-        await transaction.address.create({
-          data: {
-            clientId,
-            street: input.street,
-            number: input.number,
-            postalCode: input.postalCode,
-            cityId: city.id
-          }
-        })
+      const retainedAddressIds = new Set<bigint>()
+      for (const [index, addressInput] of input.addresses.entries()) {
+        const addressId = addressInput.id
+          ? BigInt(addressInput.id)
+          : existingAddresses[index]?.id
+        const cityId = await resolveCityId(transaction, addressInput)
+        const data = {
+          street: addressInput.street,
+          number: addressInput.number,
+          postalCode: addressInput.postalCode,
+          cityId
+        }
+
+        if (addressId) {
+          const belongsToClient = existingAddresses.some((address) => address.id === addressId)
+          if (!belongsToClient) throw new Error('La dirección seleccionada no pertenece a este cliente.')
+          await transaction.address.update({
+            where: { id: addressId },
+            data
+          })
+          retainedAddressIds.add(addressId)
+        } else {
+          const address = await transaction.address.create({
+            data: { ...data, clientId },
+            select: { id: true }
+          })
+          retainedAddressIds.add(address.id)
+        }
+      }
+
+      for (const address of existingAddresses) {
+        if (retainedAddressIds.has(address.id)) continue
+        const [orderCount, historyCount] = await Promise.all([
+          transaction.order.count({ where: { shippingAddressId: address.id } }),
+          transaction.orderStatusHistory.count({ where: { addressId: address.id } })
+        ])
+        if (orderCount > 0 || historyCount > 0) {
+          throw new Error('No se puede quitar una dirección asociada a órdenes existentes.')
+        }
+        await transaction.address.delete({ where: { id: address.id } })
       }
 
       return { id: input.id }
@@ -98,7 +134,22 @@ export class ClientsService {
       cuil: string
       email: string
       isActive: boolean
-      address?: { postalCode: string; city: string; province: string }
+      addresses: Array<{
+        id: string
+        street: string
+        number: number
+        postalCode: string
+        city: string
+        province: string
+      }>
+      address?: {
+        id: string
+        street: string
+        number: number
+        postalCode: string
+        city: string
+        province: string
+      }
     }>
     total: number
   }> {
@@ -130,8 +181,8 @@ export class ClientsService {
           email: true,
           isActive: true,
           addresses: {
-            take: 1,
             select: {
+              id: true,
               postalCode: true,
               street: true,
               number: true,
@@ -153,9 +204,18 @@ export class ClientsService {
           cuil: client.cuil,
           email: client.email,
           isActive: client.isActive,
+          addresses: client.addresses.map((clientAddress) => ({
+            id: clientAddress.id.toString(),
+            street: clientAddress.street,
+            number: clientAddress.number,
+            postalCode: clientAddress.postalCode,
+            city: clientAddress.city.name,
+            province: clientAddress.city.province.name
+          })),
           ...(address
             ? {
                 address: {
+                  id: address.id.toString(),
                   street: address.street,
                   number: address.number,
                   postalCode: address.postalCode,
@@ -172,6 +232,7 @@ export class ClientsService {
 
   async createClient(input: CreateClientInput): Promise<{ id: string }> {
     return prisma.$transaction(async (transaction) => {
+      validateAddresses(input.addresses)
       const duplicate = await transaction.client.findFirst({
         where: {
           OR: [{ cuil: input.cuil }, { email: input.email }]
@@ -186,25 +247,6 @@ export class ClientsService {
       if (duplicate?.email === input.email) {
         throw new Error('Ya existe un cliente registrado con ese email.')
       }
-
-      const province = await transaction.province.findUnique({
-        where: { name: input.province },
-        select: { id: true }
-      })
-
-      if (!province) {
-        throw new Error('La provincia seleccionada no existe.')
-      }
-
-      const existingCity = await transaction.city.findFirst({
-        where: { name: input.city, provinceId: province.id },
-        select: { id: true }
-      })
-
-      const city = existingCity ?? await transaction.city.create({
-        data: { name: input.city, provinceId: province.id },
-        select: { id: true }
-      })
 
       const clients = await transaction.client.findMany({
         select: { id: true },
@@ -227,18 +269,23 @@ export class ClientsService {
           name: input.name,
           lastname: input.lastname,
           cuil: input.cuil,
-          email: input.email,
-          addresses: {
-            create: {
-              street: input.street,
-              number: input.number,
-              postalCode: input.postalCode,
-              city: { connect: { id: city.id } }
-            }
-          }
+          email: input.email
         },
         select: { id: true }
       })
+
+      for (const addressInput of input.addresses) {
+        const cityId = await resolveCityId(transaction, addressInput)
+        await transaction.address.create({
+          data: {
+            clientId: client.id,
+            street: addressInput.street,
+            number: addressInput.number,
+            postalCode: addressInput.postalCode,
+            cityId
+          }
+        })
+      }
 
       return { id: client.id.toString() }
     })

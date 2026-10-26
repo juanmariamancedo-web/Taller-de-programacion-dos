@@ -12,29 +12,50 @@ export function useSeletedAddressOnOrder(formData: {
 
     // Fetch de Direcciones del cliente seleccionado
     useEffect(() => {
+    let active = true
     if (!formData.clientId) {
         setAddresses([])
-        return
+        return () => {
+            active = false
+        }
     }
 
     async function fetchAddresses() {
+        setAddresses([])
         try {
-            // Si la dirección ya está seleccionada y coincide con el input, enviamos search vacío
-            const response = await window.electronAPI?.getAddresses(formData.clientId, {
-                page: 1,
-                search: searchTermAddress, 
+            const fetchPage = (page: number) => window.electronAPI?.getAddresses(formData.clientId, {
+                page,
+                search: searchTermAddress,
                 sort: "nameDesc"
             })
+            const firstPage = await fetchPage(1)
+            if (!firstPage?.success) throw new Error(firstPage?.message ?? "No se pudieron cargar las direcciones.")
 
-            if (response?.success) {
-                setAddresses(response.data ?? [])
+            const pages = await Promise.all(
+                Array.from({ length: Math.max(0, (firstPage.totalPages ?? 1) - 1) }, (_, index) =>
+                    fetchPage(index + 2)
+                )
+            )
+            const responses = [firstPage, ...pages]
+            const allAddresses = responses.flatMap((response) => {
+                if (!response?.success) throw new Error(response?.message ?? "No se pudieron cargar las direcciones.")
+                return response.data ?? []
+            })
+
+            if (active) {
+                setAddresses(allAddresses.filter(
+                    (address) => Number(address.clientId) === Number(formData.clientId)
+                ))
             }
         } catch (error) {
             console.error('Error al cargar las direcciones:', error)
         }
     }
 
-    fetchAddresses()
+    void fetchAddresses()
+    return () => {
+        active = false
+    }
     }, [searchTermAddress, formData.clientId])
 
     return {
