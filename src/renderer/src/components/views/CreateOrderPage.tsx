@@ -43,7 +43,7 @@ interface FormData {
   trackingNumber: string
   location: string
   notes: string
-  invoiceType: 'A' | 'B'
+  invoiceType: 'A' | 'B' | 'EXENTO'
   paymentMethod: string
 }
 
@@ -419,11 +419,18 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
               <label className={labelClass}>Tipo de Factura (Bloqueado)</label>
               <select
                 value={formData.invoiceType}
-                disabled={true}
-                className={`${inputClass} bg-white dark:bg-zinc-900 ${disabledFieldClass}`}
+                onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' | 'EXENTO' }))}
+                className={`${inputClass} bg-white dark:bg-zinc-900`}
               >
-                <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Factura B (Consumidor Final / Monotributo)</option>
-                <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Factura A (Responsable Inscripto - IVA 21%)</option>
+                <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                  Factura B (Consumidor Final / Monotributo)
+                </option>
+                <option value="EXENTO" className="bg-white dark:bg-zinc-900 ftext-gray-900 dark:text-white">
+                  Factura B - Sujeto Exento / Organismo Público
+                </option>
+                <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                  Factura A (Responsable Inscripto - IVA 21%)
+                </option>
               </select>
             </div>
 
@@ -473,12 +480,14 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                     <label className={labelClass}>Tipo de Factura <span className="text-red-500">*</span></label>
                     <select
                       value={formData.invoiceType}
-                      disabled={isInvoiceLocked}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' }))}
-                      className={`${inputClass} bg-white dark:bg-zinc-900 ${isInvoiceLocked ? disabledFieldClass : ""}`}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' | 'EXENTO' }))}
+                      className={`${inputClass} bg-white dark:bg-zinc-900`}
                     >
                       <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
                         Factura B (Consumidor Final / Monotributo)
+                      </option>
+                      <option value="EXENTO" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                        Factura B - Sujeto Exento / Organismo Público
                       </option>
                       <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
                         Factura A (Responsable Inscripto - IVA 21%)
@@ -573,12 +582,14 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                   <label className={labelClass}>Tipo de Factura <span className="text-red-500">*</span></label>
                   <select
                     value={formData.invoiceType}
-                    disabled={isInvoiceLocked}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' }))}
-                    className={`${inputClass} bg-white dark:bg-zinc-900 ${isInvoiceLocked ? disabledFieldClass : ""}`}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' | 'EXENTO' }))}
+                    className={`${inputClass} bg-white dark:bg-zinc-900`}
                   >
                     <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
                       Factura B (Consumidor Final / Monotributo)
+                    </option>
+                    <option value="EXENTO" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                      Factura B - Sujeto Exento / Organismo Público
                     </option>
                     <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
                       Factura A (Responsable Inscripto - IVA 21%)

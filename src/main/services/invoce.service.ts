@@ -33,8 +33,12 @@ export class InvoiceService {
     const invoiceType = (order.invoiceType ?? 'B').toUpperCase()
     const isInvoiceA = invoiceType === 'A'
 
+    // Validamos si el cliente es un sujeto exento (ej. Estado, Entidad Pública, etc.)
+    // Podés adaptar esta propiedad según cómo guardes la condición en tu modelo Client (ej. taxCondition === 'EXENTO' o isExempt)
+    const clientTaxCondition = (order.client as any)?.taxCondition ?? 'CONSUMIDOR_FINAL'
+    const isExemptClient = clientTaxCondition === 'EXENTO' || clientTaxCondition === 'EXENTO_IVA'
+
     const currentStateId = Number(order.currentStateId)
-    // Si forceInvoice es true, ignoramos el estado cancelado/rechazado para mostrar la factura original
     const isCancelledOrRejected = !forceInvoice && (currentStateId === OrderState.Rejected || currentStateId === OrderState.Cancelled)
 
     const documentTitle =
@@ -43,8 +47,10 @@ export class InvoiceService {
         : `FACTURA ${invoiceType}`
 
     const total = Number(order.total)
-    const netAmount = isInvoiceA ? total / 1.21 : total
-    const vatAmount = isInvoiceA ? total - netAmount : 0
+
+    // Si es Factura A se desglosa el IVA. Si es Factura B a un exento, aplicamos Ley de Transparencia Fiscal mostrando el neto e IVA informativo.
+    const netAmount = (isInvoiceA || isExemptClient) ? total / 1.21 : total
+    const vatAmount = (isInvoiceA || isExemptClient) ? total - netAmount : 0
 
     const rows = order.itemOrders
       .map((item) => {
@@ -73,9 +79,10 @@ export class InvoiceService {
     table { width: 100%; border-collapse: collapse; margin-top: 12px; }
     th, td { padding: 8px; border-bottom: 1px solid #ddd; text-align: left; }
     .right { text-align: right; }
-    .totals-box { margin-top: 20px; float: right; width: 280px; }
+    .totals-box { margin-top: 20px; float: right; width: 300px; }
     .totals-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px; }
     .totals-row.final { font-size: 18px; font-weight: bold; border-top: 2px solid #333; margin-top: 6px; padding-top: 6px; }
+    .transparency-notice { font-size: 11px; color: #555; margin-top: 4px; font-style: italic; }
   </style>
 </head>
 <body>
@@ -84,6 +91,7 @@ export class InvoiceService {
       <h1>Comprobante Fiscal</h1>
       <div class="muted">N.º ${number} · Fecha: ${new Date().toLocaleDateString('es-AR')}</div>
       ${isCancelledOrRejected ? '<div style="color: #dc2626; font-weight: bold; margin-top: 4px;">COMPROBANTE DE ANULACIÓN</div>' : ''}
+      ${isExemptClient ? '<div style="color: #2563eb; font-weight: bold; margin-top: 4px;">CLIENTE EXENTO / SUJETO NO ALCANZADO</div>' : ''}
     </div>
     <div class="invoice-badge">
       ${documentTitle}
@@ -92,7 +100,8 @@ export class InvoiceService {
 
   <div class="block">
     <strong>Cliente:</strong> ${escapeHtml(order.client?.name)} ${escapeHtml(order.client?.lastname)}<br />
-    <strong>CUIL:</strong> ${escapeHtml(order.client?.cuil)}<br />
+    <strong>CUIL/CUIT:</strong> ${escapeHtml(order.client?.cuil)}<br />
+    <strong>Condición IVA:</strong> ${escapeHtml(clientTaxCondition)}<br />
     <strong>Dirección de envío:</strong> ${escapeHtml(addressText)}
   </div>
 
@@ -107,16 +116,18 @@ export class InvoiceService {
     ${
       isCancelledOrRejected
         ? `
-      ${isInvoiceA ? `
+      ${(isInvoiceA || isExemptClient) ? `
         <div class="totals-row"><span>Neto Anulado:</span> <span>-${money(netAmount)}</span></div>
         <div class="totals-row"><span>IVA (21%):</span> <span>-${money(vatAmount)}</span></div>
+        ${isExemptClient ? '<div class="transparency-notice">Operación exenta según Ley de Transparencia Fiscal</div>' : ''}
       ` : ''}
       <div class="totals-row final"><span>Total Reintegrado:</span> <span>-${money(total)}</span></div>
     `
         : `
-      ${isInvoiceA ? `
+      ${(isInvoiceA || isExemptClient) ? `
         <div class="totals-row"><span>Neto Gravado:</span> <span>${money(netAmount)}</span></div>
         <div class="totals-row"><span>IVA (21%):</span> <span>${money(vatAmount)}</span></div>
+        ${isExemptClient ? '<div class="transparency-notice">Comprobante B - Sujeto Exento (Ley de Transparencia Fiscal)</div>' : ''}
       ` : ''}
       <div class="totals-row final"><span>Total:</span> <span>${money(total)}</span></div>
     `

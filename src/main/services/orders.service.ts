@@ -119,7 +119,6 @@ export class OrdersService {
   }
 
   // ─── Consultas ──────────────────────────────────────────────────────────
-// ─── Consultas ──────────────────────────────────────────────────────────
 
   async getOrders(searchParams?: SearchParams, sessionContext?: UserSessionContext | null) {
     const activeSession = await this.resolveSession(sessionContext);
@@ -198,8 +197,6 @@ export class OrdersService {
       const isDraft = Number(order.currentStateId) === OrderState.Created;
       const liveAddr = order.shippingAddress;
 
-      // Si es borrador y existe la relación, mostramos los datos vivos de la dirección.
-      // Si ya no es borrador, mostramos el snapshot estático guardado en la orden.
       const street = isDraft && liveAddr ? liveAddr.street : (order.shippingStreet ?? (liveAddr?.street ?? ''));
       const number = isDraft && liveAddr ? liveAddr.number : (order.shippingNumber ?? (liveAddr?.number ?? 0));
       const floor = isDraft && liveAddr ? liveAddr.floor : (order.shippingFloor ?? (liveAddr?.floor ?? null));
@@ -217,7 +214,6 @@ export class OrdersService {
         invoiceType: order.invoiceType ?? null,
         paymentMethod: order.paymentMethod,
         
-        // Campos de snapshot expuestos según el estado
         shippingStreet: street,
         shippingNumber: number,
         shippingFloor: floor,
@@ -225,7 +221,6 @@ export class OrdersService {
         shippingPostalCode: postalCode,
         shippingCityName: cityName,
 
-        // Estructura de objeto de dirección unificada para la UI
         shippingAddress: {
           id: order.shippingAddressId ? Number(order.shippingAddressId) : null,
           street,
@@ -267,7 +262,7 @@ export class OrdersService {
 
   async createOrder(
     payload: CreateOrderPayload & {
-      invoiceType?: 'A' | 'B';
+      invoiceType?: 'A' | 'B' | 'EXENTO';
       paymentMethod?: string;
     },
     sessionContext?: UserSessionContext | null
@@ -311,10 +306,10 @@ export class OrdersService {
 
       if (initialStateId === OrderState.Paid) {
         const selectedInvoiceType = invoiceType?.toUpperCase();
-        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B') {
+        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B' && selectedInvoiceType !== 'EXENTO') {
           return {
             success: false,
-            message: 'Debe especificar si la factura es de tipo A o B para crear una orden pagada.',
+            message: 'Debe especificar si la factura es de tipo A, B o Exento para crear una orden pagada.',
           };
         }
       }
@@ -336,13 +331,15 @@ export class OrdersService {
           if (snapshot) addressSnapshot = snapshot;
         }
 
+        const normalizedInvoiceType = initialStateId === OrderState.Paid ? invoiceType?.toUpperCase() : null;
+
         const order = await tx.order.create({
           data: {
             clientId: BigInt(clientId),
             sellerId: BigInt(sellerId),
             total: Number(total),
             currentStateId: BigInt(initialStateId),
-            invoiceType: initialStateId === OrderState.Paid ? invoiceType?.toUpperCase() : null,
+            invoiceType: normalizedInvoiceType,
             paymentMethod: paymentMethod || 'Efectivo',
             ...(shippingAddressId && { shippingAddressId: BigInt(shippingAddressId) }),
             ...addressSnapshot,
@@ -362,10 +359,11 @@ export class OrdersService {
             : `Creación de la orden en estado "${getStateLabel(initialStateId)}" y descuento de stock`;
 
           if (initialStateId === OrderState.Paid) {
-            const selectedInv = invoiceType?.toUpperCase() || 'B';
+            const selectedInv = normalizedInvoiceType || 'B';
             const numericTotal = Number(total);
-            const netAmount = selectedInv === 'A' ? Number((numericTotal / 1.21).toFixed(2)) : numericTotal;
-            const vatAmount = selectedInv === 'A' ? Number((numericTotal - netAmount).toFixed(2)) : 0.00;
+            const requiresVatCalculation = selectedInv === 'A' || selectedInv === 'EXENTO';
+            const netAmount = requiresVatCalculation ? Number((numericTotal / 1.21).toFixed(2)) : numericTotal;
+            const vatAmount = requiresVatCalculation ? Number((numericTotal - netAmount).toFixed(2)) : 0.00;
 
             historyNotes = `Orden creada y pagada con Factura ${selectedInv}. Neto: $${netAmount}, IVA 21%: $${vatAmount}.`;
           }
@@ -392,7 +390,6 @@ export class OrdersService {
       console.error('Error en servicio de órdenes:', err);
       let errorMessage = err.message || 'Error en la operación de la base de datos';
 
-      // Extracción segura de los mensajes y códigos de error de Prisma y del adaptador de PG
       const errorMsg = String(err?.message || '');
       const errorCode = err?.code;
       const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
@@ -487,7 +484,6 @@ export class OrdersService {
       console.error('Error en servicio de órdenes:', err);
       let errorMessage = err.message || 'Error en la operación de la base de datos';
 
-      // Extracción segura de los mensajes y códigos de error de Prisma y del adaptador de PG
       const errorMsg = String(err?.message || '');
       const errorCode = err?.code;
       const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
@@ -512,7 +508,7 @@ export class OrdersService {
 
   // ─── Cambiar estado ─────────────────────────────────────────────────────
   async updateOrderState(
-    payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B'; paymentMethod?: string },
+    payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B' | 'EXENTO'; paymentMethod?: string },
     sessionContext?: UserSessionContext | null
   ): Promise<OrderMutationResponse> {
     try {
@@ -548,14 +544,13 @@ export class OrdersService {
         throw new Error('Indicá el motivo del rechazo o la cancelación.');
       }
 
-      // Determinamos si estamos saliendo del estado de borrador por primera vez
       const isLeavingDraft = currentState === OrderState.Created && targetStateId !== OrderState.Created;
 
-      // ─── LÓGICA DE PAGO CON PROCEDIMIENTO ALMACENADO (Factura A / B) ───────────
+      // ─── LÓGICA DE PAGO CON PROCEDIMIENTO ALMACENADO (Factura A / B / Exento) ───────────
       if (targetStateId === OrderState.Paid) {
         const selectedInvoiceType = invoiceType?.toUpperCase();
-        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B') {
-          throw new Error('Debe especificar si la factura es de tipo A o B para marcar la orden como pagada.');
+        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B' && selectedInvoiceType !== 'EXENTO') {
+          throw new Error('Debe especificar si la factura es de tipo A, B o Exento para marcar la orden como pagada.');
         }
 
         if (!paymentMethod?.trim()) {
@@ -583,7 +578,6 @@ export class OrdersService {
 
           const fiscalData = spResult[0];
 
-          // SÓLO si venimos de borrador congelamos el snapshot. Si ya era pendiente/otro, respetamos lo que ya tenía.
           let addressSnapshotUpdates = {};
           if (isLeavingDraft && existingOrder.shippingAddressId) {
             const snapshot = await this.fetchAddressSnapshot(tx, existingOrder.shippingAddressId);
@@ -594,8 +588,9 @@ export class OrdersService {
             where: { id: orderId },
             data: {
               currentStateId: BigInt(targetStateId),
-              paymentMethod: paymentMethod.trim(), // Se guarda el método de pago recién al pagar
-              ...addressSnapshotUpdates, // Si ya estaba congelado, esto queda vacío y respeta el histórico
+              invoiceType: selectedInvoiceType,
+              paymentMethod: paymentMethod.trim(),
+              ...addressSnapshotUpdates,
             },
           });
 
@@ -628,7 +623,6 @@ export class OrdersService {
           await this.releaseStock(tx, existingOrder.itemOrders);
         }
 
-        // SÓLO congelamos si estamos saliendo del borrador por primera vez
         let addressSnapshotUpdates = {};
         if (isLeavingDraft && existingOrder.shippingAddressId) {
           const snapshot = await this.fetchAddressSnapshot(tx, existingOrder.shippingAddressId);
