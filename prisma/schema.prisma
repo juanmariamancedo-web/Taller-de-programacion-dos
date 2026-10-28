@@ -31,22 +31,6 @@ model UserRole {
   @@map("user_roles")
 }
 
-model PaymentMethod {
-  id       BigInt    @id @default(autoincrement())
-  name     String    @unique
-  payments Payment[]
-
-  @@map("payment_methods")
-}
-
-model PaymentStatus {
-  id       BigInt    @id @default(autoincrement())
-  name     String    @unique
-  payments Payment[]
-
-  @@map("payment_statuses")
-}
-
 // ==========================================
 // TABLAS DE UBICACIÓN
 // ==========================================
@@ -156,47 +140,42 @@ model Product {
 }
 
 // ==========================================
-// PEDIDOS Y PAGOS
+// PEDIDOS
 // ==========================================
 
 model Order {
-  id                BigInt             @id @default(autoincrement())
-  currentStateId    BigInt             @map("current_state_id")
-  currentState      OrderState         @relation(fields: [currentStateId], references: [id])
-  trackingNumber    String?            @map("tracking_number")
-  total             Decimal            @default(0.0)
-  invoiceType       String?            @map("invoice_type") // 'A' o 'B' para discriminación fiscal
-  sellerId          BigInt             @map("seller_id")
-  seller            User               @relation(fields: [sellerId], references: [id])
-  clientId          BigInt             @map("client_id")
-  client            Client             @relation(fields: [clientId], references: [id])
-  shippingAddressId BigInt?            @map("shipping_address_id")
-  shippingAddress   Address?           @relation(fields: [shippingAddressId], references: [id])
-  createdAt         DateTime?          @default(now()) @map("created_at")
-  updatedAt         DateTime?          @updatedAt @map("updated_at")
+  id                 BigInt               @id @default(autoincrement())
+  currentStateId     BigInt               @map("current_state_id")
+  currentState       OrderState           @relation(fields: [currentStateId], references: [id])
+  trackingNumber     String?              @unique @map("tracking_number")
+  total              Decimal              @default(0.0)
+  invoiceType        String?              @map("invoice_type") // 'A' o 'B' para discriminación fiscal
+  paymentMethod      String?              @default("Efectivo") @map("payment_method")
 
-  payments          Payment[]
+  sellerId           BigInt               @map("seller_id")
+  seller             User                 @relation(fields: [sellerId], references: [id])
+  clientId           BigInt               @map("client_id")
+  client             Client               @relation(fields: [clientId], references: [id])
+  
+  // Relación opcional con la dirección de origen (por si acaso)
+  shippingAddressId  BigInt?              @map("shipping_address_id")
+  shippingAddress    Address?             @relation(fields: [shippingAddressId], references: [id])
+
+  // --- SNAPSHOT DE LA DIRECCIÓN DE ENVÍO EN EL MOMENTO DE LA ORDEN ---
+  shippingStreet     String?              @map("shipping_street")
+  shippingNumber     Int?                 @map("shipping_number")
+  shippingFloor      String?              @map("shipping_floor")
+  shippingApartment  String?              @map("shipping_apartment")
+  shippingPostalCode String?              @map("shipping_postal_code")
+  shippingCityName   String?              @map("shipping_city_name")
+
+  createdAt          DateTime?            @default(now()) @map("created_at")
+  updatedAt          DateTime?            @updatedAt @map("updated_at")
+
   orderStatusHistory OrderStatusHistory[]
-  itemOrders        ItemOrder[]
+  itemOrders         ItemOrder[]
 
   @@map("orders")
-}
-
-model Payment {
-  id                BigInt        @id @default(autoincrement())
-  orderId           BigInt        @map("order_id")
-  order             Order         @relation(fields: [orderId], references: [id])
-  paymentMethodId   BigInt        @map("payment_method_id")
-  paymentMethod     PaymentMethod @relation(fields: [paymentMethodId], references: [id])
-  paymentStatusId   BigInt        @map("payment_status_id")
-  paymentStatus     PaymentStatus @relation(fields: [paymentStatusId], references: [id])
-  amount            Decimal
-  transactionNumber String?       @map("transaction_number")
-  notes             String?
-  createdAt         DateTime?     @default(now()) @map("created_at")
-  updatedAt         DateTime?     @updatedAt @map("updated_at")
-
-  @@map("payments")
 }
 
 model OrderStatusHistory {
@@ -224,4 +203,3 @@ model ItemOrder {
 
   @@map("item_orders")
 }
-

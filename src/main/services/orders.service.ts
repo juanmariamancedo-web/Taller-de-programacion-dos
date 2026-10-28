@@ -99,7 +99,27 @@ export class OrdersService {
     }
   }
 
+  /** Obtiene los datos de la dirección para generar el snapshot histórico. */
+  private async fetchAddressSnapshot(tx: Tx, shippingAddressId: number | bigint) {
+    const dbAddress = await tx.address.findUnique({
+      where: { id: BigInt(shippingAddressId) },
+      include: { city: true },
+    });
+
+    if (!dbAddress) return null;
+
+    return {
+      shippingStreet: dbAddress.street,
+      shippingNumber: dbAddress.number,
+      shippingFloor: dbAddress.floor,
+      shippingApartment: dbAddress.apartment,
+      shippingPostalCode: dbAddress.postalCode,
+      shippingCityName: dbAddress.city?.name ?? '',
+    };
+  }
+
   // ─── Consultas ──────────────────────────────────────────────────────────
+// ─── Consultas ──────────────────────────────────────────────────────────
 
   async getOrders(searchParams?: SearchParams, sessionContext?: UserSessionContext | null) {
     const activeSession = await this.resolveSession(sessionContext);
@@ -174,32 +194,67 @@ export class OrdersService {
       }),
     ]);
 
-    const formattedOrders = orders.map((order) => ({
-      ...order,
-      id: Number(order.id),
-      clientId: Number(order.clientId),
-      sellerId: Number(order.sellerId),
-      currentStateId: Number(order.currentStateId),
-      shippingAddressId: order.shippingAddressId ? Number(order.shippingAddressId) : null,
-      invoiceType: order.invoiceType ?? null,
-      items: order.itemOrders.map((item) => ({
-        id: Number(item.id),
-        productId: Number(item.productId),
-        description: item.product?.name ?? '',
-        quantity: Number(item.amount),
-        unitPrice: Number(item.unitPrice),
-      })),
-      statusHistory: order.orderStatusHistory.map((history) => ({
-        id: Number(history.id),
-        orderId: Number(history.orderId),
-        stateId: Number(history.stateId),
-        addressId: history.addressId ? Number(history.addressId) : null,
-        stateName: history.state?.name ?? '',
-        location: (history as any).location ?? null,
-        notes: history.notes ?? '',
-        createdAt: history.createdAt,
-      })),
-    }));
+    const formattedOrders = orders.map((order) => {
+      const isDraft = Number(order.currentStateId) === OrderState.Created;
+      const liveAddr = order.shippingAddress;
+
+      // Si es borrador y existe la relación, mostramos los datos vivos de la dirección.
+      // Si ya no es borrador, mostramos el snapshot estático guardado en la orden.
+      const street = isDraft && liveAddr ? liveAddr.street : (order.shippingStreet ?? (liveAddr?.street ?? ''));
+      const number = isDraft && liveAddr ? liveAddr.number : (order.shippingNumber ?? (liveAddr?.number ?? 0));
+      const floor = isDraft && liveAddr ? liveAddr.floor : (order.shippingFloor ?? (liveAddr?.floor ?? null));
+      const apartment = isDraft && liveAddr ? liveAddr.apartment : (order.shippingApartment ?? (liveAddr?.apartment ?? null));
+      const postalCode = isDraft && liveAddr ? liveAddr.postalCode : (order.shippingPostalCode ?? (liveAddr?.postalCode ?? ''));
+      const cityName = isDraft && liveAddr ? (liveAddr.city?.name ?? '') : (order.shippingCityName ?? (liveAddr?.city?.name ?? ''));
+
+      return {
+        ...order,
+        id: Number(order.id),
+        clientId: Number(order.clientId),
+        sellerId: Number(order.sellerId),
+        currentStateId: Number(order.currentStateId),
+        shippingAddressId: order.shippingAddressId ? Number(order.shippingAddressId) : null,
+        invoiceType: order.invoiceType ?? null,
+        paymentMethod: order.paymentMethod,
+        
+        // Campos de snapshot expuestos según el estado
+        shippingStreet: street,
+        shippingNumber: number,
+        shippingFloor: floor,
+        shippingApartment: apartment,
+        shippingPostalCode: postalCode,
+        shippingCityName: cityName,
+
+        // Estructura de objeto de dirección unificada para la UI
+        shippingAddress: {
+          id: order.shippingAddressId ? Number(order.shippingAddressId) : null,
+          street,
+          number,
+          floor,
+          apartment,
+          postalCode,
+          city: { name: cityName },
+        },
+
+        items: order.itemOrders.map((item) => ({
+          id: Number(item.id),
+          productId: Number(item.productId),
+          description: item.product?.name ?? '',
+          quantity: Number(item.amount),
+          unitPrice: Number(item.unitPrice),
+        })),
+        statusHistory: order.orderStatusHistory.map((history) => ({
+          id: Number(history.id),
+          orderId: Number(history.orderId),
+          stateId: Number(history.stateId),
+          addressId: history.addressId ? Number(history.addressId) : null,
+          stateName: history.state?.name ?? '',
+          location: (history as any).location ?? null,
+          notes: history.notes ?? '',
+          createdAt: history.createdAt,
+        })),
+      };
+    });
 
     return {
       success: true,
@@ -210,7 +265,13 @@ export class OrdersService {
 
   // ─── Crear ──────────────────────────────────────────────────────────────
 
-  async createOrder(payload: CreateOrderPayload & { invoiceType?: 'A' | 'B' }, sessionContext?: UserSessionContext | null): Promise<CreateOrderResponse> {
+  async createOrder(
+    payload: CreateOrderPayload & {
+      invoiceType?: 'A' | 'B';
+      paymentMethod?: string;
+    },
+    sessionContext?: UserSessionContext | null
+  ): Promise<CreateOrderResponse> {
     try {
       const activeSession = await this.resolveSession(sessionContext);
       const role = this.getSessionRole(activeSession);
@@ -226,7 +287,7 @@ export class OrdersService {
       const shippingAddressId = payload.shippingAddressId ? Number(payload.shippingAddressId) : null;
       const currentUserId = this.getSessionUserId(activeSession);
       const sellerId = role === 'seller' ? currentUserId : Number(payload.sellerId);
-      const { items, total, invoiceType } = payload;
+      const { items, total, invoiceType, paymentMethod } = payload;
 
       if (!clientId || !sellerId || !items || items.length === 0) {
         return {
@@ -261,7 +322,20 @@ export class OrdersService {
       const newOrder = await prisma.$transaction(async (tx) => {
         await this.reserveStock(tx, items);
 
-        // Creamos la orden asignando directamente el tipo de factura si nace pagada
+        let addressSnapshot = {
+          shippingStreet: '',
+          shippingNumber: 0,
+          shippingFloor: null as string | null,
+          shippingApartment: null as string | null,
+          shippingPostalCode: '',
+          shippingCityName: '',
+        };
+
+        if (shippingAddressId) {
+          const snapshot = await this.fetchAddressSnapshot(tx, shippingAddressId);
+          if (snapshot) addressSnapshot = snapshot;
+        }
+
         const order = await tx.order.create({
           data: {
             clientId: BigInt(clientId),
@@ -269,7 +343,9 @@ export class OrdersService {
             total: Number(total),
             currentStateId: BigInt(initialStateId),
             invoiceType: initialStateId === OrderState.Paid ? invoiceType?.toUpperCase() : null,
+            paymentMethod: paymentMethod || 'Efectivo',
             ...(shippingAddressId && { shippingAddressId: BigInt(shippingAddressId) }),
+            ...addressSnapshot,
             itemOrders: {
               create: items.map((item) => ({
                 productId: BigInt(item.productId),
@@ -280,7 +356,6 @@ export class OrdersService {
           },
         });
 
-        // Si nace pagada, registramos la nota fiscal en el historial directamente sin llamar al SP que busca por ID separado
         if (shippingAddressId) {
           let historyNotes = initialStateId === OrderState.Created
             ? 'Creación de la orden de compra y descuento de stock'
@@ -314,21 +389,42 @@ export class OrdersService {
         message: 'Orden creada exitosamente y stock actualizado.',
       };
     } catch (err: any) {
-      console.error('Error al crear orden en Prisma:', err);
+      console.error('Error en servicio de órdenes:', err);
+      let errorMessage = err.message || 'Error en la operación de la base de datos';
+
+      // Extracción segura de los mensajes y códigos de error de Prisma y del adaptador de PG
+      const errorMsg = String(err?.message || '');
+      const errorCode = err?.code;
+      const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
+
+      if (
+        errorCode === 'P2002' ||
+        errorMsg.includes('P2002') ||
+        errorMsg.includes('tracking_number') ||
+        errorMsg.includes('Unique constraint failed') ||
+        driverError.includes('UniqueConstraintViolation') ||
+        driverError.includes('tracking_number')
+      ) {
+        errorMessage = 'El número de seguimiento (tracking) ya se encuentra registrado en otra orden.';
+      }
+
       return {
         success: false,
-        message: err.message || 'Error al guardar la orden en la base de datos',
+        message: errorMessage,
       };
     }
   }
 
   // ─── Editar datos (solo mientras es borrador) ───────────────────────────
 
-  async updateOrder(payload: UpdateOrderPayload, sessionContext?: UserSessionContext | null): Promise<OrderMutationResponse> {
+  async updateOrder(
+    payload: UpdateOrderPayload & { paymentMethod?: string },
+    sessionContext?: UserSessionContext | null
+  ): Promise<OrderMutationResponse> {
     try {
       const activeSession = await this.resolveSession(sessionContext);
       const role = this.getSessionRole(activeSession);
-      const { id, clientId, shippingAddressId, items, total } = payload;
+      const { id, clientId, shippingAddressId, items, total, paymentMethod } = payload;
       const orderId = BigInt(id);
 
       const existingOrder = await prisma.order.findUnique({ where: { id: orderId } });
@@ -355,12 +451,20 @@ export class OrdersService {
           await this.reserveStock(tx, items!);
         }
 
+        let addressSnapshotUpdates = {};
+        if (shippingAddressId) {
+          const snapshot = await this.fetchAddressSnapshot(tx, BigInt(shippingAddressId)); 
+          if (snapshot) addressSnapshotUpdates = snapshot;
+        }
+
         return tx.order.update({
           where: { id: orderId },
           data: {
             clientId: clientId ? BigInt(clientId) : existingOrder.clientId,
             shippingAddressId: shippingAddressId ? BigInt(shippingAddressId) : existingOrder.shippingAddressId,
             total: total !== undefined ? Number(total) : Number(existingOrder.total),
+            paymentMethod: paymentMethod || existingOrder.paymentMethod,
+            ...addressSnapshotUpdates,
             ...(hasNewItems && {
               itemOrders: {
                 create: items!.map((item) => ({
@@ -380,24 +484,41 @@ export class OrdersService {
         message: 'Orden actualizada exitosamente',
       };
     } catch (err: any) {
-      console.error('Error al actualizar orden en Prisma:', err);
+      console.error('Error en servicio de órdenes:', err);
+      let errorMessage = err.message || 'Error en la operación de la base de datos';
+
+      // Extracción segura de los mensajes y códigos de error de Prisma y del adaptador de PG
+      const errorMsg = String(err?.message || '');
+      const errorCode = err?.code;
+      const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
+
+      if (
+        errorCode === 'P2002' ||
+        errorMsg.includes('P2002') ||
+        errorMsg.includes('tracking_number') ||
+        errorMsg.includes('Unique constraint failed') ||
+        driverError.includes('UniqueConstraintViolation') ||
+        driverError.includes('tracking_number')
+      ) {
+        errorMessage = 'El número de seguimiento (tracking) ya se encuentra registrado en otra orden.';
+      }
+
       return {
         success: false,
-        message: err.message || 'Error al actualizar la orden en la base de datos',
+        message: errorMessage,
       };
     }
   }
 
   // ─── Cambiar estado ─────────────────────────────────────────────────────
-
   async updateOrderState(
-    payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B' },
+    payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B'; paymentMethod?: string },
     sessionContext?: UserSessionContext | null
   ): Promise<OrderMutationResponse> {
     try {
       const activeSession = await this.resolveSession(sessionContext);
       const role = this.getSessionRole(activeSession);
-      const { id, currentStateId, trackingNumber, notes, location, invoiceType } = payload;
+      const { id, currentStateId, trackingNumber, notes, location, invoiceType, paymentMethod } = payload;
       const orderId = BigInt(id);
       const targetStateId = Number(currentStateId);
 
@@ -427,6 +548,9 @@ export class OrdersService {
         throw new Error('Indicá el motivo del rechazo o la cancelación.');
       }
 
+      // Determinamos si estamos saliendo del estado de borrador por primera vez
+      const isLeavingDraft = currentState === OrderState.Created && targetStateId !== OrderState.Created;
+
       // ─── LÓGICA DE PAGO CON PROCEDIMIENTO ALMACENADO (Factura A / B) ───────────
       if (targetStateId === OrderState.Paid) {
         const selectedInvoiceType = invoiceType?.toUpperCase();
@@ -434,44 +558,66 @@ export class OrdersService {
           throw new Error('Debe especificar si la factura es de tipo A o B para marcar la orden como pagada.');
         }
 
-        const spResult = await prisma.$queryRaw<Array<{
-          order_id: bigint;
-          total_amount: number;
-          invoice_type: string;
-          net_amount: number;
-          vat_amount: number;
-        }>>`
-          SELECT * FROM procesar_pago_orden(
-            ${orderId}::bigint, 
-            ${selectedInvoiceType}::varchar, 
-            ${BigInt(OrderState.Paid)}::bigint
-          )
-        `;
-
-        if (!spResult || spResult.length === 0) {
-          throw new Error('Error al ejecutar el procedimiento almacenado de facturación.');
+        if (!paymentMethod?.trim()) {
+          throw new Error('Debe indicar un método de pago para marcar la orden como pagada.');
         }
 
-        const fiscalData = spResult[0];
+        const updatedOrder = await prisma.$transaction(async (tx) => {
+          const spResult = await tx.$queryRaw<Array<{
+            order_id: bigint;
+            total_amount: number;
+            invoice_type: string;
+            net_amount: number;
+            vat_amount: number;
+          }>>`
+            SELECT * FROM procesar_pago_orden(
+              ${orderId}::bigint, 
+              ${selectedInvoiceType}::varchar, 
+              ${BigInt(OrderState.Paid)}::bigint
+            )
+          `;
 
-        if (existingOrder.shippingAddressId || existingOrder.clientId) {
-          const addressIdToUse = existingOrder.shippingAddressId ?? (await prisma.address.findFirst({ where: { clientId: existingOrder.clientId } }))?.id;
+          if (!spResult || spResult.length === 0) {
+            throw new Error('Error al ejecutar el procedimiento almacenado de facturación.');
+          }
+
+          const fiscalData = spResult[0];
+
+          // SÓLO si venimos de borrador congelamos el snapshot. Si ya era pendiente/otro, respetamos lo que ya tenía.
+          let addressSnapshotUpdates = {};
+          if (isLeavingDraft && existingOrder.shippingAddressId) {
+            const snapshot = await this.fetchAddressSnapshot(tx, existingOrder.shippingAddressId);
+            if (snapshot) addressSnapshotUpdates = snapshot;
+          }
+
+          const updated = await tx.order.update({
+            where: { id: orderId },
+            data: {
+              currentStateId: BigInt(targetStateId),
+              paymentMethod: paymentMethod.trim(), // Se guarda el método de pago recién al pagar
+              ...addressSnapshotUpdates, // Si ya estaba congelado, esto queda vacío y respeta el histórico
+            },
+          });
+
+          const addressIdToUse = existingOrder.shippingAddressId ?? (await tx.address.findFirst({ where: { clientId: existingOrder.clientId } }))?.id;
 
           if (addressIdToUse) {
-            await prisma.orderStatusHistory.create({
+            await tx.orderStatusHistory.create({
               data: {
                 orderId: orderId,
                 stateId: BigInt(targetStateId),
                 addressId: addressIdToUse,
-                notes: `Orden pagada con Factura ${selectedInvoiceType}. Neto: $${fiscalData.net_amount}, IVA 21%: $${fiscalData.vat_amount}.`,
+                notes: `Orden pagada con Factura ${selectedInvoiceType}. Método: ${paymentMethod.trim()}. Neto: $${fiscalData.net_amount}, IVA 21%: $${fiscalData.vat_amount}.`,
               },
             });
           }
-        }
+
+          return updated;
+        });
 
         return {
           success: true,
-          orderId: Number(orderId),
+          orderId: Number(updatedOrder.id),
           message: `Orden marcada como pagada con Factura ${selectedInvoiceType} exitosamente.`,
         };
       }
@@ -482,11 +628,19 @@ export class OrdersService {
           await this.releaseStock(tx, existingOrder.itemOrders);
         }
 
+        // SÓLO congelamos si estamos saliendo del borrador por primera vez
+        let addressSnapshotUpdates = {};
+        if (isLeavingDraft && existingOrder.shippingAddressId) {
+          const snapshot = await this.fetchAddressSnapshot(tx, existingOrder.shippingAddressId);
+          if (snapshot) addressSnapshotUpdates = snapshot;
+        }
+
         const updated = await tx.order.update({
           where: { id: orderId },
           data: {
             currentStateId: BigInt(targetStateId),
             ...(trackingNumber?.trim() && { trackingNumber: trackingNumber.trim() }),
+            ...addressSnapshotUpdates,
           },
         });
 
@@ -518,10 +672,27 @@ export class OrdersService {
           : 'Estado de la orden actualizado correctamente.',
       };
     } catch (err: any) {
-      console.error('Error en updateOrderState:', err);
+      console.error('Error en servicio de órdenes:', err);
+      let errorMessage = err.message || 'Error en la operación de la base de datos';
+
+      const errorMsg = String(err?.message || '');
+      const errorCode = err?.code;
+      const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
+
+      if (
+        errorCode === 'P2002' ||
+        errorMsg.includes('P2002') ||
+        errorMsg.includes('tracking_number') ||
+        errorMsg.includes('Unique constraint failed') ||
+        driverError.includes('UniqueConstraintViolation') ||
+        driverError.includes('tracking_number')
+      ) {
+        errorMessage = 'El número de seguimiento (tracking) ya se encuentra registrado en otra orden.';
+      }
+
       return {
         success: false,
-        message: err.message || 'Error al actualizar el estado de la orden.',
+        message: errorMessage,
       };
     }
   }
