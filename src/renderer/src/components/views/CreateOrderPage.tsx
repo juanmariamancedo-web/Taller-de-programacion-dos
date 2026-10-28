@@ -44,6 +44,7 @@ interface FormData {
   location: string
   notes: string
   invoiceType: 'A' | 'B'
+  paymentMethod: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -71,6 +72,7 @@ const buildFormData = (order?: OrderWithState | null): FormData => ({
   location: "",
   notes: "",
   invoiceType: (order as any)?.invoiceType ?? 'B',
+  paymentMethod: (order as any)?.paymentMethod ?? 'Efectivo',
 })
 
 const mapOrderItems = (order: OrderWithState): FormOrderItem[] => {
@@ -154,7 +156,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const isTargetStatePaid = formData.currentStateId === OrderState.Paid
   const isInitialStatePaid = !isEditing && initialStateId === OrderState.Paid
 
-  // Una vez que la orden ya fue marcada como Paid (o superior), el tipo de factura queda bloqueado
   const isInvoiceLocked = (isEditing && orderStateId >= OrderState.Paid) || Boolean((initialOrder as any)?.invoiceType)
 
   const { clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients } =
@@ -212,11 +213,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const total = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
 
-  const goToOrders = () => {
-    dispatch(setOrderToEdit(null))
-    setTimeout(() => dispatch(setCurrentTab("orders")), 150)
-  }
-
   const handleCancel = () => {
     dispatch(setOrderToEdit(null))
     dispatch(setCurrentTab("orders"))
@@ -227,7 +223,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       const response = await window.electronAPI?.openOrderInvoice?.(String(initialOrder?.id), docType)
       assertSuccess(response, "No se pudo abrir el comprobante.")
     } catch (err) {
-      dispatch(setGlobalAlert(err instanceof Error ? err.message : "Error al abrir el comprobante."));
+      dispatch(setGlobalAlert(err instanceof Error ? err.message : "Error al abrir el comprobante."))
     }
   }
 
@@ -235,6 +231,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     if (canEditDetails) {
       if (formData.clientId <= 0) return "Debe seleccionar un cliente"
       if (formData.shippingAddressId <= 0) return "Debe seleccionar una dirección"
+      if (!formData.paymentMethod.trim()) return "Debe indicar un método de pago"
       if (items.some((i) => i.productId <= 0)) return "Todos los ítems deben tener un producto seleccionado"
     }
     if (nextStateNeedsTracking && !formData.trackingNumber.trim()) {
@@ -266,13 +263,24 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             ? Number(currentSession?.id)
             : Number(initialOrder?.sellerId || currentSession?.id || 0)
 
+        // Obtenemos el snapshot de la dirección seleccionada de la lista local
+        const selectedAddress = addresses.find((a) => Number(a.id) === formData.shippingAddressId) || (initialOrder as any)?.shippingAddress
+
         const details = {
           clientId: formData.clientId,
           shippingAddressId: formData.shippingAddressId,
           sellerId,
           currentStateId: orderStateId,
           total,
+          paymentMethod: formData.paymentMethod,
           invoiceType: isInitialStatePaid ? formData.invoiceType : undefined,
+          // Snapshot de dirección para persistencia histórica
+          shippingStreet: selectedAddress?.street ?? "",
+          shippingNumber: Number(selectedAddress?.number ?? 0),
+          shippingFloor: selectedAddress?.floor ?? null,
+          shippingApartment: selectedAddress?.apartment ?? null,
+          shippingPostalCode: selectedAddress?.postalCode ?? "",
+          shippingCityName: selectedAddress?.city?.name ?? "",
           items: items.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
         }
 
@@ -290,7 +298,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         const response = await window.electronAPI?.updateOrderState?.({
           id: orderId,
           currentStateId: formData.currentStateId,
-          trackingNumber: formData.trackingNumber.trim(),
+          trackingNumber: formData.trackingNumber.trim() || undefined,
           location: formData.location.trim() || undefined,
           notes: formData.notes.trim() || undefined,
           invoiceType: isTargetStatePaid ? formData.invoiceType : undefined,
@@ -310,7 +318,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         }
       }
 
-      goToOrders()
+      dispatch(setOrderToEdit(null))
+      setTimeout(() => dispatch(setCurrentTab("orders")), 150)
     } catch (err) {
       console.error("Error al guardar la orden:", err)
       dispatch(setGlobalAlert(err instanceof Error ? err.message : "Error de comunicación con el proceso principal de Electron."))
@@ -406,13 +415,29 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             <select
               value={formData.invoiceType}
               disabled={true}
-              className={`${inputClass} ${disabledFieldClass}`}
+              className={`${inputClass} bg-white dark:bg-zinc-900 ${disabledFieldClass}`}
             >
-              <option value="B">Factura B (Consumidor Final / Monotributo)</option>
-              <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
+              <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Factura B (Consumidor Final / Monotributo)</option>
+              <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Factura A (Responsable Inscripto - IVA 21%)</option>
             </select>
           </div>
         )}
+
+        {/* Método de Pago */}
+        <div>
+          <label className={labelClass}>Método de Pago</label>
+          <select
+            value={formData.paymentMethod}
+            disabled={!canEditDetails}
+            onChange={(e) => setFormData((prev) => ({ ...prev, paymentMethod: e.target.value }))}
+            className={`${inputClass} bg-white dark:bg-zinc-900 ${!canEditDetails ? disabledFieldClass : ""}`}
+          >
+            <option value="Efectivo" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Efectivo</option>
+            <option value="Transferencia" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Transferencia</option>
+            <option value="Tarjeta de Débito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Débito</option>
+            <option value="Tarjeta de Crédito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Crédito</option>
+          </select>
+        </div>
 
         {allowedNextStates.length > 0 && (
           <div className="rounded-xl bg-blue-50/50 p-4 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 flex flex-col gap-4">
