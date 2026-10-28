@@ -150,7 +150,7 @@ model Order {
   trackingNumber     String?              @unique @map("tracking_number")
   total              Decimal              @default(0.0)
   invoiceType        String?              @map("invoice_type") // 'A' o 'B' para discriminación fiscal
-  paymentMethod      String               @default("Efectivo") @map("payment_method")
+  paymentMethod      String?              @default("Efectivo") @map("payment_method")
 
   sellerId           BigInt               @map("seller_id")
   seller             User                 @relation(fields: [sellerId], references: [id])

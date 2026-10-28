@@ -512,13 +512,13 @@ export class OrdersService {
 
   // ─── Cambiar estado ─────────────────────────────────────────────────────
   async updateOrderState(
-    payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B' },
+    payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B'; paymentMethod?: string },
     sessionContext?: UserSessionContext | null
   ): Promise<OrderMutationResponse> {
     try {
       const activeSession = await this.resolveSession(sessionContext);
       const role = this.getSessionRole(activeSession);
-      const { id, currentStateId, trackingNumber, notes, location, invoiceType } = payload;
+      const { id, currentStateId, trackingNumber, notes, location, invoiceType, paymentMethod } = payload;
       const orderId = BigInt(id);
       const targetStateId = Number(currentStateId);
 
@@ -558,6 +558,10 @@ export class OrdersService {
           throw new Error('Debe especificar si la factura es de tipo A o B para marcar la orden como pagada.');
         }
 
+        if (!paymentMethod?.trim()) {
+          throw new Error('Debe indicar un método de pago para marcar la orden como pagada.');
+        }
+
         const updatedOrder = await prisma.$transaction(async (tx) => {
           const spResult = await tx.$queryRaw<Array<{
             order_id: bigint;
@@ -590,6 +594,7 @@ export class OrdersService {
             where: { id: orderId },
             data: {
               currentStateId: BigInt(targetStateId),
+              paymentMethod: paymentMethod.trim(), // Se guarda el método de pago recién al pagar
               ...addressSnapshotUpdates, // Si ya estaba congelado, esto queda vacío y respeta el histórico
             },
           });
@@ -602,7 +607,7 @@ export class OrdersService {
                 orderId: orderId,
                 stateId: BigInt(targetStateId),
                 addressId: addressIdToUse,
-                notes: `Orden pagada con Factura ${selectedInvoiceType}. Neto: $${fiscalData.net_amount}, IVA 21%: $${fiscalData.vat_amount}.`,
+                notes: `Orden pagada con Factura ${selectedInvoiceType}. Método: ${paymentMethod.trim()}. Neto: $${fiscalData.net_amount}, IVA 21%: $${fiscalData.vat_amount}.`,
               },
             });
           }
