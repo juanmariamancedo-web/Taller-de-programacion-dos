@@ -194,10 +194,10 @@ export class InvoiceService {
       ${
         isCancelledOrRejected
           ? `
-        <div class="totals-row"><span>Neto Anulado:</span> <span>-${money(netAmount)}</span></div>
-        <div class="totals-row"><span>IVA (21%):</span> <span>-${money(vatAmount)}</span></div>
+        <div class="totals-row"><span>Neto Anulado:</span> <span>${money(-netAmount)}</span></div>
+        <div class="totals-row"><span>IVA (21%):</span> <span>${money(-vatAmount)}</span></div>
         <div class="transparency-notice">${isExempt ? 'Sujeto Exento - IVA no alcanzado' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
-        <div class="totals-row final"><span>Total Reintegrado:</span> <span>-${money(finalTotal)}</span></div>
+        <div class="totals-row final"><span>Total Reintegrado:</span> <span>${money(-finalTotal)}</span></div>
       `
           : `
         <div class="totals-row"><span>Neto Gravado:</span> <span>${money(netAmount)}</span></div>

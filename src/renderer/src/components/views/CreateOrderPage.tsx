@@ -418,6 +418,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             <div className="rounded-xl bg-gray-50 dark:bg-zinc-800/50 p-4 border border-gray-200 dark:border-white/10">
               <label className={labelClass}>Tipo de Factura (Bloqueado)</label>
               <select
+                disabled
                 value={formData.invoiceType}
                 onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' | 'EXENTO' }))}
                 className={`${inputClass} bg-white dark:bg-zinc-900`}
