@@ -731,7 +731,11 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             </table>
           </div>
 
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex flex-col items-end gap-1">
+            <div className="text-xs text-slate-500 dark:text-slate-400 flex gap-4">
+              <span>Neto: ${(total / 1.21).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span>IVA (21%): ${(total - (total / 1.21)).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
             <div className="flex items-center gap-4 text-base font-bold text-gray-900 dark:text-white">
               <span>Total:</span>
               <span className="text-xl text-blue-600 dark:text-blue-400">

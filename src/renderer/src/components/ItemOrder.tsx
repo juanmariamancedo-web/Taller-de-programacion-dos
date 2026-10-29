@@ -12,7 +12,6 @@ interface ItemOrderProps {
   onRemoveItem: (id: string) => void
 }
 
-// Solución: Usamos intersección o aseguramos que stock sea compatible
 type ProductWithStock = ProductListItem & { stock: number }
 
 export function ItemOrder({
@@ -95,7 +94,6 @@ export function ItemOrder({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // FILTRO ESTRICTO: Excluye productos ya seleccionados y oculta automáticamente los que tengan stock 0 o menor
   const availableProducts = products.filter((product) => {
     const stock = Number(product.stock ?? 0)
     const isOutOfStock = stock <= 0
@@ -104,7 +102,6 @@ export function ItemOrder({
     return !isOutOfStock && !isAlreadySelected
   })
 
-  // Obtener el stock actual del producto seleccionado en este ítem (si lo hubiera)
   const currentProductStock = products.find((p) => Number(p.id) === item.productId)?.stock
 
   const handleSelectProduct = (product: ProductWithStock) => {
@@ -134,7 +131,14 @@ export function ItemOrder({
     onUpdateItem(item.id, { quantity: qty })
   }
 
-  const subtotal = item.quantity * item.unitPrice
+  // Cálculos fiscales por ítem (asumiendo precios con IVA incluido)
+  const unitPriceWithVat = item.unitPrice
+  const unitNetPrice = unitPriceWithVat / 1.21
+  const unitVatAmount = unitPriceWithVat - unitNetPrice
+
+  const totalSubtotal = item.quantity * unitPriceWithVat
+  const netSubtotal = item.quantity * unitNetPrice
+  const vatSubtotal = totalSubtotal - netSubtotal
 
   const inputStyle =
     'w-full rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:text-white'
@@ -187,7 +191,7 @@ export function ItemOrder({
                         <span className="text-[11px] text-slate-400">Stock: {String(product.stock ?? 0)} un.</span>
                       </div>
                       <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                        ${Number(product.price).toLocaleString('es-AR')}
+                        ${Number(product.price).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                       </span>
                     </button>
                   </li>
@@ -204,7 +208,7 @@ export function ItemOrder({
       </td>
 
       {/* Cantidad */}
-      <td className="w-28 px-4 py-3">
+      <td className="w-24 px-4 py-3">
         <div className="relative">
           <input
             type="number"
@@ -219,19 +223,24 @@ export function ItemOrder({
         </div>
       </td>
 
-      {/* Precio Unitario */}
-      <td className="w-36 px-4 py-3">
-        <input
-          type="text"
-          value={`$${item.unitPrice.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`}
-          className={`${inputStyle} text-right cursor-not-allowed opacity-60`}
-          disabled
-        />
+      {/* Precio Unitario (Con desglose neto / IVA) */}
+      <td className="w-44 px-4 py-3 text-right">
+        <div className="font-medium text-slate-900 dark:text-white">
+          ${unitPriceWithVat.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+        </div>
+        <div className="text-[11px] text-slate-400">
+          Neto: ${unitNetPrice.toLocaleString('es-AR', { minimumFractionDigits: 2 })} | IVA: ${unitVatAmount.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+        </div>
       </td>
 
       {/* Subtotal */}
-      <td className="w-32 px-4 py-3 text-right font-semibold text-slate-900 dark:text-white">
-        ${subtotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+      <td className="w-40 px-4 py-3 text-right">
+        <div className="font-semibold text-slate-900 dark:text-white">
+          ${totalSubtotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+        </div>
+        <div className="text-[11px] text-slate-400">
+          IVA inc. (${vatSubtotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })})
+        </div>
       </td>
 
       {/* Eliminar Ítem */}
