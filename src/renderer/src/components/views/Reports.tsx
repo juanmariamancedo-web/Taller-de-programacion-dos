@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import type {
   ClientReportData,
   OrdersReportData,
-  ProductReportData
+  ProductReportData,
+  TimelinePoint
 } from '../../../../main/domain/types/electron-env'
 
 type ReportTableRow = string[]
@@ -114,40 +115,27 @@ function buildPrintableReport(
     </html>`
 }
 
-function ReportChart({ items }: { items: ChartItem[] }): React.JSX.Element {
+function ReportChart({ items, kind }: { items: ChartItem[]; kind: ReportKind }): React.JSX.Element {
+  if (!items.length) return <p className="py-6 text-center text-sm text-gray-500">No hay datos para graficar.</p>
   const maxValue = Math.max(...items.map((item) => item.value), 0)
-  const chartHeight = Math.max(items.length * 38 + 16, 64)
 
-  if (!items.length) {
-    return <p className="py-6 text-center text-sm text-gray-500">No hay datos para graficar.</p>
+  if (kind === 'clients') {
+    const total = items.reduce((sum, item) => sum + item.value, 0)
+    let offset = 0
+    const colors = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
+    return <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center"><svg role="img" aria-label="Gráfico de torta" viewBox="0 0 200 200" className="h-56 w-56"><circle cx="100" cy="100" r="70" fill="none" stroke="#e5e7eb" strokeWidth="36" />{items.map((item, index) => { const portion = total ? item.value / total : 0; const dash = portion * 439.82; const gap = 439.82 - dash; const element = <circle key={item.label} cx="100" cy="100" r="70" fill="none" stroke={colors[index % colors.length]} strokeWidth="36" strokeDasharray={`${dash} ${gap}`} strokeDashoffset={-offset} transform="rotate(-90 100 100)" />; offset += dash; return element })}</svg><div className="text-sm">{items.map((item, index) => <div key={item.label} className="mb-2 flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ background: ['#2563eb','#10b981','#f59e0b','#ef4444','#8b5cf6'][index % 5] }} /><span>{item.label}: <strong>{numberFormat.format(item.value)}</strong></span></div>)}</div></div>
   }
 
-  return (
-    <div className="overflow-x-auto">
-      <svg
-        role="img"
-        aria-label="Gráfico de barras del reporte"
-        viewBox={`0 0 760 ${chartHeight}`}
-        className="min-w-[640px] w-full"
-      >
-        {items.map((item, index) => {
-          const y = index * 38 + 8
-          const width = maxValue > 0 ? Math.max((item.value / maxValue) * 410, 2) : 2
-          return (
-            <g key={`${item.label}-${index}`}>
-              <text x="0" y={y + 16} className="fill-gray-700 dark:fill-gray-200" fontSize="12">
-                {item.label.length > 24 ? `${item.label.slice(0, 22)}…` : item.label}
-              </text>
-              <rect x="215" y={y} width={width} height="23" rx="5" className="fill-blue-600" />
-              <text x="645" y={y + 16} className="fill-gray-700 dark:fill-gray-200" fontSize="12">
-                {numberFormat.format(item.value)}
-              </text>
-            </g>
-          )
-        })}
-      </svg>
-    </div>
-  )
+  if (kind === 'products') {
+    const width = 760; const height = 220; const left = 18; const bottom = 190
+    const points = items.map((item, index) => ({ x: left + (index * (width - left * 2)) / Math.max(items.length - 1, 1), y: bottom - (maxValue ? item.value / maxValue : 0) * 150 }))
+    const line = points.map((point) => `${point.x},${point.y}`).join(' ') 
+    const area = points.length ? `${left},${bottom} ${line} ${width - left},${bottom}` : ''
+    return <div className="overflow-x-auto"><svg role="img" aria-label="Gráfico de área de productos" viewBox={`0 0 ${width} ${height}`} className="min-w-[640px] w-full"><polygon points={area} fill="#2563eb" opacity="0.18" /><polyline points={line} fill="none" stroke="#2563eb" strokeWidth="3" />{points.map((point, index) => <g key={items[index].label}><circle cx={point.x} cy={point.y} r="5" fill="#2563eb" /><text x={point.x} y="210" textAnchor="middle" className="fill-gray-700 dark:fill-gray-200" fontSize="10">{items[index].label.slice(0, 12)}</text></g>)}</svg></div>
+  }
+
+  const chartHeight = Math.max(items.length * 38 + 16, 64)
+  return <div className="overflow-x-auto"><svg role="img" aria-label="Gráfico de barras" viewBox={`0 0 760 ${chartHeight}`} className="min-w-[640px] w-full">{items.map((item, index) => { const y = index * 38 + 8; const width = maxValue > 0 ? Math.max((item.value / maxValue) * 410, 2) : 2; return <g key={`${item.label}-${index}`}><text x="0" y={y + 16} className="fill-gray-700 dark:fill-gray-200" fontSize="12">{item.label.length > 24 ? `${item.label.slice(0, 22)}…` : item.label}</text><rect x="215" y={y} width={width} height="23" rx="5" className="fill-blue-600" /><text x="645" y={y + 16} className="fill-gray-700 dark:fill-gray-200" fontSize="12">{numberFormat.format(item.value)}</text></g> })}</svg></div>
 }
 
 function ReportView({
@@ -164,7 +152,10 @@ function ReportView({
   loading,
   error,
   onBack,
-  dateFilters
+  dateFilters,
+  timeline,
+  granularity,
+  onGranularityChange
 }: {
   kind: ReportKind
   title: string
@@ -186,6 +177,9 @@ function ReportView({
     onToChange: (value: string) => void
     onSearch: () => void
   }
+  timeline?: TimelinePoint[]
+  granularity?: 'week' | 'month'
+  onGranularityChange?: (value: 'week' | 'month') => void
 }): React.JSX.Element {
   const [generatingPdf, setGeneratingPdf] = useState(false)
   const [pdfError, setPdfError] = useState<string | null>(null)
@@ -277,6 +271,16 @@ function ReportView({
         </form>
       )}
 
+      {timeline && (
+        <section className="rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-white/10 dark:bg-white/5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Evolución de órdenes</h2>
+            {onGranularityChange && <select value={granularity} onChange={(event) => onGranularityChange(event.target.value as 'week' | 'month')} className="rounded-lg border px-3 py-2 dark:bg-gray-900"><option value="week">Semana</option><option value="month">Mes</option></select>}
+          </div>
+          {timeline.length ? (() => { const max = Math.max(...timeline.map((item) => item.count), 1); const points = timeline.map((item, index) => `${30 + index * (700 / Math.max(timeline.length - 1, 1))},${190 - (item.count / max) * 150}`).join(' '); return <svg role="img" aria-label="Línea de tiempo de órdenes" viewBox="0 0 760 220" className="w-full"><polyline points={points} fill="none" stroke="#2563eb" strokeWidth="3" />{timeline.map((item, index) => { const x = 30 + index * (700 / Math.max(timeline.length - 1, 1)); const y = 190 - (item.count / max) * 150; return <g key={item.label}><circle cx={x} cy={y} r="4" fill="#2563eb" /><text x={x} y="210" textAnchor="middle" className="fill-gray-700 dark:fill-gray-200" fontSize="9">{item.label}</text></g> })}</svg> })() : <p className="py-6 text-center text-sm text-gray-500">No hay órdenes en el período.</p>}
+        </section>
+      )}
+
       {error && (
         <p
           role="alert"
@@ -300,9 +304,9 @@ function ReportView({
 
       <section className="rounded-xl border border-gray-200 bg-white/70 p-4 shadow-sm dark:border-white/10 dark:bg-white/5">
         <h2 className="mb-4 text-lg font-semibold text-gray-900 dark:text-white">
-          Gráfico de barras
+          {kind === 'orders' ? 'Volumen por producto' : kind === 'clients' ? 'Distribución de clientes' : 'Top productos por ventas'}
         </h2>
-        <ReportChart items={chart} />
+        <ReportChart items={chart} kind={kind} />
       </section>
 
       <section className="overflow-hidden rounded-xl border border-gray-200 dark:border-white/10">
@@ -615,7 +619,8 @@ export function OrdersReport({ onBack }: { onBack: () => void }): React.JSX.Elem
   const [error, setError] = useState<string | null>(null)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
-  const [appliedFilters, setAppliedFilters] = useState({ from: '', to: '' })
+  const [granularity, setGranularity] = useState<'week' | 'month'>('month')
+  const [appliedFilters, setAppliedFilters] = useState<{ from: string; to: string; granularity: 'week' | 'month' }>({ from: '', to: '', granularity: 'month' })
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -654,7 +659,7 @@ export function OrdersReport({ onBack }: { onBack: () => void }): React.JSX.Elem
       setError('La fecha "Desde" no puede ser posterior a "Hasta".')
       return
     }
-    setAppliedFilters({ from, to })
+    setAppliedFilters({ from, to, granularity })
   }
   const period =
     appliedFilters.from && appliedFilters.to
@@ -695,6 +700,9 @@ export function OrdersReport({ onBack }: { onBack: () => void }): React.JSX.Elem
       kind="orders"
       title="Reporte de Órdenes"
       description="Productos vendidos en órdenes pagadas, despachadas o entregadas dentro del rango de fechas seleccionado."
+      timeline={data?.timeline}
+      granularity={granularity}
+      onGranularityChange={(value) => { setGranularity(value); setAppliedFilters({ from, to, granularity: value }) }}
       period={period}
       metrics={metrics}
       columns={['Producto', 'Órdenes', 'Unidades vendidas', 'Ventas totales']}

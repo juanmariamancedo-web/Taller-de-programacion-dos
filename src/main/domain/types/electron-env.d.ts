@@ -195,6 +195,25 @@ export interface ClientReportData {
 export interface OrdersReportFilters {
   from?: string
   to?: string
+  granularity?: 'week' | 'month'
+}
+
+export interface TimelinePoint {
+  label: string
+  count: number
+}
+
+export interface SellerSalesData {
+  totalSoldMonth: number
+  ordersCount: number
+  averageSale: number
+  orders: Array<{
+    id: string
+    createdAt: string | null
+    clientName: string
+    state: string
+    total: number
+  }>
 }
 
 export interface ReportDateFilters {
@@ -215,6 +234,7 @@ export interface OrdersReportData {
   totalUnits: number
   totalSales: number
   totalOrders: number
+  timeline: TimelinePoint[]
   details: Array<{
     orderId: string
     orderDate: string | null
@@ -471,6 +491,11 @@ export interface IElectronAPI {
   getClientsReport: (filters: ReportDateFilters) => Promise<ReportResponse<ClientReportData>>
   getOrdersReport: (filters: OrdersReportFilters) => Promise<ReportResponse<OrdersReportData>>
   exportReportPdf: (input: ReportPdfInput) => Promise<ReportPdfResponse>
+  getSellerSales: () => Promise<{ success: boolean; data?: SellerSalesData; message?: string }>
+  generateDatabaseBackup: () => Promise<{ success: boolean; path?: string; fileName?: string; message?: string }>
+  downloadDatabaseBackup: (sourcePath: string) => Promise<{ success: boolean; message?: string }>
+  restoreDatabaseBackup: (sourcePath: string) => Promise<{ success: boolean; message?: string }>
+  chooseBackupFile: () => Promise<{ success: boolean; path?: string; message?: string }>
   onReportsUpdated: (callback: () => void) => Unsubscribe
 
   // Usuarios

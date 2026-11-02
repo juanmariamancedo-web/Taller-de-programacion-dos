@@ -51,6 +51,11 @@ const api = {
     ipcRenderer.invoke('reports:orders', filters),
   exportReportPdf: (input: ReportPdfInput): Promise<ReportPdfResponse> =>
     ipcRenderer.invoke('reports:export-pdf', input),
+  getSellerSales: () => ipcRenderer.invoke('sales:my-sales'),
+  generateDatabaseBackup: () => ipcRenderer.invoke('backup:generate'),
+  downloadDatabaseBackup: (sourcePath: string) => ipcRenderer.invoke('backup:download', sourcePath),
+  chooseBackupFile: () => ipcRenderer.invoke('backup:choose-file'),
+  restoreDatabaseBackup: (sourcePath: string) => ipcRenderer.invoke('backup:restore', sourcePath),
   onReportsUpdated: (callback: () => void): Unsubscribe => {
     const subscription = (): void => callback()
     ipcRenderer.on('reports:updated', subscription)

@@ -18,6 +18,7 @@ export function registerDashboardIPC(): void {
             console.error('Failed to fetch orders:', error);
             return {
                 success: false,
+                message: error instanceof Error ? error.message : 'Error al obtener los datos del inicio.',
                 error: error instanceof Error ? error.message : 'Unknown error occurred'
             };
         }

@@ -38,6 +38,14 @@ function getCreatedAtFilter(filters: ReportDateFilters): { gte?: Date; lt?: Date
   return Object.keys(createdAt).length ? createdAt : undefined
 }
 
+function getTimelineLabel(date: Date, granularity: 'week' | 'month'): string {
+  if (granularity === 'month') return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
+  const monday = new Date(date)
+  const day = monday.getUTCDay()
+  monday.setUTCDate(monday.getUTCDate() - (day === 0 ? 6 : day - 1))
+  return monday.toISOString().slice(0, 10)
+}
+
 export class ReportsService {
   private async getSellerFilter(): Promise<{ sellerId?: bigint }> {
     const session = await authService.getActiveSession()
@@ -285,12 +293,93 @@ export class ReportsService {
         b.salesTotal - a.salesTotal ||
         a.productName.localeCompare(b.productName)
     )
+    const granularity = filters.granularity ?? 'month'
+    const timelineOrders = await prisma.order.findMany({
+      where: { ...sellerFilter, ...(createdAt ? { createdAt } : {}) },
+      select: { createdAt: true }
+    })
+    const timelineMap = new Map<string, number>()
+    for (const order of timelineOrders) {
+      if (!order.createdAt) continue
+      const label = getTimelineLabel(order.createdAt, granularity)
+      timelineMap.set(label, (timelineMap.get(label) ?? 0) + 1)
+    }
+
+    if (timelineOrders.length) {
+      const datedOrders = timelineOrders.flatMap((order) => order.createdAt ? [order.createdAt] : [])
+      const minDate = filters.from
+        ? parseReportDate(filters.from, 'Desde')!
+        : new Date(Math.min(...datedOrders.map((date) => date.getTime())))
+      const maxDate = filters.to
+        ? parseReportDate(filters.to, 'Hasta')!
+        : new Date(Math.max(...datedOrders.map((date) => date.getTime())))
+
+      if (granularity === 'month') {
+        const cursor = new Date(Date.UTC(minDate.getUTCFullYear(), minDate.getUTCMonth(), 1))
+        const end = new Date(Date.UTC(maxDate.getUTCFullYear(), maxDate.getUTCMonth(), 1))
+        while (cursor <= end) {
+          const label = getTimelineLabel(cursor, 'month')
+          if (!timelineMap.has(label)) timelineMap.set(label, 0)
+          cursor.setUTCMonth(cursor.getUTCMonth() + 1)
+        }
+      } else {
+        const cursor = new Date(minDate)
+        const day = cursor.getUTCDay()
+        cursor.setUTCDate(cursor.getUTCDate() - (day === 0 ? 6 : day - 1))
+        const end = new Date(maxDate)
+        const endDay = end.getUTCDay()
+        end.setUTCDate(end.getUTCDate() - (endDay === 0 ? 6 : endDay - 1))
+        while (cursor <= end) {
+          const label = getTimelineLabel(cursor, 'week')
+          if (!timelineMap.has(label)) timelineMap.set(label, 0)
+          cursor.setUTCDate(cursor.getUTCDate() + 7)
+        }
+      }
+    }
+
+    const timeline = [...timelineMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([label, count]) => ({ label, count }))
+
     return {
       rows,
       totalUnits,
       totalSales,
       totalOrders: orderIds.size,
+      timeline,
       details
+    }
+  }
+
+  async getSellerSales(): Promise<import('../domain/types/electron-env').SellerSalesData> {
+    const session = await authService.getActiveSession()
+    if (!session || (![3].includes(session.roleId) && !['seller', 'vendedor'].includes(session.roleName.toLowerCase()))) {
+      throw new Error('Solo los vendedores pueden consultar sus ventas.')
+    }
+
+    const sellerId = BigInt(session.id)
+    const now = new Date()
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+    const orders = await prisma.order.findMany({
+      where: { sellerId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true, createdAt: true, total: true,
+        client: { select: { name: true, lastname: true } },
+        currentState: { select: { name: true } }
+      }
+    })
+    const monthOrders = orders.filter((order) => order.createdAt && order.createdAt >= monthStart)
+    const totalSoldMonth = monthOrders.reduce((sum, order) => sum + Number(order.total), 0)
+    return {
+      totalSoldMonth,
+      ordersCount: orders.length,
+      averageSale: orders.length ? orders.reduce((sum, order) => sum + Number(order.total), 0) / orders.length : 0,
+      orders: orders.map((order) => ({
+        id: order.id.toString(),
+        createdAt: order.createdAt?.toISOString() ?? null,
+        clientName: `${order.client.name} ${order.client.lastname}`,
+        state: order.currentState.name,
+        total: Number(order.total)
+      }))
     }
   }
 }
