@@ -156,8 +156,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const isTargetStatePaid = formData.currentStateId === OrderState.Paid
   const isInitialStatePaid = !isEditing && initialStateId === OrderState.Paid
 
-  const isInvoiceLocked = (isEditing && orderStateId >= OrderState.Paid) || Boolean((initialOrder as any)?.invoiceType)
-
   const { clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients } =
     useSeletedUserOnOrder()
 

@@ -45,7 +45,15 @@ export function registerReportsIPC(): void {
     }
   })
 
-  ipcMain.handle('reports:export-pdf', async (event, input: ReportPdfInput) => {
+  ipcMain.handle('sales:my-sales', async () => {
+    try {
+      return { success: true, data: await reportsService.getSellerSales() }
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : 'No se pudieron cargar tus ventas.' }
+    }
+  })
+
+  ipcMain.handle('reports:export-pdf', async (_event, input: ReportPdfInput) => {
     let pdfWindow: BrowserWindow | undefined
     let pdfServer: Server | undefined
     let serverTimeout: NodeJS.Timeout | undefined

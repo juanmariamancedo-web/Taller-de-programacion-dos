@@ -45,7 +45,7 @@ export default function HomePanel() {
                     setLastOrders(response.data.lastOrders)
                     setTopProducts(response.data.topProducts)
                 } else {
-                    setError(response?.message || "Error al obtener datos")
+                    setError(response?.message || ('error' in (response ?? {}) ? String((response as any).error) : "Error al obtener datos"))
                 }
             } catch (err) {
                 setError('Error de comunicación con Electron')

@@ -15,6 +15,8 @@ import Profile from './components/views/Profile'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ClientsReport, OrdersReport, ProductsReport } from './components/views/Reports'
 import GlobalAlert from './components/GlobalAlert'
+import MySales from './components/views/MySales'
+import DatabaseBackup from './components/views/DatabaseBackup'
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
@@ -37,6 +39,10 @@ function App(): React.JSX.Element {
 
   if(roleId == 1 || roleName === 'admin'){
     navItems.push({ id: 'users', label: 'Usuarios'})
+    navItems.push({ id: 'backup', label: 'Backup'})
+  }
+  if(roleId == 3 || ['seller', 'vendedor'].includes(roleName || '')){
+    navItems.push({ id: 'my-sales', label: 'Mis Ventas'})
   }
 
   const renderPanel = () => {
@@ -52,6 +58,12 @@ function App(): React.JSX.Element {
 
     switch(currentTab){
       case "dashboard":
+        return <HomePanel />
+      case "my-sales":
+        if(roleId == 3 || ['seller', 'vendedor'].includes(roleName || '')) return <MySales />
+        return <HomePanel />
+      case "backup":
+        if(roleId == 1 || roleName === 'admin') return <DatabaseBackup />
         return <HomePanel />
       case "products":
         return <ProductsPanel />

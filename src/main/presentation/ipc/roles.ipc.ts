@@ -1,9 +1,8 @@
 import { ipcMain } from 'electron';
-import { SearchParams } from '../../domain/types/electron-env';
 import { rolesService } from '../../services/roles.servicies';
 
 export function registerRoleIPC(): void {
-    ipcMain.handle('roles:getRoles', async (_event, searchParams: SearchParams) => {
+    ipcMain.handle('roles:getRoles', async (_event) => {
         try {
             const rawData = await rolesService.getOrders()
             
