@@ -61,6 +61,20 @@ function runWithInput(command: string, args: string[], env: NodeJS.ProcessEnv, i
   })
 }
 
+function prepareRestoreInput(sourcePath: string): Buffer {
+  const resetDatabase = [
+    'DROP SCHEMA IF EXISTS public CASCADE;',
+    'CREATE SCHEMA public;',
+    'GRANT ALL ON SCHEMA public TO PUBLIC;',
+    ''
+  ].join('\n')
+
+  return Buffer.concat([
+    Buffer.from(resetDatabase, 'utf8'),
+    fs.readFileSync(sourcePath)
+  ])
+}
+
 export class BackupService {
   private databaseEnv(): NodeJS.ProcessEnv {
     const connectionString = process.env.DATABASE_URL
@@ -166,19 +180,22 @@ export class BackupService {
     await this.assertAdmin()
     if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error('El archivo de respaldo no existe.')
 
+    const restoreInput = prepareRestoreInput(sourcePath)
+
     try {
-      await run('psql', ['--set', 'ON_ERROR_STOP=1', '--file', sourcePath], this.databaseEnv())
-    } catch {
+      await runWithInput('psql', ['--set', 'ON_ERROR_STOP=1'], this.databaseEnv(), restoreInput)
+    } catch (hostError) {
       const { container, user, database } = getDatabaseConfig()
       try {
-        await runWithInput('docker', ['exec', '-i', container, 'psql', '--set', 'ON_ERROR_STOP=1', '--username', user, '--dbname', database], process.env, fs.readFileSync(sourcePath))
+        await runWithInput('docker', ['exec', '-i', container, 'psql', '--set', 'ON_ERROR_STOP=1', '--username', user, '--dbname', database], process.env, restoreInput)
       } catch (nativeDockerError) {
         try {
-          await runWithInput('wsl.exe', ['--exec', 'docker', 'exec', '-i', container, 'psql', '--set', 'ON_ERROR_STOP=1', '--username', user, '--dbname', database], process.env, fs.readFileSync(sourcePath))
+          await runWithInput('wsl.exe', ['--exec', 'docker', 'exec', '-i', container, 'psql', '--set', 'ON_ERROR_STOP=1', '--username', user, '--dbname', database], process.env, restoreInput)
         } catch (dockerError) {
           const detail = dockerError instanceof Error ? dockerError.message : String(dockerError)
           const nativeDetail = nativeDockerError instanceof Error ? nativeDockerError.message : String(nativeDockerError)
-          throw new Error(`No fue posible restaurar el backup. Docker/WSL: ${detail}. Docker Windows: ${nativeDetail}.`)
+          const hostDetail = hostError instanceof Error ? hostError.message : String(hostError)
+          throw new Error(`No fue posible restaurar el backup. Cliente local: ${hostDetail}. Docker Windows: ${nativeDetail}. Docker/WSL: ${detail}.`)
         }
       }
     }
