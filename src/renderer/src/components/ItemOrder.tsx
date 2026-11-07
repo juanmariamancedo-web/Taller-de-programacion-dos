@@ -12,15 +12,23 @@ interface ItemOrderProps {
   isExistingOrder?: boolean
   /** El servidor rechazó este ítem por stock insuficiente. */
   stockError?: boolean
+  /** Estado logístico actual de la orden (1 = Created / Borrador) */
+  currentStateId?: number
   onUpdateItem: (id: string, updatedFields: Partial<FormOrderItem>) => void
   onRemoveItem: (id: string) => void
 }
 
-type ProductWithStock = ProductListItem & { stock: number }
+type ProductWithStock = ProductListItem & { stock: number; reservedStock?: number; availableStock?: number }
 
-/** Unidades realmente disponibles: stock físico menos lo reservado por ediciones en curso. */
-const getAvailableStock = (product: ProductWithStock): number =>
-  Number(product.availableStock ?? Number(product.stock ?? 0) - Number(product.reservedStock ?? 0))
+/** Unidades disponibles generales del producto (Físico - Reservado global) */
+const getAvailableStock = (product: ProductWithStock): number => {
+  if (product.availableStock !== undefined) {
+    return Number(product.availableStock)
+  }
+  const physical = Number(product.stock ?? 0)
+  const reserved = Number(product.reservedStock ?? 0)
+  return Math.max(0, physical - reserved)
+}
 
 export function ItemOrder({
   item,
@@ -29,6 +37,7 @@ export function ItemOrder({
   selectedProductIds,
   isExistingOrder = false,
   stockError = false,
+  currentStateId = 1,
   onUpdateItem,
   onRemoveItem,
 }: ItemOrderProps) {
@@ -47,6 +56,69 @@ export function ItemOrder({
   useEffect(() => {
     setSearchTerm(item.description || '')
   }, [item.description])
+
+  // Cargar la info del producto actual al montar si ya tiene un productId asignado
+  useEffect(() => {
+    async function fetchCurrentProduct() {
+      if (!item.productId) return
+      try {
+        const api = window.electronAPI as any
+        if (api?.getProducts) {
+          const res = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
+          const found = (res.data || []).find((p: any) => Number(p.id) === Number(item.productId))
+          if (found) {
+            setProducts((prev) => {
+              if (prev.some((p) => Number(p.id) === Number(found.id))) return prev
+              return [...prev, found as ProductWithStock]
+            })
+          }
+        }
+      } catch (err) {
+        console.error('Error al cargar producto inicial del ítem:', err)
+      }
+    }
+    fetchCurrentProduct()
+  }, [item.productId, item.description])
+
+  // Suscripción en tiempo real a los cambios de stock globales de Electron
+  useEffect(() => {
+    const api = window.electronAPI as any
+    if (!api?.onStockUpdated) return
+
+    const unsubscribe = api.onStockUpdated(async () => {
+      try {
+        if (api?.getProducts) {
+          const res = await api.getProducts({ search: searchTerm, page: 1, sort: 'nameDesc' })
+          const fetchedProducts = (res.data || []) as ProductWithStock[]
+
+          let selectedProductUpdate: ProductWithStock | null = null
+          if (item.productId) {
+            const specificRes = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
+            selectedProductUpdate = ((specificRes.data || []) as ProductWithStock[]).find(
+              (p) => Number(p.id) === Number(item.productId)
+            ) || null
+          }
+
+          setProducts((prev: ProductWithStock[]) => {
+            const updatedMap = new Map<number, ProductWithStock>(prev.map((p) => [Number(p.id), p]))
+            fetchedProducts.forEach((p) => updatedMap.set(Number(p.id), p))
+            
+            if (selectedProductUpdate) {
+              updatedMap.set(Number(selectedProductUpdate.id), selectedProductUpdate)
+            }
+
+            return Array.from(updatedMap.values())
+          })
+        }
+      } catch (err) {
+        console.error('Error al actualizar stock en tiempo real:', err)
+      }
+    })
+
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
+  }, [searchTerm, item.productId, item.description])
 
   const updateDropdownPosition = (): void => {
     const input = inputRef.current
@@ -68,8 +140,9 @@ export function ItemOrder({
     const timer = setTimeout(async () => {
       setIsLoading(true)
       try {
-        if (window.electronAPI?.getProducts) {
-          const res = await window.electronAPI?.getProducts({ search: searchTerm, page: 1, sort: 'nameDesc' })
+        const api = window.electronAPI as any
+        if (api?.getProducts) {
+          const res = await api.getProducts({ search: searchTerm, page: 1, sort: 'nameDesc' })
           setProducts((res.data || []) as ProductWithStock[])
         }
       } catch (error) {
@@ -104,20 +177,26 @@ export function ItemOrder({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  // Filtrado seguro para el Dropdown evitando ocultar el producto actual en edición
   const availableProducts = products.filter((product) => {
-    const isOutOfStock = getAvailableStock(product) <= 0
-    const isAlreadySelected = Number(product.id) !== item.productId && selectedProductIds.includes(Number(product.id))
+    const isCurrentItemProduct = Number(product.id) === item.productId
+    const isOutOfStock = getAvailableStock(product) <= 0 && !isCurrentItemProduct
+    const isAlreadySelected = !isCurrentItemProduct && selectedProductIds.includes(Number(product.id))
 
     return !isOutOfStock && !isAlreadySelected
   })
 
   const currentProduct = products.find((p) => Number(p.id) === item.productId)
-  const currentProductAvailable = currentProduct ? getAvailableStock(currentProduct) : undefined
+  
+  // Stock base disponible informado por el backend
+  const baseAvailable = currentProduct ? getAvailableStock(currentProduct) : 0
 
-  // En una orden nueva no hay unidades propias descontadas ni reservadas, así que el disponible
-  // es el tope exacto. En una orden existente el tope depende de lo que la orden ya tiene
-  // descontado y reservado: lo decide el servidor al reservar, por eso acá no se limita.
-  const maxQuantity = !isExistingOrder ? currentProductAvailable : undefined
+  // El límite máximo para el input es lo que queda libre + lo que ya tiene asignado este ítem en la orden actual
+  const currentProductAvailable = currentProduct 
+    ? baseAvailable + Number(item.quantity)
+    : undefined
+
+  const maxQuantity = currentProductAvailable !== undefined ? Math.max(1, currentProductAvailable) : undefined
 
   const handleSelectProduct = (product: ProductWithStock) => {
     if (disabled) return
@@ -160,6 +239,9 @@ export function ItemOrder({
 
   const errorStyle = stockError ? 'border-red-500 ring-2 ring-red-500/20 dark:border-red-500' : ''
 
+  // Determinamos si está en modo borrador (OrderState.Created = 1)
+  const isDraft = currentStateId === 1
+
   return (
     <tr className="border-b border-slate-200/80 transition hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.02]">
       {/* Producto */}
@@ -181,6 +263,24 @@ export function ItemOrder({
               setTimeout(() => setIsOpen(false), 200)
             }}
           />
+
+          {/* Indicador de stock en tiempo real */}
+          {isDraft && currentProduct && (
+            <div className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${
+                  baseAvailable > 0 || Number(item.quantity) > 0 ? 'bg-emerald-500' : 'bg-red-500'
+                }`}
+              />
+              <span>
+                Stock disponible:{' '}
+                <strong className="text-slate-700 dark:text-slate-200">{baseAvailable}</strong> un.
+              </span>
+              <span className="text-slate-400 font-normal">
+                (Físico: {currentProduct.stock}, Res.: {currentProduct.reservedStock ?? 0})
+              </span>
+            </div>
+          )}
 
           {stockError && (
             <p className="mt-1 text-[11px] font-medium text-red-500">
@@ -249,15 +349,13 @@ export function ItemOrder({
             title={
               maxQuantity !== undefined
                 ? `Stock máximo disponible: ${maxQuantity}`
-                : isExistingOrder
-                ? 'El stock disponible se valida al modificar la cantidad'
                 : undefined
             }
           />
         </div>
       </td>
 
-      {/* Precio Unitario (Con desglose neto / IVA) */}
+      {/* Precio Unitario */}
       <td className="w-44 px-4 py-3 text-right">
         <div className="font-medium text-slate-900 dark:text-white">
           ${unitPriceWithVat.toLocaleString('es-AR', { minimumFractionDigits: 2 })}

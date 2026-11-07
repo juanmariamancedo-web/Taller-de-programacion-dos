@@ -139,6 +139,13 @@ const api = {
       ipcRenderer.removeListener('theme-changed', subscription)
     }
   }, 
+  onStockUpdated: (callback: () => void): Unsubscribe => {
+    const subscription = (): void => callback()
+    ipcRenderer.on('products:stock-updated', subscription)
+    return () => {
+      ipcRenderer.removeListener('products:stock-updated', subscription)
+    }
+  },
 }
 
 if (process.contextIsolated) {

@@ -9,6 +9,13 @@ function notifyReportsUpdated(): void {
   }
 }
 
+// NUEVO: Notificador global para cambios de stock en tiempo real
+function notifyStockUpdated(): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('products:stock-updated');
+  }
+}
+
 export function registerOrderIPC(): void {
   // Obtener órdenes según rol
   ipcMain.handle('orders:getOrders', async (_event, searchParams: SearchParams) => {
@@ -47,7 +54,10 @@ export function registerOrderIPC(): void {
       } : undefined;
 
       const response = await ordersService.createOrder(payload, sessionContext);
-      if (response.success) notifyReportsUpdated();
+      if (response.success) {
+        notifyReportsUpdated();
+        notifyStockUpdated(); // <--- Notifica stock actualizado
+      }
       return response;
     } catch (error) {
       console.error('Failed to create order:', error);
@@ -69,7 +79,10 @@ export function registerOrderIPC(): void {
       } : undefined;
 
       const response = await ordersService.updateOrder(payload, sessionContext);
-      if (response.success) notifyReportsUpdated();
+      if (response.success) {
+        notifyReportsUpdated();
+        notifyStockUpdated(); // <--- Notifica stock actualizado
+      }
       return response;
     } catch (error) {
       console.error('Failed to update order:', error);
@@ -103,7 +116,10 @@ export function registerOrderIPC(): void {
         } : undefined;
 
         const response = await ordersService.updateOrderState(payload, sessionContext);
-        if (response.success) notifyReportsUpdated();
+        if (response.success) {
+          notifyReportsUpdated();
+          notifyStockUpdated(); // <--- Notifica stock actualizado
+        }
         return response;
       } catch (error) {
         console.error('Failed to update order state:', error);
@@ -115,8 +131,6 @@ export function registerOrderIPC(): void {
     }
   );
 
-  // Canal para mantener compatibilidad si el frontend hace peticiones de reserva por ID,
-  // redirigiéndolo al flujo unificado de actualización y bloqueo atómico de stock.
   ipcMain.handle(
     'orders:reserve-stock',
     async (
@@ -131,7 +145,9 @@ export function registerOrderIPC(): void {
           roleName: session.roleName,
         } : undefined;
 
-        return await ordersService.updateOrder(payload, sessionContext);
+        const res = await ordersService.updateOrder(payload, sessionContext);
+        if (res.success) notifyStockUpdated();
+        return res;
       } catch (error) {
         console.error('Failed to reserve order stock:', error);
         return {
@@ -142,7 +158,6 @@ export function registerOrderIPC(): void {
     }
   );
 
-  // Liberar el borrador / cancelar la orden creada temporalmente si el usuario sale sin guardar.
   ipcMain.handle('orders:release-reservation', async (_event, orderId: number | string) => {
     try {
       const session = await authService.getActiveSession();
@@ -152,11 +167,14 @@ export function registerOrderIPC(): void {
         roleName: session.roleName,
       } : undefined;
 
-      return await ordersService.updateOrderState({
+      const res = await ordersService.updateOrderState({
         id: orderId,
-        currentStateId: 5, // OrderState.Cancelled (o el número correspondiente al estado cancelado)
+        currentStateId: 5,
         notes: 'Cancelado automáticamente al cerrar el formulario',
       }, sessionContext);
+
+      if (res.success) notifyStockUpdated();
+      return res;
     } catch (error) {
       console.error('Failed to release order reservation:', error);
       return {

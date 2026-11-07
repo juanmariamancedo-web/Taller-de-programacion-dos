@@ -32,17 +32,33 @@ export class ProductsService {
   async updateProduct(input: UpdateProductInput): Promise<{ id: string }> {
     this.assertValidStock(input.stock)
 
-    // Guardia atómica: solo actualiza si el nuevo stock no queda por debajo de lo reservado.
-    // (reservedStock <= nuevo stock) se evalúa en el mismo UPDATE, sin carrera con las reservas.
     const productId = BigInt(input.id)
-    const result = await prisma.product.updateMany({
-      where: { id: productId, reservedStock: { lte: input.stock } },
-      data: this.toProductData(input)
-    })
 
-    if (result.count === 0) await this.throwStockBelowReserved(productId, input.stock)
+    // Calculamos dinámicamente las unidades reservadas por otros borradores activos (currentStateId = 1)
+    const activeReservations = await prisma.itemOrder.aggregate({
+      where: {
+        productId: productId,
+        order: {
+          currentStateId: BigInt(1), // OrderState.Created
+        },
+      },
+      _sum: { amount: true },
+    });
 
-    return { id: productId.toString() }
+    const reserved = Number(activeReservations._sum.amount ?? 0);
+
+    // Guardia atómica de stock: el nuevo stock físico no puede ser menor a lo que ya está reservado en borradores
+    if (input.stock < reserved) {
+      await this.throwStockBelowReserved(productId, input.stock, reserved);
+    }
+
+    const product = await prisma.product.update({
+      where: { id: productId },
+      data: this.toProductData(input),
+      select: { id: true }
+    });
+
+    return { id: product.id.toString() }
   }
 
   async setProductStatus(id: string, isActive: boolean): Promise<{ id: string }> {
@@ -59,14 +75,31 @@ export class ProductsService {
     this.assertValidStock(stock)
 
     const productId = BigInt(id)
-    const result = await prisma.product.updateMany({
-      where: { id: productId, reservedStock: { lte: stock } },
-      data: { stock }
-    })
 
-    if (result.count === 0) await this.throwStockBelowReserved(productId, stock)
+    // Calculamos dinámicamente las unidades reservadas por borradores activos
+    const activeReservations = await prisma.itemOrder.aggregate({
+      where: {
+        productId: productId,
+        order: {
+          currentStateId: BigInt(1), // OrderState.Created
+        },
+      },
+      _sum: { amount: true },
+    });
 
-    return { id: productId.toString() }
+    const reserved = Number(activeReservations._sum.amount ?? 0);
+
+    if (stock < reserved) {
+      await this.throwStockBelowReserved(productId, stock, reserved);
+    }
+
+    const product = await prisma.product.update({
+      where: { id: productId },
+      data: { stock },
+      select: { id: true }
+    });
+
+    return { id: product.id.toString() }
   }
 
   async getProducts(searchParams?: SearchParams): Promise<ProductsResponse> {
@@ -102,7 +135,7 @@ export class ProductsService {
           skip: (page - 1) * limit,
           take: limit,
           include: {
-            category: true, // Incluye la relación con la categoría si es necesaria en el frontend
+            category: true,
           },
           orderBy,
         }),
@@ -111,10 +144,21 @@ export class ProductsService {
 
       const totalPages = Math.ceil(totalCount / limit) || 1;
 
-      return {
-        success: true,
-        data: products.map((product) => {
-          const reservedStock = product.reservedStock ?? 0
+      // Calculamos el stock reservado y disponible de forma dinámica para cada producto listado
+      const productsWithDynamicStock = await Promise.all(
+        products.map(async (product) => {
+          const activeReservations = await prisma.itemOrder.aggregate({
+            where: {
+              productId: product.id,
+              order: {
+                currentStateId: BigInt(1), // OrderState.Created (Borrador activo)
+              },
+            },
+            _sum: { amount: true },
+          });
+
+          const reservedStock = Number(activeReservations._sum.amount ?? 0);
+          const availableStock = Math.max(0, product.stock - reservedStock);
 
           return {
             id: product.id.toString(),
@@ -122,13 +166,18 @@ export class ProductsService {
             price: Number(product.price),
             stock: product.stock,
             reservedStock,
-            availableStock: Math.max(0, product.stock - reservedStock),
+            availableStock,
             lowStock: product.lowStock,
             image: product.image,
             isActive: product.isActive,
             categoryId: product.categoryId.toString()
           }
-        }),
+        })
+      );
+
+      return {
+        success: true,
+        data: productsWithDynamicStock,
         totalPages,
         totalCount,
         currentPage: page,
@@ -152,18 +201,17 @@ export class ProductsService {
     }
   }
 
-  /** Se llama cuando el UPDATE condicional no afectó filas: o no existe, o el stock quedaba por debajo de lo reservado. */
-  private async throwStockBelowReserved(productId: bigint, requestedStock: number): Promise<never> {
+  private async throwStockBelowReserved(productId: bigint, requestedStock: number, knownReserved?: number): Promise<never> {
     const product = await prisma.product.findUnique({
       where: { id: productId },
-      select: { name: true, reservedStock: true }
+      select: { name: true }
     })
 
     if (!product) {
       throw new Error('El producto no existe.')
     }
 
-    const reserved = product.reservedStock ?? 0
+    const reserved = knownReserved ?? 0
     throw new Error(
       `No se puede dejar el stock de "${product.name}" en ${requestedStock}: hay ${reserved} unidades reservadas por órdenes en edición. Esperá a que terminen o ingresá un valor mayor o igual a ${reserved}.`
     )

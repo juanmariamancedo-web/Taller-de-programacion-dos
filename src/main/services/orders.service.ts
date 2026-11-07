@@ -29,7 +29,7 @@ export interface UserSessionContext {
 
 type Tx = Prisma.TransactionClient;
 
-/** Estados que cierran la orden liberando el stock reservado o físico. */
+/** Estados que cierran la orden liberando el stock. */
 const releasesStock = (stateId: number) =>
   stateId === OrderState.Rejected || stateId === OrderState.Cancelled;
 
@@ -58,12 +58,14 @@ export class OrdersService {
   }
 
   /** 
-   * Reserva stock validando disponibilidad real (stock físico - stock reservado).
-   * Incrementa reservedStock de forma atómica.
+   * Valida la disponibilidad real de stock de manera dinámica:
+   * Stock Físico menos la suma de cantidades en otros borradores activos (currentStateId === OrderState.Created).
+   * Permite excluir una orden en curso para que no se bloquee a sí misma al actualizarse.
    */
-  private async reserveStock(
+  private async validateStockAvailability(
     tx: Tx,
-    items: { productId: number | bigint | string; quantity: number | string }[]
+    items: { productId: number | bigint | string; quantity: number | string }[],
+    currentOrderId?: bigint
   ) {
     for (const item of items) {
       const productId = BigInt(item.productId);
@@ -73,43 +75,39 @@ export class OrdersService {
 
       const product = await tx.product.findUnique({
         where: { id: productId },
-        select: { id: true, name: true, stock: true, reservedStock: true },
+        select: { id: true, name: true, stock: true },
       });
 
       if (!product) {
         throw new Error(`El producto con ID ${item.productId} no existe.`);
       }
 
-      const availableStock = product.stock - (product.reservedStock ?? 0);
+      // Buscamos todos los ítems en otros borradores activos (excluyendo esta orden)
+      const otherDraftItems = await tx.itemOrder.findMany({
+        where: {
+          productId: productId,
+          ...(currentOrderId && { orderId: { not: currentOrderId } }),
+          order: {
+            currentStateId: BigInt(OrderState.Created),
+          },
+        },
+        select: { amount: true },
+      });
 
-      if (availableStock < requestedQuantity) {
+      // Sumamos estrictamente lo que ocupan los DEMÁS borradores
+      const reservedByOthers = otherDraftItems.reduce((acc, curr) => acc + Number(curr.amount), 0);
+      const availableReal = product.stock - reservedByOthers;
+
+      if (availableReal < requestedQuantity) {
         throw new Error(
-          `Stock insuficiente para el producto "${product.name}". Disponible real: ${availableStock} (Físico: ${product.stock}, Reservado: ${product.reservedStock ?? 0}), solicitado: ${requestedQuantity}.`
+          `Stock insuficiente para el producto "${product.name}". Disponible real: ${availableReal} (Físico: ${product.stock}, Ocupado por otros borradores: ${reservedByOthers}), solicitado: ${requestedQuantity}.`
         );
       }
-
-      await tx.product.update({
-        where: { id: productId },
-        data: { reservedStock: { increment: requestedQuantity } },
-      });
-    }
-  }
-
-  /** Devuelve al stock reservado cuando se modifican o quitan ítems de un borrador. */
-  private async releaseReservedStock(tx: Tx, items: { productId: bigint; amount: number | bigint }[]) {
-    for (const item of items) {
-      const amount = Number(item.amount);
-      if (amount <= 0) continue;
-
-      await tx.product.update({
-        where: { id: item.productId },
-        data: { reservedStock: { decrement: amount } },
-      });
     }
   }
 
   /** 
-   * Descuenta el stock físico definitivamente y libera la reserva 
+   * Descuenta el stock físico definitivamente 
    * (Se ejecuta cuando la orden pasa a pagada/efectivizada).
    */
   private async finalizeStockDeduction(tx: Tx, items: { productId: bigint; amount: number | bigint }[]) {
@@ -121,7 +119,6 @@ export class OrdersService {
         where: { id: item.productId },
         data: {
           stock: { decrement: qty },
-          reservedStock: { decrement: qty },
         },
       });
     }
@@ -305,7 +302,6 @@ export class OrdersService {
         };
       }
 
-      // clientId y shippingAddressId ahora pueden ser opcionales para permitir el auto-guardado del borrador
       const clientId = payload.clientId ? Number(payload.clientId) : null;
       const shippingAddressId = payload.shippingAddressId ? Number(payload.shippingAddressId) : null;
       
@@ -334,9 +330,9 @@ export class OrdersService {
       }
 
       const newOrder = await prisma.$transaction(async (tx) => {
-        // Reservamos stock solo si hay ítems especificados
+        // Validamos disponibilidad real antes de crear
         if (items && items.length > 0) {
-          await this.reserveStock(tx, items);
+          await this.validateStockAvailability(tx, items);
         }
 
         let addressSnapshot = {
@@ -377,7 +373,6 @@ export class OrdersService {
           },
         });
 
-        // Si se creó directamente como pagada, convertimos la reserva en descuento físico
         if (initialStateId === OrderState.Paid && items && items.length > 0) {
           await this.finalizeStockDeduction(
             tx, 
@@ -419,8 +414,6 @@ export class OrdersService {
 
   // ─── Actualizar / Sincronizar Borrador ─────────────────────────────────
 
- // ─── Actualizar / Sincronizar Borrador ─────────────────────────────────
-
   async updateOrder(
     payload: UpdateOrderPayload & { paymentMethod?: string },
     sessionContext?: UserSessionContext | null
@@ -449,32 +442,16 @@ export class OrdersService {
       }
 
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        // 1. Obtenemos los ítems anteriores DIRECTAMENTE DENTRO de la transacción para evitar desincronización
-        const previousItemOrders = await tx.itemOrder.findMany({
-          where: { orderId },
-        });
-
-        // 2. Liberamos el stock reservado anterior de manera explícita
-        if (previousItemOrders.length > 0) {
-          await this.releaseReservedStock(
-            tx,
-            previousItemOrders.map((i) => ({
-              productId: i.productId,
-              amount: i.amount,
-            }))
-          );
-        }
-
-        // 3. Borramos los ítems viejos de la orden
-        await tx.itemOrder.deleteMany({ where: { orderId } });
-
         const hasNewItems = items !== undefined && items !== null;
         const validItems = hasNewItems ? items.filter((i) => Number(i.quantity) > 0 && Number(i.productId) > 0) : [];
 
-        // 4. Validamos y reservamos el nuevo stock para los ítems actuales
+        // Validamos stock pasando el orderId actual para excluirnos a nosotros mismos de la resta de otros borradores
         if (validItems.length > 0) {
-          await this.reserveStock(tx, validItems);
+          await this.validateStockAvailability(tx, validItems, orderId);
         }
+
+        // Borramos los ítems viejos de la orden
+        await tx.itemOrder.deleteMany({ where: { orderId } });
 
         let addressSnapshotUpdates = {};
         if (shippingAddressId) {
@@ -482,7 +459,6 @@ export class OrdersService {
           if (snapshot) addressSnapshotUpdates = snapshot;
         }
 
-        // 5. Actualizamos los datos principales de la orden y creamos los nuevos itemOrders
         return tx.order.update({
           where: { id: orderId },
           data: {
@@ -571,7 +547,7 @@ export class OrdersService {
         }
 
         const updatedOrder = await prisma.$transaction(async (tx) => {
-          // Descontamos stock físico definitivamente y liberamos la reserva
+          // Descontamos stock físico definitivamente al pagar
           await this.finalizeStockDeduction(
             tx, 
             existingOrder.itemOrders.map(i => ({ productId: i.productId, amount: i.amount }))
@@ -638,13 +614,6 @@ export class OrdersService {
 
       // ─── OTROS ESTADOS (Cancelado, Rechazado, etc.) ───────────────────────
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        if (releasesStock(targetStateId)) {
-          await this.releaseReservedStock(
-            tx, 
-            existingOrder.itemOrders.map(i => ({ productId: i.productId, amount: i.amount }))
-          );
-        }
-
         let addressSnapshotUpdates = {};
         if (isLeavingDraft && existingOrder.shippingAddressId) {
           const snapshot = await this.fetchAddressSnapshot(tx, existingOrder.shippingAddressId);
@@ -664,7 +633,7 @@ export class OrdersService {
           const noteParts = [
             location?.trim() && `Ubicación: ${location.trim()}.`,
             notes?.trim(),
-            releasesStock(targetStateId) && '(Stock reservado devuelto al inventario)',
+            releasesStock(targetStateId) && '(Borrador cancelado / stock liberado)',
           ].filter(Boolean);
 
           await tx.orderStatusHistory.create({
@@ -684,7 +653,7 @@ export class OrdersService {
         success: true,
         orderId: Number(updatedOrder.id),
         message: releasesStock(targetStateId)
-          ? 'Orden cerrada y stock reservado devuelto al inventario.'
+          ? 'Orden cerrada y stock liberado correctamente.'
           : 'Estado de la orden actualizado correctamente.',
       };
     } catch (err: any) {

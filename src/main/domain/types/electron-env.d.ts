@@ -550,6 +550,7 @@ export interface IElectronAPI {
   updateProduct: (input: UpdateProductInput) => Promise<ProductMutationResponse>
   setProductStatus: (input: ProductStatusInput) => Promise<ProductMutationResponse>
   updateProductStock: (input: ProductStockInput) => Promise<ProductMutationResponse>
+  onStockUpdated: (callback: () => void) => Unsubscribe
 
   // Autenticación y Sesión
   login: (credentials: Credentials) => Promise<AuthResponse>
