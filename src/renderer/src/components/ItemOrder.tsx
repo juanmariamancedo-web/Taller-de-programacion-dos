@@ -57,6 +57,27 @@ export function ItemOrder({
     setSearchTerm(item.description || '')
   }, [item.description])
 
+  // Función para refrescar el producto actual bajo demanda o por sincronización
+  const refreshCurrentProduct = async () => {
+    if (!item.productId) return
+    try {
+      const api = window.electronAPI as any
+      if (api?.getProducts) {
+        const res = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
+        const found = (res.data || []).find((p: any) => Number(p.id) === Number(item.productId))
+        if (found) {
+          setProducts((prev) => {
+            const updatedMap = new Map<number, ProductWithStock>(prev.map((p) => [Number(p.id), p]))
+            updatedMap.set(Number(found.id), found as ProductWithStock)
+            return Array.from(updatedMap.values())
+          })
+        }
+      }
+    } catch (err) {
+      console.error('Error al refrescar producto:', err)
+    }
+  }
+
   // Cargar la info del producto actual al montar si ya tiene un productId asignado
   useEffect(() => {
     async function fetchCurrentProduct() {
@@ -80,45 +101,32 @@ export function ItemOrder({
     fetchCurrentProduct()
   }, [item.productId, item.description])
 
-  // Suscripción en tiempo real a los cambios de stock globales de Electron
+  const isDraft = currentStateId === 1
+
+  // Sincronización automática en tiempo real por intervalos cortos para asegurar actualización entre ventanas
+  useEffect(() => {
+    if (!isDraft || !item.productId) return
+
+    const interval = setInterval(() => {
+      refreshCurrentProduct()
+    }, 2000)
+
+    return () => clearInterval(interval)
+  }, [isDraft, item.productId, item.description])
+
+  // Suscripción al evento IPC global de Electron
   useEffect(() => {
     const api = window.electronAPI as any
     if (!api?.onStockUpdated) return
 
     const unsubscribe = api.onStockUpdated(async () => {
-      try {
-        if (api?.getProducts) {
-          const res = await api.getProducts({ search: searchTerm, page: 1, sort: 'nameDesc' })
-          const fetchedProducts = (res.data || []) as ProductWithStock[]
-
-          let selectedProductUpdate: ProductWithStock | null = null
-          if (item.productId) {
-            const specificRes = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
-            selectedProductUpdate = ((specificRes.data || []) as ProductWithStock[]).find(
-              (p) => Number(p.id) === Number(item.productId)
-            ) || null
-          }
-
-          setProducts((prev: ProductWithStock[]) => {
-            const updatedMap = new Map<number, ProductWithStock>(prev.map((p) => [Number(p.id), p]))
-            fetchedProducts.forEach((p) => updatedMap.set(Number(p.id), p))
-            
-            if (selectedProductUpdate) {
-              updatedMap.set(Number(selectedProductUpdate.id), selectedProductUpdate)
-            }
-
-            return Array.from(updatedMap.values())
-          })
-        }
-      } catch (err) {
-        console.error('Error al actualizar stock en tiempo real:', err)
-      }
+      refreshCurrentProduct()
     })
 
     return () => {
       if (typeof unsubscribe === 'function') unsubscribe()
     }
-  }, [searchTerm, item.productId, item.description])
+  }, [item.productId, item.description])
 
   const updateDropdownPosition = (): void => {
     const input = inputRef.current
@@ -239,9 +247,6 @@ export function ItemOrder({
 
   const errorStyle = stockError ? 'border-red-500 ring-2 ring-red-500/20 dark:border-red-500' : ''
 
-  // Determinamos si está en modo borrador (OrderState.Created = 1)
-  const isDraft = currentStateId === 1
-
   return (
     <tr className="border-b border-slate-200/80 transition hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.02]">
       {/* Producto */}
@@ -258,7 +263,10 @@ export function ItemOrder({
               setSearchTerm(e.target.value)
               openDropdown()
             }}
-            onFocus={openDropdown}
+            onFocus={() => {
+              refreshCurrentProduct()
+              openDropdown()
+            }}
             onBlur={() => {
               setTimeout(() => setIsOpen(false), 200)
             }}
@@ -345,6 +353,7 @@ export function ItemOrder({
             disabled={disabled}
             value={item.quantity}
             onChange={handleQuantityChange}
+            onFocus={refreshCurrentProduct}
             className={`${inputStyle} ${errorStyle} text-center ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
             title={
               maxQuantity !== undefined
