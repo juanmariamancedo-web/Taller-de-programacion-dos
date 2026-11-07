@@ -471,16 +471,16 @@ export interface UpdateOrderStatePayload {
 }
 
 export interface CreateOrderPayload {
-  clientId: number | string;
-  sellerId?: number | string;
-  shippingAddressId?: number | string;
-  initialStateId?: number; // Creada (por defecto), Pendiente o Pagada
+  clientId?: number | bigint; 
+  sellerId: number | bigint;
+  shippingAddressId?: number | bigint;
   total: number;
-  items: Array<{
-    productId: number;
+  items: {
+    productId: number | bigint;
     quantity: number;
     unitPrice: number;
-  }>;
+  }[];
+  initialStateId?: number;
 }
 
 export interface UpdateOrderPayload {

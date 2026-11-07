@@ -1,6 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron';
 import { ordersService } from '../../services/orders.service';
-import { authService } from '../../services/auth.service'; // Tu servicio de auth/sesión
+import { authService } from '../../services/auth.service';
 import { SearchParams, CreateOrderPayload, UpdateOrderPayload } from '../../domain/types/electron-env';
 
 function notifyReportsUpdated(): void {
@@ -58,7 +58,7 @@ export function registerOrderIPC(): void {
     }
   });
 
-  // Actualizar orden / estado logístico según rol
+  // Actualizar orden / sincronizar stock reservado del borrador
   ipcMain.handle('orders:update', async (_event, payload: UpdateOrderPayload) => {
     try {
       const session = await authService.getActiveSession();
@@ -115,13 +115,13 @@ export function registerOrderIPC(): void {
     }
   );
 
-  // Reservar stock mientras se edita una orden existente (estado objetivo, idempotente).
-  // No notifica reportes: la reserva es temporal y no cambia ventas ni inventario real.
+  // Canal para mantener compatibilidad si el frontend hace peticiones de reserva por ID,
+  // redirigiéndolo al flujo unificado de actualización y bloqueo atómico de stock.
   ipcMain.handle(
     'orders:reserve-stock',
     async (
       _event,
-      payload: { orderId: number | string; items: { productId: number; quantity: number }[] }
+      payload: UpdateOrderPayload
     ) => {
       try {
         const session = await authService.getActiveSession();
@@ -131,7 +131,7 @@ export function registerOrderIPC(): void {
           roleName: session.roleName,
         } : undefined;
 
-        return await ordersService.reserveOrderStock(payload, sessionContext);
+        return await ordersService.updateOrder(payload, sessionContext);
       } catch (error) {
         console.error('Failed to reserve order stock:', error);
         return {
@@ -142,7 +142,7 @@ export function registerOrderIPC(): void {
     }
   );
 
-  // Liberar la reserva de edición (cancelar edición / cerrar el formulario). Idempotente.
+  // Liberar el borrador / cancelar la orden creada temporalmente si el usuario sale sin guardar.
   ipcMain.handle('orders:release-reservation', async (_event, orderId: number | string) => {
     try {
       const session = await authService.getActiveSession();
@@ -152,7 +152,11 @@ export function registerOrderIPC(): void {
         roleName: session.roleName,
       } : undefined;
 
-      return await ordersService.releaseOrderReservation(orderId, sessionContext);
+      return await ordersService.updateOrderState({
+        id: orderId,
+        currentStateId: 5, // OrderState.Cancelled (o el número correspondiente al estado cancelado)
+        notes: 'Cancelado automáticamente al cerrar el formulario',
+      }, sessionContext);
     } catch (error) {
       console.error('Failed to release order reservation:', error);
       return {

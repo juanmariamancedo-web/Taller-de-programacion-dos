@@ -29,34 +29,9 @@ export interface UserSessionContext {
 
 type Tx = Prisma.TransactionClient;
 
-/** Estados que cierran la orden y devuelven el stock al inventario. */
+/** Estados que cierran la orden liberando el stock reservado o físico. */
 const releasesStock = (stateId: number) =>
   stateId === OrderState.Rejected || stateId === OrderState.Cancelled;
-
-/** Tiempo que vive una reserva de edición si la app se cae o se cierra sin liberarla. */
-const RESERVATION_TTL_MS = 10 * 60 * 1000;
-const newExpiry = () => new Date(Date.now() + RESERVATION_TTL_MS);
-
-/**
- * Nombres REALES en la base de datos, según schema.prisma:
- *  - tabla "products" (@@map)
- *  - "stock" y "reservedStock" NO tienen @map, así que la columna conserva el camelCase.
- * Se usan en los UPDATE condicionales con SQL crudo, que es lo que evita la carrera
- * entre usuarios. Si algún día agregás @map a esas columnas, actualizá esto.
- */
-const P = {
-  table: Prisma.raw('"products"'),
-  id: Prisma.raw('"id"'),
-  stock: Prisma.raw('"stock"'),
-  reserved: Prisma.raw('"reservedStock"'),
-};
-
-class StockError extends Error {
-  constructor(message: string, public productId?: number) {
-    super(message);
-    this.name = 'StockError';
-  }
-}
 
 export class OrdersService {
   // ─── Helpers ────────────────────────────────────────────────────────────
@@ -82,130 +57,73 @@ export class OrdersService {
     }
   }
 
-  // ─── Stock: helpers ─────────────────────────────────────────────────────
-  //
-  // Modelo:
-  //  - stock           = unidades físicas que NO están comprometidas en una orden.
-  //                      Se descuenta apenas la orden se crea y se devuelve al cancelar/rechazar.
-  //  - reservedStock   = unidades que una sesión de EDICIÓN tiene apartadas temporalmente
-  //                      (solo lo extra respecto a lo que la orden ya tenía descontado).
-  //  - Disponible      = stock - reservedStock.
-  //  Toda validación de disponibilidad es un UPDATE condicional: la fila se bloquea y el
-  //  chequeo + la escritura son una sola operación atómica.
-
-  /** Suma cantidades por producto (soporta productos repetidos). */
-  private toQtyMap(
-    rows: { productId: number | bigint | string; qty: number | bigint | string }[]
-  ): Map<string, number> {
-    const map = new Map<string, number>();
-    for (const row of rows) {
-      const key = String(BigInt(row.productId));
-      map.set(key, (map.get(key) ?? 0) + Number(row.qty));
-    }
-    return map;
-  }
-
-  /** IDs ordenados: siempre se bloquean las filas en el mismo orden para evitar deadlocks. */
-  private sortedIds(...maps: Map<string, number>[]): bigint[] {
-    const ids = new Set<string>();
-    maps.forEach((m) => m.forEach((_, key) => ids.add(key)));
-    return [...ids].map((id) => BigInt(id)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-  }
-
-  private async throwStockError(tx: Tx, productId: bigint, requested: number): Promise<never> {
-    const product = await tx.product.findUnique({
-      where: { id: productId },
-      select: { name: true, stock: true, reservedStock: true },
-    });
-
-    if (!product) {
-      throw new StockError(`El producto con ID ${productId} no existe.`, Number(productId));
-    }
-
-    const reserved = product.reservedStock ?? 0;
-    throw new StockError(
-      `Stock insuficiente para el producto "${product.name}". Disponible: ${product.stock - reserved} (stock: ${product.stock}, reservado por otras ediciones: ${reserved}), solicitado: ${requested}.`,
-      Number(productId)
-    );
-  }
-
-  /** Descuenta stock físico solo si hay disponible (stock - reservedStock >= qty). */
-  private async deductStock(tx: Tx, productId: bigint, qty: number) {
-    if (qty <= 0) return;
-    const affected = await tx.$executeRaw`
-      UPDATE ${P.table}
-      SET ${P.stock} = ${P.stock} - ${qty}
-      WHERE ${P.id} = ${productId} AND ${P.stock} - ${P.reserved} >= ${qty}
-    `;
-    if (affected === 0) await this.throwStockError(tx, productId, qty);
-  }
-
-  /** Aparta unidades (reservedStock += qty) solo si hay disponible. */
-  private async reserveUnits(tx: Tx, productId: bigint, qty: number) {
-    if (qty <= 0) return;
-    const affected = await tx.$executeRaw`
-      UPDATE ${P.table}
-      SET ${P.reserved} = ${P.reserved} + ${qty}
-      WHERE ${P.id} = ${productId} AND ${P.stock} - ${P.reserved} >= ${qty}
-    `;
-    if (affected === 0) await this.throwStockError(tx, productId, qty);
-  }
-
-  /** Devuelve stock físico (cancelación / rechazo / reducción de cantidades). */
-  private async restoreStock(tx: Tx, productId: bigint, qty: number) {
-    if (qty <= 0) return;
-    await tx.product.update({
-      where: { id: productId },
-      data: { stock: { increment: qty } },
-    });
-  }
-
-  /**
-   * Libera TODAS las reservas de edición de una orden. Idempotente: si no hay, no hace nada.
-   * Cada fila se borra con deleteMany y solo se descuenta si realmente se borró,
-   * así nunca se libera dos veces la misma reserva.
+  /** 
+   * Reserva stock validando disponibilidad real (stock físico - stock reservado).
+   * Incrementa reservedStock de forma atómica.
    */
-  private async releaseReservationsTx(tx: Tx, orderId: bigint) {
-    const rows = await tx.stockReservation.findMany({
-      where: { orderId },
-      orderBy: { productId: 'asc' },
-    });
+  private async reserveStock(
+    tx: Tx,
+    items: { productId: number | bigint | string; quantity: number | string }[]
+  ) {
+    for (const item of items) {
+      const productId = BigInt(item.productId);
+      const requestedQuantity = Number(item.quantity);
 
-    for (const row of rows) {
-      const deleted = await tx.stockReservation.deleteMany({ where: { id: row.id } });
-      if (deleted.count === 1 && row.quantity > 0) {
-        await tx.product.update({
-          where: { id: row.productId },
-          data: { reservedStock: { decrement: row.quantity } },
-        });
-      }
-    }
-  }
+      if (requestedQuantity <= 0) continue;
 
-  /**
-   * Libera reservas vencidas (app cerrada / caída). Llamalo al iniciar la app,
-   * con un setInterval en el proceso main (ej. cada 1-2 min) y antes de reservar o crear.
-   */
-  async releaseExpiredReservations() {
-    try {
-      await prisma.$transaction(async (tx) => {
-        const expired = await tx.stockReservation.findMany({
-          where: { expiresAt: { lt: new Date() } },
-          orderBy: [{ productId: 'asc' }, { id: 'asc' }],
-        });
-
-        for (const row of expired) {
-          const deleted = await tx.stockReservation.deleteMany({ where: { id: row.id } });
-          if (deleted.count === 1 && row.quantity > 0) {
-            await tx.product.update({
-              where: { id: row.productId },
-              data: { reservedStock: { decrement: row.quantity } },
-            });
-          }
-        }
+      const product = await tx.product.findUnique({
+        where: { id: productId },
+        select: { id: true, name: true, stock: true, reservedStock: true },
       });
-    } catch (err) {
-      console.error('Error liberando reservas vencidas:', err);
+
+      if (!product) {
+        throw new Error(`El producto con ID ${item.productId} no existe.`);
+      }
+
+      const availableStock = product.stock - (product.reservedStock ?? 0);
+
+      if (availableStock < requestedQuantity) {
+        throw new Error(
+          `Stock insuficiente para el producto "${product.name}". Disponible real: ${availableStock} (Físico: ${product.stock}, Reservado: ${product.reservedStock ?? 0}), solicitado: ${requestedQuantity}.`
+        );
+      }
+
+      await tx.product.update({
+        where: { id: productId },
+        data: { reservedStock: { increment: requestedQuantity } },
+      });
+    }
+  }
+
+  /** Devuelve al stock reservado cuando se modifican o quitan ítems de un borrador. */
+  private async releaseReservedStock(tx: Tx, items: { productId: bigint; amount: number | bigint }[]) {
+    for (const item of items) {
+      const amount = Number(item.amount);
+      if (amount <= 0) continue;
+
+      await tx.product.update({
+        where: { id: item.productId },
+        data: { reservedStock: { decrement: amount } },
+      });
+    }
+  }
+
+  /** 
+   * Descuenta el stock físico definitivamente y libera la reserva 
+   * (Se ejecuta cuando la orden pasa a pagada/efectivizada).
+   */
+  private async finalizeStockDeduction(tx: Tx, items: { productId: bigint; amount: number | bigint }[]) {
+    for (const item of items) {
+      const qty = Number(item.amount);
+      if (qty <= 0) continue;
+
+      await tx.product.update({
+        where: { id: item.productId },
+        data: {
+          stock: { decrement: qty },
+          reservedStock: { decrement: qty },
+        },
+      });
     }
   }
 
@@ -225,121 +143,6 @@ export class OrdersService {
       shippingPostalCode: dbAddress.postalCode,
       shippingCityName: dbAddress.city?.name ?? '',
     };
-  }
-
-  // ─── Reservas de edición (API para el frontend) ─────────────────────────
-
-  /**
-   * Fija la reserva de una orden EXISTENTE en edición al estado objetivo.
-   * `items` = cantidades que el usuario tiene hoy en el formulario.
-   * Solo se reserva lo EXTRA respecto a lo que la orden ya tiene descontado.
-   * Es idempotente: se puede llamar muchas veces con el mismo payload.
-   */
-  async reserveOrderStock(
-    payload: { orderId: string | number; items: { productId: number | string; quantity: number | string }[] },
-    sessionContext?: UserSessionContext | null
-  ): Promise<OrderMutationResponse & { failedProductId?: number }> {
-    try {
-      const activeSession = await this.resolveSession(sessionContext);
-      const role = this.getSessionRole(activeSession);
-      const orderId = BigInt(payload.orderId);
-
-      await this.releaseExpiredReservations();
-
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        select: { id: true, sellerId: true, currentStateId: true },
-      });
-      if (!order) return { success: false, message: 'La orden no existe' };
-
-      this.assertSellerOwnsOrder(role, order.sellerId, this.getSessionUserId(activeSession));
-
-      if (!canEditOrderDetails(Number(order.currentStateId), role)) {
-        return { success: false, message: 'La orden ya no se puede editar.' };
-      }
-
-      const requested = this.toQtyMap(
-        (payload.items ?? [])
-          .filter((i) => Number(i.productId) > 0)
-          .map((i) => ({ productId: i.productId, qty: i.quantity }))
-      );
-
-      await prisma.$transaction(async (tx) => {
-        const fresh = await tx.order.findUnique({
-          where: { id: orderId },
-          select: { currentStateId: true, itemOrders: true },
-        });
-        if (!fresh || !canEditOrderDetails(Number(fresh.currentStateId), role)) {
-          throw new Error('La orden ya no se puede editar.');
-        }
-
-        const original = this.toQtyMap(fresh.itemOrders.map((i) => ({ productId: i.productId, qty: i.amount })));
-        const reservations = await tx.stockReservation.findMany({ where: { orderId } });
-        const current = this.toQtyMap(reservations.map((r) => ({ productId: r.productId, qty: r.quantity })));
-
-        for (const productId of this.sortedIds(requested, current)) {
-          const key = String(productId);
-          const target = Math.max(0, (requested.get(key) ?? 0) - (original.get(key) ?? 0));
-          const delta = target - (current.get(key) ?? 0);
-
-          if (delta > 0) {
-            await this.reserveUnits(tx, productId, delta);
-          } else if (delta < 0) {
-            await tx.product.update({
-              where: { id: productId },
-              data: { reservedStock: { decrement: -delta } },
-            });
-          }
-
-          if (target > 0) {
-            await tx.stockReservation.upsert({
-              where: { orderId_productId: { orderId, productId } },
-              create: { orderId, productId, quantity: target, expiresAt: newExpiry() },
-              update: { quantity: target, expiresAt: newExpiry() },
-            });
-          } else {
-            await tx.stockReservation.deleteMany({ where: { orderId, productId } });
-          }
-        }
-      });
-
-      return { success: true, orderId: Number(orderId), message: 'Stock reservado.' };
-    } catch (err: any) {
-      console.error('Error reservando stock:', err);
-      return {
-        success: false,
-        message: err?.message || 'No se pudo reservar el stock.',
-        failedProductId: err instanceof StockError ? err.productId : undefined,
-      };
-    }
-  }
-
-  /** Libera la reserva de edición de una orden. Idempotente. */
-  async releaseOrderReservation(
-    orderIdRaw: string | number,
-    sessionContext?: UserSessionContext | null
-  ): Promise<OrderMutationResponse> {
-    try {
-      const activeSession = await this.resolveSession(sessionContext);
-      const role = this.getSessionRole(activeSession);
-      const orderId = BigInt(orderIdRaw);
-
-      const order = await prisma.order.findUnique({
-        where: { id: orderId },
-        select: { sellerId: true },
-      });
-
-      if (order) {
-        this.assertSellerOwnsOrder(role, order.sellerId, this.getSessionUserId(activeSession));
-      }
-
-      await prisma.$transaction((tx) => this.releaseReservationsTx(tx, orderId));
-
-      return { success: true, orderId: Number(orderId), message: 'Reserva liberada.' };
-    } catch (err: any) {
-      console.error('Error liberando reserva:', err);
-      return { success: false, message: err?.message || 'No se pudo liberar la reserva.' };
-    }
   }
 
   // ─── Consultas ──────────────────────────────────────────────────────────
@@ -431,13 +234,13 @@ export class OrdersService {
       return {
         ...order,
         id: Number(order.id),
-        clientId: Number(order.clientId),
+        clientId: order.clientId ? Number(order.clientId) : null,
         sellerId: Number(order.sellerId),
         currentStateId: Number(order.currentStateId),
         shippingAddressId: order.shippingAddressId ? Number(order.shippingAddressId) : null,
         invoiceType: order.invoiceType ?? null,
         paymentMethod: order.paymentMethod,
-
+        
         shippingStreet: street,
         shippingNumber: number,
         shippingFloor: floor,
@@ -445,15 +248,15 @@ export class OrdersService {
         shippingPostalCode: postalCode,
         shippingCityName: cityName,
 
-        shippingAddress: {
-          id: order.shippingAddressId ? Number(order.shippingAddressId) : null,
+        shippingAddress: order.shippingAddressId ? {
+          id: Number(order.shippingAddressId),
           street,
           number,
           floor,
           apartment,
           postalCode,
           city: { name: cityName },
-        },
+        } : null,
 
         items: order.itemOrders.map((item) => ({
           id: Number(item.id),
@@ -482,7 +285,7 @@ export class OrdersService {
     };
   }
 
-  // ─── Crear ──────────────────────────────────────────────────────────────
+  // ─── Crear / Borrador Inicial ───────────────────────────────────────────
 
   async createOrder(
     payload: CreateOrderPayload & {
@@ -502,16 +305,18 @@ export class OrdersService {
         };
       }
 
-      const clientId = Number(payload.clientId);
+      // clientId y shippingAddressId ahora pueden ser opcionales para permitir el auto-guardado del borrador
+      const clientId = payload.clientId ? Number(payload.clientId) : null;
       const shippingAddressId = payload.shippingAddressId ? Number(payload.shippingAddressId) : null;
+      
       const currentUserId = this.getSessionUserId(activeSession);
       const sellerId = role === 'seller' ? currentUserId : Number(payload.sellerId);
       const { items, total, invoiceType, paymentMethod } = payload;
 
-      if (!clientId || !sellerId || !items || items.length === 0) {
+      if (!sellerId) {
         return {
           success: false,
-          message: 'Datos de la orden incompletos (cliente, seller e ítems son obligatorios)',
+          message: 'Identificador de vendedor no válido.',
         };
       }
 
@@ -528,25 +333,10 @@ export class OrdersService {
         };
       }
 
-      if (initialStateId === OrderState.Paid) {
-        const selectedInvoiceType = invoiceType?.toUpperCase();
-        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B' && selectedInvoiceType !== 'EXENTO') {
-          return {
-            success: false,
-            message: 'Debe especificar si la factura es de tipo A, B o Exento para crear una orden pagada.',
-          };
-        }
-      }
-
-      // Libera reservas vencidas para que no bloqueen stock disponible
-      await this.releaseExpiredReservations();
-
       const newOrder = await prisma.$transaction(async (tx) => {
-        // 1. Descontar stock físico de forma atómica (falla si no hay disponible = stock - reservedStock).
-        //    Se procesa por productId ordenado para evitar deadlocks entre usuarios.
-        const requested = this.toQtyMap(items.map((i) => ({ productId: i.productId, qty: i.quantity })));
-        for (const productId of this.sortedIds(requested)) {
-          await this.deductStock(tx, productId, requested.get(String(productId)) ?? 0);
+        // Reservamos stock solo si hay ítems especificados
+        if (items && items.length > 0) {
+          await this.reserveStock(tx, items);
         }
 
         let addressSnapshot = {
@@ -567,38 +357,38 @@ export class OrdersService {
 
         const order = await tx.order.create({
           data: {
-            clientId: BigInt(clientId),
             sellerId: BigInt(sellerId),
-            total: Number(total),
+            total: Number(total || 0),
             currentStateId: BigInt(initialStateId),
             invoiceType: normalizedInvoiceType,
             paymentMethod: paymentMethod || 'Efectivo',
+            ...(clientId && { clientId: BigInt(clientId) }),
             ...(shippingAddressId && { shippingAddressId: BigInt(shippingAddressId) }),
             ...addressSnapshot,
-            itemOrders: {
-              create: items.map((item) => ({
-                productId: BigInt(item.productId),
-                amount: Number(item.quantity),
-                unitPrice: Number(item.unitPrice),
-              })),
-            },
+            ...(items && items.length > 0 && {
+              itemOrders: {
+                create: items.map((item) => ({
+                  productId: BigInt(item.productId),
+                  amount: Number(item.quantity),
+                  unitPrice: Number(item.unitPrice),
+                })),
+              },
+            }),
           },
         });
 
+        // Si se creó directamente como pagada, convertimos la reserva en descuento físico
+        if (initialStateId === OrderState.Paid && items && items.length > 0) {
+          await this.finalizeStockDeduction(
+            tx, 
+            items.map(i => ({ productId: BigInt(i.productId), amount: Number(i.quantity) }))
+          );
+        }
+
         if (shippingAddressId) {
           let historyNotes = initialStateId === OrderState.Created
-            ? 'Creación de la orden de compra y descuento de stock'
-            : `Creación de la orden en estado "${getStateLabel(initialStateId)}" y descuento de stock`;
-
-          if (initialStateId === OrderState.Paid) {
-            const selectedInv = normalizedInvoiceType || 'B';
-            const numericTotal = Number(total);
-            const requiresVatCalculation = selectedInv === 'A' || selectedInv === 'EXENTO';
-            const netAmount = requiresVatCalculation ? Number((numericTotal / 1.21).toFixed(2)) : numericTotal;
-            const vatAmount = requiresVatCalculation ? Number((numericTotal - netAmount).toFixed(2)) : 0.00;
-
-            historyNotes = `Orden creada y pagada con Factura ${selectedInv}. Neto: $${netAmount}, IVA 21%: $${vatAmount}.`;
-          }
+            ? 'Creación de borrador de orden y reserva inicial de stock'
+            : `Creación de la orden en estado "${getStateLabel(initialStateId)}"`;
 
           await tx.orderStatusHistory.create({
             data: {
@@ -616,36 +406,20 @@ export class OrdersService {
       return {
         success: true,
         orderId: Number(newOrder.id),
-        message: 'Orden creada exitosamente y stock actualizado.',
+        message: 'Borrador de orden creado exitosamente y stock sincronizado.',
       };
     } catch (err: any) {
-      console.error('Error en servicio de órdenes:', err);
-      let errorMessage = err.message || 'Error en la operación de la base de datos';
-
-      const errorMsg = String(err?.message || '');
-      const errorCode = err?.code;
-      const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
-
-      if (
-        errorCode === 'P2002' ||
-        errorMsg.includes('P2002') ||
-        errorMsg.includes('tracking_number') ||
-        errorMsg.includes('Unique constraint failed') ||
-        driverError.includes('UniqueConstraintViolation') ||
-        driverError.includes('tracking_number')
-      ) {
-        errorMessage = 'El número de seguimiento (tracking) ya se encuentra registrado en otra orden.';
-      }
-
+      console.error('Error en servicio de órdenes (createOrder):', err);
       return {
         success: false,
-        message: errorMessage,
-        failedProductId: err instanceof StockError ? err.productId : undefined,
+        message: err.message || 'Error en la operación de la base de datos',
       };
     }
   }
 
-  // ─── Editar datos (solo mientras es borrador) ───────────────────────────
+  // ─── Actualizar / Sincronizar Borrador ─────────────────────────────────
+
+ // ─── Actualizar / Sincronizar Borrador ─────────────────────────────────
 
   async updateOrder(
     payload: UpdateOrderPayload & { paymentMethod?: string },
@@ -659,8 +433,8 @@ export class OrdersService {
 
       const existingOrder = await prisma.order.findUnique({
         where: { id: orderId },
-        include: { itemOrders: true },
       });
+
       if (!existingOrder) {
         return { success: false, message: 'La orden no existe' };
       }
@@ -674,37 +448,32 @@ export class OrdersService {
         };
       }
 
-      await this.releaseExpiredReservations();
-
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        // Releemos dentro de la transacción: el estado o los ítems pudieron cambiar
-        const fresh = await tx.order.findUnique({
-          where: { id: orderId },
-          include: { itemOrders: true },
+        // 1. Obtenemos los ítems anteriores DIRECTAMENTE DENTRO de la transacción para evitar desincronización
+        const previousItemOrders = await tx.itemOrder.findMany({
+          where: { orderId },
         });
-        if (!fresh || !canEditOrderDetails(Number(fresh.currentStateId), role)) {
-          throw new Error('La orden ya fue confirmada: solo se puede editar mientras es un borrador.');
+
+        // 2. Liberamos el stock reservado anterior de manera explícita
+        if (previousItemOrders.length > 0) {
+          await this.releaseReservedStock(
+            tx,
+            previousItemOrders.map((i) => ({
+              productId: i.productId,
+              amount: i.amount,
+            }))
+          );
         }
 
-        // 1. Liberar la reserva de edición: lo que se guarda pasa a ser stock definitivo
-        await this.releaseReservationsTx(tx, orderId);
+        // 3. Borramos los ítems viejos de la orden
+        await tx.itemOrder.deleteMany({ where: { orderId } });
 
-        const hasNewItems = Boolean(items && items.length > 0);
+        const hasNewItems = items !== undefined && items !== null;
+        const validItems = hasNewItems ? items.filter((i) => Number(i.quantity) > 0 && Number(i.productId) > 0) : [];
 
-        if (hasNewItems) {
-          // 2. Ajustar el stock físico solo por la DIFERENCIA (nueva - original)
-          const original = this.toQtyMap(fresh.itemOrders.map((i) => ({ productId: i.productId, qty: i.amount })));
-          const next = this.toQtyMap(items!.map((i) => ({ productId: i.productId, qty: i.quantity })));
-
-          for (const productId of this.sortedIds(original, next)) {
-            const key = String(productId);
-            const diff = (next.get(key) ?? 0) - (original.get(key) ?? 0);
-
-            if (diff > 0) await this.deductStock(tx, productId, diff);
-            else if (diff < 0) await this.restoreStock(tx, productId, -diff);
-          }
-
-          await tx.itemOrder.deleteMany({ where: { orderId } });
+        // 4. Validamos y reservamos el nuevo stock para los ítems actuales
+        if (validItems.length > 0) {
+          await this.reserveStock(tx, validItems);
         }
 
         let addressSnapshotUpdates = {};
@@ -713,17 +482,18 @@ export class OrdersService {
           if (snapshot) addressSnapshotUpdates = snapshot;
         }
 
+        // 5. Actualizamos los datos principales de la orden y creamos los nuevos itemOrders
         return tx.order.update({
           where: { id: orderId },
           data: {
-            clientId: clientId ? BigInt(clientId) : fresh.clientId,
-            shippingAddressId: shippingAddressId ? BigInt(shippingAddressId) : fresh.shippingAddressId,
-            total: total !== undefined ? Number(total) : Number(fresh.total),
-            paymentMethod: paymentMethod || fresh.paymentMethod,
+            clientId: clientId ? BigInt(clientId) : existingOrder.clientId,
+            shippingAddressId: shippingAddressId ? BigInt(shippingAddressId) : existingOrder.shippingAddressId,
+            total: total !== undefined ? Number(total) : Number(existingOrder.total),
+            paymentMethod: paymentMethod || existingOrder.paymentMethod,
             ...addressSnapshotUpdates,
-            ...(hasNewItems && {
+            ...(validItems.length > 0 && {
               itemOrders: {
-                create: items!.map((item) => ({
+                create: validItems.map((item) => ({
                   productId: BigInt(item.productId),
                   amount: Number(item.quantity),
                   unitPrice: Number(item.unitPrice),
@@ -737,36 +507,19 @@ export class OrdersService {
       return {
         success: true,
         orderId: Number(updatedOrder.id),
-        message: 'Orden actualizada exitosamente',
+        message: 'Orden actualizada y stock reservado sincronizado correctamente.',
       };
     } catch (err: any) {
-      console.error('Error en servicio de órdenes:', err);
-      let errorMessage = err.message || 'Error en la operación de la base de datos';
-
-      const errorMsg = String(err?.message || '');
-      const errorCode = err?.code;
-      const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
-
-      if (
-        errorCode === 'P2002' ||
-        errorMsg.includes('P2002') ||
-        errorMsg.includes('tracking_number') ||
-        errorMsg.includes('Unique constraint failed') ||
-        driverError.includes('UniqueConstraintViolation') ||
-        driverError.includes('tracking_number')
-      ) {
-        errorMessage = 'El número de seguimiento (tracking) ya se encuentra registrado en otra orden.';
-      }
-
+      console.error('Error en servicio de órdenes (updateOrder):', err);
       return {
         success: false,
-        message: errorMessage,
-        failedProductId: err instanceof StockError ? err.productId : undefined,
+        message: err.message || 'Error en la operación de la base de datos',
       };
     }
   }
 
-  // ─── Cambiar estado ─────────────────────────────────────────────────────
+  // ─── Cambiar Estado ─────────────────────────────────────────────────────
+
   async updateOrderState(
     payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B' | 'EXENTO'; paymentMethod?: string },
     sessionContext?: UserSessionContext | null
@@ -806,7 +559,7 @@ export class OrdersService {
 
       const isLeavingDraft = currentState === OrderState.Created && targetStateId !== OrderState.Created;
 
-      // ─── LÓGICA DE PAGO CON PROCEDIMIENTO ALMACENADO (Factura A / B / Exento) ───────────
+      // ─── PAGO Y FACTURACIÓN ────────────────────────────────────────────────
       if (targetStateId === OrderState.Paid) {
         const selectedInvoiceType = invoiceType?.toUpperCase();
         if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B' && selectedInvoiceType !== 'EXENTO') {
@@ -818,9 +571,11 @@ export class OrdersService {
         }
 
         const updatedOrder = await prisma.$transaction(async (tx) => {
-          // El stock físico ya se descontó al crear la orden: acá solo se descarta
-          // cualquier reserva de edición que haya quedado abierta.
-          await this.releaseReservationsTx(tx, orderId);
+          // Descontamos stock físico definitivamente y liberamos la reserva
+          await this.finalizeStockDeduction(
+            tx, 
+            existingOrder.itemOrders.map(i => ({ productId: i.productId, amount: i.amount }))
+          );
 
           const spResult = await tx.$queryRaw<Array<{
             order_id: bigint;
@@ -858,7 +613,7 @@ export class OrdersService {
             },
           });
 
-          const addressIdToUse = existingOrder.shippingAddressId ?? (await tx.address.findFirst({ where: { clientId: existingOrder.clientId } }))?.id;
+          const addressIdToUse = existingOrder.shippingAddressId ?? (await tx.address.findFirst({ where: { clientId: existingOrder.clientId! } }))?.id;
 
           if (addressIdToUse) {
             await tx.orderStatusHistory.create({
@@ -881,29 +636,13 @@ export class OrdersService {
         };
       }
 
-      // ─── FLUJO ESTÁNDAR PARA OTROS ESTADOS ──────────────────────────────────
+      // ─── OTROS ESTADOS (Cancelado, Rechazado, etc.) ───────────────────────
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        // Guardia de concurrencia: solo una transición gana. Evita devolver el stock dos veces
-        // si dos usuarios cancelan/rechazan la misma orden a la vez.
-        const moved = await tx.order.updateMany({
-          where: { id: orderId, currentStateId: existingOrder.currentStateId },
-          data: { currentStateId: BigInt(targetStateId) },
-        });
-        if (moved.count === 0) {
-          throw new Error('La orden cambió de estado mientras se procesaba. Recargá e intentá de nuevo.');
-        }
-
-        // Cualquier reserva de edición abierta deja de tener sentido al cambiar de estado
-        await this.releaseReservationsTx(tx, orderId);
-
-        // Si se cancela o rechaza, devolvemos el stock físico que se había descontado
         if (releasesStock(targetStateId)) {
-          const qtyByProduct = this.toQtyMap(
-            existingOrder.itemOrders.map((i) => ({ productId: i.productId, qty: i.amount }))
+          await this.releaseReservedStock(
+            tx, 
+            existingOrder.itemOrders.map(i => ({ productId: i.productId, amount: i.amount }))
           );
-          for (const productId of this.sortedIds(qtyByProduct)) {
-            await this.restoreStock(tx, productId, qtyByProduct.get(String(productId)) ?? 0);
-          }
         }
 
         let addressSnapshotUpdates = {};
@@ -925,7 +664,7 @@ export class OrdersService {
           const noteParts = [
             location?.trim() && `Ubicación: ${location.trim()}.`,
             notes?.trim(),
-            releasesStock(targetStateId) && '(Stock devuelto al inventario)',
+            releasesStock(targetStateId) && '(Stock reservado devuelto al inventario)',
           ].filter(Boolean);
 
           await tx.orderStatusHistory.create({
@@ -945,31 +684,14 @@ export class OrdersService {
         success: true,
         orderId: Number(updatedOrder.id),
         message: releasesStock(targetStateId)
-          ? 'Orden cerrada y stock devuelto al inventario.'
+          ? 'Orden cerrada y stock reservado devuelto al inventario.'
           : 'Estado de la orden actualizado correctamente.',
       };
     } catch (err: any) {
-      console.error('Error en servicio de órdenes:', err);
-      let errorMessage = err.message || 'Error en la operación de la base de datos';
-
-      const errorMsg = String(err?.message || '');
-      const errorCode = err?.code;
-      const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
-
-      if (
-        errorCode === 'P2002' ||
-        errorMsg.includes('P2002') ||
-        errorMsg.includes('tracking_number') ||
-        errorMsg.includes('Unique constraint failed') ||
-        driverError.includes('UniqueConstraintViolation') ||
-        driverError.includes('tracking_number')
-      ) {
-        errorMessage = 'El número de seguimiento (tracking) ya se encuentra registrado en otra orden.';
-      }
-
+      console.error('Error en servicio de órdenes (updateOrderState):', err);
       return {
         success: false,
-        message: errorMessage,
+        message: err.message || 'Error en la operación de la base de datos',
       };
     }
   }
