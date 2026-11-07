@@ -71,6 +71,13 @@ const api = {
     ipcRenderer.invoke('orders:update', payload),
   updateOrderState: (payload: { id: number | string; currentStateId: number; trackingNumber?: string; notes?: string }) =>
     ipcRenderer.invoke('orders:updateState', payload),
+  reserveOrderStock: (payload: {
+    orderId: number | string
+    items: { productId: number; quantity: number }[]
+  }): Promise<{ success: boolean; message?: string; orderId?: number; failedProductId?: number }> =>
+    ipcRenderer.invoke('orders:reserve-stock', payload),
+  releaseOrderReservation: (orderId: number | string): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke('orders:release-reservation', orderId),
 
   // --- MÓDULO DE USUARIOS ---
   getUsers: (params: SearchParams) => ipcRenderer.invoke('users:getUsers', params),

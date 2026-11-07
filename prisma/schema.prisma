@@ -122,19 +122,25 @@ model Category {
   @@map("categories")
 }
 
+// stock         = unidades físicas NO comprometidas en órdenes (se descuenta al crear la orden)
+// reservedStock = unidades apartadas temporalmente por ediciones en curso
+// Disponible    = stock - reservedStock
+// Ojo: "stock" y "reservedStock" no tienen @map; el SQL crudo del servicio usa esos nombres.
 model Product {
-  id         BigInt      @id @default(autoincrement())
-  name       String
-  price      Decimal
-  stock      Int
-  lowStock   Int         @map("low_stock")
-  image      String
-  isActive   Boolean     @default(true) @map("is_active")
-  categoryId BigInt      @map("category_id")
-  category   Category    @relation(fields: [categoryId], references: [id])
-  createdAt  DateTime?   @default(now()) @map("created_at")
-  updatedAt  DateTime?   @updatedAt @map("updated_at")
-  itemOrders ItemOrder[]
+  id                BigInt             @id @default(autoincrement())
+  name              String
+  price             Decimal
+  stock             Int                @default(0)
+  reservedStock     Int                @default(0)
+  lowStock          Int                @map("low_stock")
+  image             String
+  isActive          Boolean            @default(true) @map("is_active")
+  categoryId        BigInt             @map("category_id")
+  category          Category           @relation(fields: [categoryId], references: [id])
+  createdAt         DateTime?          @default(now()) @map("created_at")
+  updatedAt         DateTime?          @updatedAt @map("updated_at")
+  itemOrders        ItemOrder[]
+  stockReservations StockReservation[]
 
   @@map("products")
 }
@@ -174,6 +180,7 @@ model Order {
 
   orderStatusHistory OrderStatusHistory[]
   itemOrders         ItemOrder[]
+  stockReservations  StockReservation[]
 
   @@map("orders")
 }
@@ -202,4 +209,21 @@ model ItemOrder {
   order     Order   @relation(fields: [orderId], references: [id])
 
   @@map("item_orders")
+}
+
+// Reservas temporales de stock mientras se EDITA una orden existente.
+// Solo guarda lo extra respecto a lo que la orden ya tiene descontado.
+// Se libera al guardar, al cancelar la edición, al cambiar de estado o al vencer (expiresAt).
+model StockReservation {
+  id        BigInt   @id @default(autoincrement())
+  orderId   BigInt   @map("order_id")
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId BigInt   @map("product_id")
+  product   Product  @relation(fields: [productId], references: [id])
+  quantity  Int
+  expiresAt DateTime @map("expires_at")
+
+  @@unique([orderId, productId])
+  @@index([expiresAt])
+  @@map("stock_reservations")
 }

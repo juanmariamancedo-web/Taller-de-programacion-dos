@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useAppDispatch } from "../../store/hooks"
 import { setCurrentTab, setOrderToEdit, setGlobalAlert } from "../../store/slices/appSlice"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
@@ -50,6 +50,7 @@ interface FormData {
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 const SHOW_DEBUG = false
+const RESERVE_DEBOUNCE_MS = 400
 
 const inputClass =
   "w-full rounded-xl border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
@@ -140,6 +141,11 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const [formData, setFormData] = useState<FormData>(() => buildFormData(initialOrder))
   const [items, setItems] = useState<FormOrderItem[]>([newItem()])
 
+  // Reserva de stock (solo órdenes existentes en edición)
+  const lastValidItems = useRef<FormOrderItem[]>(items)
+  const itemsDirty = useRef(false)
+  const [stockErrorProductId, setStockErrorProductId] = useState<number | null>(null)
+
   const [initialStateId, setInitialStateId] = useState<number>(OrderState.Created)
 
   const initialStateOptions = [
@@ -164,11 +170,14 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   useEffect(() => {
     setFormData(buildFormData(initialOrder))
+    itemsDirty.current = false
 
     if (!initialOrder?.id) {
       setSearchTermClients("")
       setSearchTermAddress("")
-      setItems([newItem()])
+      const fresh = [newItem()]
+      setItems(fresh)
+      lastValidItems.current = fresh
       setInitialStateId(OrderState.Created)
       return
     }
@@ -183,16 +192,28 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       setSearchTermAddress(`${addr.street ?? ""} ${addr.number ?? ""}${city}`.trim())
     }
 
-    setItems(mapOrderItems(initialOrder))
+    const mapped = mapOrderItems(initialOrder)
+    setItems(mapped)
+    lastValidItems.current = mapped
   }, [initialOrder])
 
-  const handleAddItem = () => setItems((prev) => [...prev, newItem()])
+  const handleAddItem = () => {
+    itemsDirty.current = true
+    setStockErrorProductId(null)
+    setItems((prev) => [...prev, newItem()])
+  }
 
-  const handleRemoveItem = (id: string) =>
+  const handleRemoveItem = (id: string) => {
+    itemsDirty.current = true
+    setStockErrorProductId(null)
     setItems((prev) => (prev.length === 1 ? prev : prev.filter((item) => item.id !== id)))
+  }
 
-  const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) =>
+  const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) => {
+    itemsDirty.current = true
+    setStockErrorProductId(null)
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item)))
+  }
 
   const handleClientSelect = (client: (typeof clients)[number]) => {
     setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
@@ -211,7 +232,50 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const total = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
 
-  const handleCancel = () => {
+  // Reserva con debounce: solo órdenes existentes y solo si el usuario tocó los ítems.
+  // Se envía el estado objetivo (idempotente), no incrementos.
+  useEffect(() => {
+    if (!initialOrder?.id || !canEditDetails || !itemsDirty.current) return
+
+    const orderId = String(initialOrder.id)
+    const valid = items.filter((i) => i.productId > 0)
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await window.electronAPI?.reserveOrderStock?.({
+          orderId,
+          items: valid.map(({ productId, quantity }) => ({ productId, quantity })),
+        })
+        if (!res?.success) setStockErrorProductId(res?.failedProductId ?? null)
+        assertSuccess(res, "Stock insuficiente para reservar.")
+        lastValidItems.current = items
+      } catch (err: any) {
+        dispatch(setGlobalAlert(err?.message || "Stock insuficiente para reservar."))
+        itemsDirty.current = false // evita reintentar en bucle al revertir
+        setItems(lastValidItems.current)
+      }
+    }, RESERVE_DEBOUNCE_MS)
+
+    return () => clearTimeout(timer)
+  }, [items])
+
+  // Liberar la reserva al salir sin guardar. El backend debe ser idempotente:
+  // si no hay reserva (o ya se liberó al guardar), no hace nada. El TTL cubre cierres bruscos.
+  useEffect(() => {
+    const id = initialOrder?.id
+    return () => {
+      if (id) window.electronAPI?.releaseOrderReservation?.(String(id))?.catch?.(console.error)
+    }
+  }, [initialOrder?.id])
+
+  const handleCancel = async () => {
+    if (initialOrder?.id) {
+      try {
+        await window.electronAPI?.releaseOrderReservation?.(String(initialOrder.id))
+      } catch (e) {
+        console.error("Error liberando reserva:", e)
+      }
+    }
     dispatch(setOrderToEdit(null))
     dispatch(setCurrentTab("orders"))
   }
@@ -289,6 +353,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           ? await window.electronAPI?.updateOrder?.({ id: orderId, ...details } as any)
           : await window.electronAPI?.createOrder?.({ ...details, initialStateId } as any)
 
+        if (!response?.success) setStockErrorProductId(response?.failedProductId ?? null)
         assertSuccess(response, "Error al guardar la orden.")
         if (!orderId && response?.orderId) {
           savedOrderId = String(response.orderId)
@@ -721,6 +786,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                     disabled={!canEditDetails}
                     isOnlyItem={items.length === 1 || !canEditDetails}
                     selectedProductIds={items.map((i) => i.productId).filter((id) => id > 0)}
+                    isExistingOrder={isEditing}
+                    stockError={item.productId > 0 && item.productId === stockErrorProductId}
                     onUpdateItem={handleUpdateItem}
                     onRemoveItem={handleRemoveItem}
                   />

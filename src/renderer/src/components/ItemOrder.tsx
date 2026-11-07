@@ -8,17 +8,27 @@ interface ItemOrderProps {
   isOnlyItem: boolean
   disabled?: boolean
   selectedProductIds: number[]
+  /** Orden ya guardada: el límite real de cantidad lo decide el servidor al reservar. */
+  isExistingOrder?: boolean
+  /** El servidor rechazó este ítem por stock insuficiente. */
+  stockError?: boolean
   onUpdateItem: (id: string, updatedFields: Partial<FormOrderItem>) => void
   onRemoveItem: (id: string) => void
 }
 
 type ProductWithStock = ProductListItem & { stock: number }
 
+/** Unidades realmente disponibles: stock físico menos lo reservado por ediciones en curso. */
+const getAvailableStock = (product: ProductWithStock): number =>
+  Number(product.availableStock ?? Number(product.stock ?? 0) - Number(product.reservedStock ?? 0))
+
 export function ItemOrder({
   item,
   isOnlyItem,
   disabled = false,
   selectedProductIds,
+  isExistingOrder = false,
+  stockError = false,
   onUpdateItem,
   onRemoveItem,
 }: ItemOrderProps) {
@@ -95,21 +105,26 @@ export function ItemOrder({
   }, [])
 
   const availableProducts = products.filter((product) => {
-    const stock = Number(product.stock ?? 0)
-    const isOutOfStock = stock <= 0
+    const isOutOfStock = getAvailableStock(product) <= 0
     const isAlreadySelected = Number(product.id) !== item.productId && selectedProductIds.includes(Number(product.id))
 
     return !isOutOfStock && !isAlreadySelected
   })
 
-  const currentProductStock = products.find((p) => Number(p.id) === item.productId)?.stock
+  const currentProduct = products.find((p) => Number(p.id) === item.productId)
+  const currentProductAvailable = currentProduct ? getAvailableStock(currentProduct) : undefined
+
+  // En una orden nueva no hay unidades propias descontadas ni reservadas, así que el disponible
+  // es el tope exacto. En una orden existente el tope depende de lo que la orden ya tiene
+  // descontado y reservado: lo decide el servidor al reservar, por eso acá no se limita.
+  const maxQuantity = !isExistingOrder ? currentProductAvailable : undefined
 
   const handleSelectProduct = (product: ProductWithStock) => {
     if (disabled) return
     setSearchTerm(product.name)
     setIsOpen(false)
 
-    const maxStock = Number(product.stock ?? 1)
+    const maxStock = Math.max(1, getAvailableStock(product))
     const adjustedQuantity = Math.min(item.quantity, maxStock)
 
     onUpdateItem(item.id, {
@@ -125,7 +140,7 @@ export function ItemOrder({
     const rawVal = Number(e.target.value) || 1
     const minVal = 1
 
-    const maxVal = currentProductStock !== undefined ? Number(currentProductStock) : rawVal
+    const maxVal = maxQuantity !== undefined ? Number(maxQuantity) : rawVal
     const qty = Math.min(maxVal, Math.max(minVal, rawVal))
 
     onUpdateItem(item.id, { quantity: qty })
@@ -143,6 +158,8 @@ export function ItemOrder({
   const inputStyle =
     'w-full rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:text-white'
 
+  const errorStyle = stockError ? 'border-red-500 ring-2 ring-red-500/20 dark:border-red-500' : ''
+
   return (
     <tr className="border-b border-slate-200/80 transition hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.02]">
       {/* Producto */}
@@ -152,7 +169,7 @@ export function ItemOrder({
             ref={inputRef}
             type="text"
             disabled={disabled}
-            className={`${inputStyle} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+            className={`${inputStyle} ${errorStyle} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
             placeholder="Buscar producto..."
             value={searchTerm}
             onChange={(e) => {
@@ -164,6 +181,12 @@ export function ItemOrder({
               setTimeout(() => setIsOpen(false), 200)
             }}
           />
+
+          {stockError && (
+            <p className="mt-1 text-[11px] font-medium text-red-500">
+              Stock insuficiente: se restauró la última cantidad válida.
+            </p>
+          )}
 
           {!disabled && isOpen && dropdownPosition && createPortal(
             <ul
@@ -188,7 +211,12 @@ export function ItemOrder({
                     >
                       <div>
                         <span className="font-medium block">{product.name}</span>
-                        <span className="text-[11px] text-slate-400">Stock: {String(product.stock ?? 0)} un.</span>
+                        <span className="text-[11px] text-slate-400">
+                          Disponible: {getAvailableStock(product)} un.
+                          {Number(product.reservedStock ?? 0) > 0 && (
+                            <> ({Number(product.reservedStock)} reservadas)</>
+                          )}
+                        </span>
                       </div>
                       <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                         ${Number(product.price).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -213,12 +241,18 @@ export function ItemOrder({
           <input
             type="number"
             min={1}
-            max={currentProductStock !== undefined ? Number(currentProductStock) : undefined}
+            max={maxQuantity !== undefined ? Number(maxQuantity) : undefined}
             disabled={disabled}
             value={item.quantity}
             onChange={handleQuantityChange}
-            className={`${inputStyle} text-center ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
-            title={currentProductStock !== undefined ? `Stock máximo disponible: ${currentProductStock}` : undefined}
+            className={`${inputStyle} ${errorStyle} text-center ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+            title={
+              maxQuantity !== undefined
+                ? `Stock máximo disponible: ${maxQuantity}`
+                : isExistingOrder
+                ? 'El stock disponible se valida al modificar la cantidad'
+                : undefined
+            }
           />
         </div>
       </td>

@@ -19,6 +19,8 @@ export class ProductsService {
   }
 
   async createProduct(input: ProductInput): Promise<{ id: string }> {
+    this.assertValidStock(input.stock)
+
     const product = await prisma.product.create({
       data: this.toProductData(input),
       select: { id: true }
@@ -28,13 +30,19 @@ export class ProductsService {
   }
 
   async updateProduct(input: UpdateProductInput): Promise<{ id: string }> {
-    const product = await prisma.product.update({
-      where: { id: BigInt(input.id) },
-      data: this.toProductData(input),
-      select: { id: true }
+    this.assertValidStock(input.stock)
+
+    // Guardia atómica: solo actualiza si el nuevo stock no queda por debajo de lo reservado.
+    // (reservedStock <= nuevo stock) se evalúa en el mismo UPDATE, sin carrera con las reservas.
+    const productId = BigInt(input.id)
+    const result = await prisma.product.updateMany({
+      where: { id: productId, reservedStock: { lte: input.stock } },
+      data: this.toProductData(input)
     })
 
-    return { id: product.id.toString() }
+    if (result.count === 0) await this.throwStockBelowReserved(productId, input.stock)
+
+    return { id: productId.toString() }
   }
 
   async setProductStatus(id: string, isActive: boolean): Promise<{ id: string }> {
@@ -48,13 +56,17 @@ export class ProductsService {
   }
 
   async updateProductStock(id: string, stock: number): Promise<{ id: string }> {
-    const product = await prisma.product.update({
-      where: { id: BigInt(id) },
-      data: { stock },
-      select: { id: true }
+    this.assertValidStock(stock)
+
+    const productId = BigInt(id)
+    const result = await prisma.product.updateMany({
+      where: { id: productId, reservedStock: { lte: stock } },
+      data: { stock }
     })
 
-    return { id: product.id.toString() }
+    if (result.count === 0) await this.throwStockBelowReserved(productId, stock)
+
+    return { id: productId.toString() }
   }
 
   async getProducts(searchParams?: SearchParams): Promise<ProductsResponse> {
@@ -101,16 +113,22 @@ export class ProductsService {
 
       return {
         success: true,
-        data: products.map((product) => ({
-          id: product.id.toString(),
-          name: product.name,
-          price: Number(product.price),
-          stock: product.stock,
-          lowStock: product.lowStock,
-          image: product.image,
-          isActive: product.isActive,
-          categoryId: product.categoryId.toString()
-        })),
+        data: products.map((product) => {
+          const reservedStock = product.reservedStock ?? 0
+
+          return {
+            id: product.id.toString(),
+            name: product.name,
+            price: Number(product.price),
+            stock: product.stock,
+            reservedStock,
+            availableStock: Math.max(0, product.stock - reservedStock),
+            lowStock: product.lowStock,
+            image: product.image,
+            isActive: product.isActive,
+            categoryId: product.categoryId.toString()
+          }
+        }),
         totalPages,
         totalCount,
         currentPage: page,
@@ -126,6 +144,29 @@ export class ProductsService {
         currentPage: 1,
       };
     }
+  }
+
+  private assertValidStock(stock: number) {
+    if (!Number.isInteger(stock) || stock < 0) {
+      throw new Error('El stock debe ser un número entero mayor o igual a 0.')
+    }
+  }
+
+  /** Se llama cuando el UPDATE condicional no afectó filas: o no existe, o el stock quedaba por debajo de lo reservado. */
+  private async throwStockBelowReserved(productId: bigint, requestedStock: number): Promise<never> {
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      select: { name: true, reservedStock: true }
+    })
+
+    if (!product) {
+      throw new Error('El producto no existe.')
+    }
+
+    const reserved = product.reservedStock ?? 0
+    throw new Error(
+      `No se puede dejar el stock de "${product.name}" en ${requestedStock}: hay ${reserved} unidades reservadas por órdenes en edición. Esperá a que terminen o ingresá un valor mayor o igual a ${reserved}.`
+    )
   }
 
   private toProductData(input: ProductInput): Prisma.ProductUncheckedCreateInput {

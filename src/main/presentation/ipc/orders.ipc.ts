@@ -79,24 +79,86 @@ export function registerOrderIPC(): void {
       };
     }
   });
-    ipcMain.handle('orders:updateState', async (_event, payload: { id: number | string; currentStateId: number; trackingNumber?: string; notes?: string }) => {
-        try {
-            const session = await authService.getActiveSession()
 
-            const sessionContext = session ? {
-            userId: Number(session.id),
-            roleName: session.roleName,
-            } : undefined
+  ipcMain.handle(
+    'orders:updateState',
+    async (
+      _event,
+      payload: {
+        id: number | string;
+        currentStateId: number;
+        trackingNumber?: string;
+        notes?: string;
+        location?: string;
+        invoiceType?: 'A' | 'B' | 'EXENTO';
+        paymentMethod?: string;
+      }
+    ) => {
+      try {
+        const session = await authService.getActiveSession();
 
-            const response = await ordersService.updateOrderState(payload, sessionContext)
-            if (response.success) notifyReportsUpdated()
-            return response
-        } catch (error) {
-            console.error('Failed to update order state:', error)
-            return {
-            success: false,
-            message: error instanceof Error ? error.message : 'Error al cambiar el estado logístico',
-            }
-        }
-    })
+        const sessionContext = session ? {
+          userId: Number(session.id),
+          roleName: session.roleName,
+        } : undefined;
+
+        const response = await ordersService.updateOrderState(payload, sessionContext);
+        if (response.success) notifyReportsUpdated();
+        return response;
+      } catch (error) {
+        console.error('Failed to update order state:', error);
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : 'Error al cambiar el estado logístico',
+        };
+      }
+    }
+  );
+
+  // Reservar stock mientras se edita una orden existente (estado objetivo, idempotente).
+  // No notifica reportes: la reserva es temporal y no cambia ventas ni inventario real.
+  ipcMain.handle(
+    'orders:reserve-stock',
+    async (
+      _event,
+      payload: { orderId: number | string; items: { productId: number; quantity: number }[] }
+    ) => {
+      try {
+        const session = await authService.getActiveSession();
+
+        const sessionContext = session ? {
+          userId: Number(session.id),
+          roleName: session.roleName,
+        } : undefined;
+
+        return await ordersService.reserveOrderStock(payload, sessionContext);
+      } catch (error) {
+        console.error('Failed to reserve order stock:', error);
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : 'Error al reservar el stock',
+        };
+      }
+    }
+  );
+
+  // Liberar la reserva de edición (cancelar edición / cerrar el formulario). Idempotente.
+  ipcMain.handle('orders:release-reservation', async (_event, orderId: number | string) => {
+    try {
+      const session = await authService.getActiveSession();
+
+      const sessionContext = session ? {
+        userId: Number(session.id),
+        roleName: session.roleName,
+      } : undefined;
+
+      return await ordersService.releaseOrderReservation(orderId, sessionContext);
+    } catch (error) {
+      console.error('Failed to release order reservation:', error);
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Error al liberar la reserva',
+      };
+    }
+  });
 }
