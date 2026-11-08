@@ -50,9 +50,7 @@ export function ItemOrder({
   const dropdownRef = useRef<HTMLUListElement>(null)
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null)
 
-  // Control de debounce para no saturar el backend
   const reserveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
-  // Guardamos la última cantidad que confirmamos en la base de datos
   const previousQuantityRef = useRef(item.quantity)
 
   useEffect(() => {
@@ -63,7 +61,6 @@ export function ItemOrder({
     if (!item.productId) {
       setSelectedProduct(null)
     }
-    // Si el producto cambia (o se carga una orden existente), sincronizamos la cantidad previa
     previousQuantityRef.current = item.quantity
   }, [item.productId])
 
@@ -85,7 +82,7 @@ export function ItemOrder({
     fetchProduct()
   }, [item.productId, item.description, selectedProduct])
 
-  // Polling de stock para mantener sincronizado el frontend con lo que pasa en la BD (si otro usuario reserva)
+  // Polling de stock real
   useEffect(() => {
     if (!item.productId) return
 
@@ -173,28 +170,33 @@ export function ItemOrder({
 
   const activeProduct = selectedProduct || products.find((p) => Number(p.id) === item.productId)
   
-  // El disponible es lo que ya calculó la BD (Físico - Reservado)
+  // ─── CÁLCULO DE LÍMITES CORREGIDO ───────────────────────────────────────────
+  // El availableStock de la BD ya descuenta lo que está reservado por este ítem.
+  // Para el límite máximo del input, usamos el stock físico total, ya que no podemos 
+  // comprar más de lo que existe en el depósito (12 en tu caso).
+  const physicalStock = activeProduct ? Number(activeProduct.stock ?? activeProduct.physicalStock ?? 0) : 0
   const dynamicAvailable = activeProduct ? getAvailableStock(activeProduct) : 0
 
-  // Límite del input: lo disponible + lo que ya tenemos reservado para este item
-  const maxQuantity = activeProduct ? Math.max(1, dynamicAvailable + item.quantity) : undefined
+  // Si estamos editando una orden existente, el límite máximo es el stock físico.
+  // Si es una orden nueva, también es el stock físico. La validación final la hace el backend.
+  const maxQuantity = activeProduct ? physicalStock : undefined
 
-  // Función que llama a la nueva API del backend
   const syncReservedStock = async (productId: number, newQty: number, prevQty: number) => {
     try {
       const api = window.electronAPI as any
       if (api?.reserveStock) {
-        await api.reserveStock(String(productId), newQty, prevQty)
+        const res = await api.reserveStock(String(productId), newQty, prevQty)
+        return res
       }
     } catch (error) {
       console.error("Error al reservar stock:", error)
     }
+    return { success: false }
   }
 
   const handleSelectProduct = async (product: ProductWithStock) => {
     if (disabled) return
     
-    // Si había un producto anterior seleccionado, liberamos su reserva
     if (item.productId > 0) {
       await syncReservedStock(item.productId, 0, previousQuantityRef.current)
     }
@@ -206,7 +208,6 @@ export function ItemOrder({
     const maxStock = Math.max(1, getAvailableStock(product))
     const adjustedQuantity = Math.min(1, maxStock)
 
-    // Reservamos el nuevo producto en la base de datos
     await syncReservedStock(Number(product.id), adjustedQuantity, 0)
     previousQuantityRef.current = adjustedQuantity
 
@@ -227,22 +228,26 @@ export function ItemOrder({
 
     onUpdateItem(item.id, { quantity: qty })
 
-    // Sincronizamos la reserva en la BD con un debounce de 400ms
     if (item.productId > 0) {
       if (reserveTimeoutRef.current) clearTimeout(reserveTimeoutRef.current)
       
       reserveTimeoutRef.current = setTimeout(async () => {
-        await syncReservedStock(item.productId, qty, previousQuantityRef.current)
-        previousQuantityRef.current = qty
+        // Verificamos que el backend acepte la reserva
+        const res = await syncReservedStock(item.productId, qty, previousQuantityRef.current)
+        if (res && !res.success) {
+          // Si el backend dice que no hay stock (porque otro usuario compró), revertimos el input
+          onUpdateItem(item.id, { quantity: previousQuantityRef.current })
+          window.alert(res.message || "Stock insuficiente.")
+        } else {
+          previousQuantityRef.current = qty
+        }
       }, 400)
     }
   }
 
-  // Si el componente se desmonta (se elimina el ítem), liberamos el stock
   useEffect(() => {
     return () => {
       if (item.productId > 0) {
-        // Fire and forget: liberar reserva al desmontar
         window.electronAPI?.reserveStock?.(String(item.productId), 0, previousQuantityRef.current).catch(console.error)
       }
     }
