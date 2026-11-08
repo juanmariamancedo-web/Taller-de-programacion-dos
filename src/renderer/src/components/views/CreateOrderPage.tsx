@@ -203,7 +203,13 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     }
   }, [initialOrder, draftOrderId])
 
-  // Función para garantizar la creación transparente del borrador enviando cliente y dirección actuales
+  // Cálculo de importes (para Exento, el importe final baja a su valor neto EN PANTALLA)
+  const rawSubtotal = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
+  const isExento = formData.invoiceType === 'EXENTO'
+  // Este `displayTotal` es solo para mostrar en la UI, el backend siempre recibe el bruto.
+  const displayTotal = isExento ? Number((rawSubtotal / 1.21).toFixed(2)) : rawSubtotal
+
+  // Función blindada para crear el borrador una sola vez
   const ensureDraftOrderExists = async (currentItems: FormOrderItem[]): Promise<number | null> => {
     if (currentOrderId) return currentOrderId
     if (isInitializingDraft) return null
@@ -213,13 +219,13 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
     setIsInitializingDraft(true)
     try {
-      const sellerId = role === "seller" ? Number(session?.id) : Number(session?.id || 0)
+      const sellerId = role === "seller" ? Number(session?.id) : Number(initialOrder?.sellerId || session?.id || 0)
 
       const response = await window.electronAPI?.createOrder?.({
         sellerId,
         clientId: formData.clientId > 0 ? formData.clientId : undefined,
         shippingAddressId: formData.shippingAddressId > 0 ? formData.shippingAddressId : undefined,
-        total: currentItems.reduce((acc, it) => acc + it.quantity * it.unitPrice, 0),
+        total: rawSubtotal, // Siempre enviamos el bruto
         initialStateId: OrderState.Created,
         items: validItems.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
       })
@@ -240,7 +246,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
   // Reserva de stock en tiempo real con debounce
   useEffect(() => {
     const validItems = items.filter((i) => i.productId > 0)
-    if (validItems.length === 0 || !canEditDetails || !itemsDirty.current) return
+    if (validItems.length === 0 || !canEditDetails || !itemsDirty.current || isInitializingDraft) return
 
     const timer = setTimeout(async () => {
       try {
@@ -254,7 +260,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
           id: String(activeId),
           clientId: formData.clientId > 0 ? formData.clientId : undefined,
           shippingAddressId: formData.shippingAddressId > 0 ? formData.shippingAddressId : undefined,
-          total: items.reduce((acc, it) => acc + it.quantity * it.unitPrice, 0),
+          total: rawSubtotal, // Siempre enviamos el bruto
           items: validItems.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
         } as any)
 
@@ -264,6 +270,8 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
         }
         lastValidItems.current = items
       } catch (err: any) {
+        if (err?.message?.includes("ya fue confirmada")) return
+        
         dispatch(setGlobalAlert(err?.message || "Stock insuficiente para reservar."))
         itemsDirty.current = false
         setItems(lastValidItems.current)
@@ -271,7 +279,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     }, RESERVE_DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [items, currentOrderId, canEditDetails, formData.clientId, formData.shippingAddressId])
+  }, [items, currentOrderId, canEditDetails, formData.clientId, formData.shippingAddressId, rawSubtotal, isInitializingDraft])
 
   const handleAddItem = () => {
     itemsDirty.current = true
@@ -346,8 +354,6 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     }
   }
 
-  const total = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
-
   const handleCancel = async () => {
     if (draftOrderId && items.every((i) => i.productId === 0)) {
       try {
@@ -375,8 +381,8 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
   const validate = (): string | null => {
     if (canEditDetails) {
-      if (formData.clientId <= 0) return "Debe seleccionar un cliente"
-      if (formData.shippingAddressId <= 0) return "Debe seleccionar una dirección"
+      if (!formData.clientId || Number(formData.clientId) <= 0) return "Debe seleccionar un cliente"
+      if (!formData.shippingAddressId || Number(formData.shippingAddressId) <= 0) return "Debe seleccionar una dirección"
       if (items.some((i) => i.productId <= 0)) return "Todos los ítems deben tener un producto seleccionado"
     }
 
@@ -421,7 +427,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
           shippingAddressId: formData.shippingAddressId,
           sellerId,
           currentStateId: orderStateId,
-          total,
+          total: rawSubtotal, // Siempre enviamos el bruto para que el SP/backend aplique la exención correctamente una sola vez
           paymentMethod: isInitialStatePaid ? formData.paymentMethod : undefined,
           invoiceType: isInitialStatePaid ? formData.invoiceType : undefined,
           shippingStreet: selectedAddress?.street ?? "",
@@ -869,13 +875,15 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
           {/* Resumen impositivo Ley 27.743 */}
           <div className="mt-4 flex flex-col items-end gap-1">
             <div className="text-xs text-slate-500 dark:text-slate-400 flex gap-4">
-              <span>Neto: ${(total / 1.21).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              <span>IVA (21%): ${(total - (total / 1.21)).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span>Neto {isExento ? 'Exento' : 'Gravado'}: ${(rawSubtotal / 1.21).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              {!isExento && (
+                <span>IVA (21%): ${(rawSubtotal - (rawSubtotal / 1.21)).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              )}
             </div>
             <div className="flex items-center gap-4 text-base font-bold text-gray-900 dark:text-white">
               <span>Total:</span>
               <span className="text-xl text-blue-600 dark:text-blue-400">
-                ${total.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                ${displayTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
               </span>
             </div>
           </div>

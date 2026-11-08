@@ -66,11 +66,20 @@ export class InvoiceService {
 
     const total = Number(order.total)
 
-    // Cálculos fiscales:
-    const netAmount = Number((total / 1.21).toFixed(2))
-    const vatAmount = Number((total - netAmount).toFixed(2))
-    
-    const finalTotal = isExempt ? netAmount : total
+    // Cálculos fiscales unificados:
+    // Si es exento, la BD ya guardó el total neto (no dividimos de nuevo).
+    // Si no es exento, el total incluye IVA, así que lo desglosamos.
+    let netAmount, vatAmount, finalTotal;
+
+    if (isExempt) {
+      netAmount = total;
+      vatAmount = 0;
+      finalTotal = total;
+    } else {
+      netAmount = Number((total / 1.21).toFixed(2));
+      vatAmount = Number((total - netAmount).toFixed(2));
+      finalTotal = total;
+    }
 
     const rows = order.itemOrders
       .map((item) => {
@@ -195,13 +204,13 @@ export class InvoiceService {
         isCancelledOrRejected
           ? `
         <div class="totals-row"><span>Neto Anulado:</span> <span>${money(-netAmount)}</span></div>
-        <div class="totals-row"><span>IVA (21%):</span> <span>${money(-vatAmount)}</span></div>
+        ${!isExempt ? `<div class="totals-row"><span>IVA (21%):</span> <span>${money(-vatAmount)}</span></div>` : ''}
         <div class="transparency-notice">${isExempt ? 'Sujeto Exento - IVA no alcanzado' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
         <div class="totals-row final"><span>Total Reintegrado:</span> <span>${money(-finalTotal)}</span></div>
       `
           : `
-        <div class="totals-row"><span>Neto Gravado:</span> <span>${money(netAmount)}</span></div>
-        <div class="totals-row"><span>IVA (21%):</span> <span>${money(vatAmount)}</span></div>
+        <div class="totals-row"><span>Neto ${isExempt ? 'Exento' : 'Gravado'}:</span> <span>${money(netAmount)}</span></div>
+        ${!isExempt ? `<div class="totals-row"><span>IVA (21%):</span> <span>${money(vatAmount)}</span></div>` : ''}
         <div class="transparency-notice">${isExempt ? 'Sujeto Exento (IVA no gravado)' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
         <div class="totals-row final"><span>Total:</span> <span>${money(finalTotal)}</span></div>
       `
