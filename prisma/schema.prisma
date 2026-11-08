@@ -2,7 +2,7 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-ts"
   output   = "../src/main/infrastructure/db/generated/client"
 }
 
@@ -123,20 +123,18 @@ model Category {
 }
 
 model Product {
-  id            BigInt             @id @default(autoincrement())
-  name          String
-  price         Decimal
-  stock         Int                @default(0)
-  reservedStock Int                @default(0) @map("reserved_stock")
-  lowStock      Int                @map("low_stock")
-  image         String
-  isActive      Boolean            @default(true) @map("is_active")
-  categoryId    BigInt             @map("category_id")
-  category      Category           @relation(fields: [categoryId], references: [id])
-  createdAt     DateTime?          @default(now()) @map("created_at")
-  updatedAt     DateTime?          @updatedAt @map("updated_at")
-  itemOrders    ItemOrder[]
-  stockReservations StockReservation[]
+  id          BigInt      @id @default(autoincrement())
+  name        String
+  price       Decimal
+  stock       Int         @default(0)
+  lowStock    Int         @map("low_stock")
+  image       String
+  isActive    Boolean     @default(true) @map("is_active")
+  categoryId  BigInt      @map("category_id")
+  category    Category    @relation(fields: [categoryId], references: [id])
+  createdAt   DateTime?   @default(now()) @map("created_at")
+  updatedAt   DateTime?   @updatedAt @map("updated_at")
+  itemOrders  ItemOrder[]
 
   @@map("products")
 }
@@ -177,7 +175,6 @@ model Order {
 
   orderStatusHistory OrderStatusHistory[]
   itemOrders         ItemOrder[]
-  stockReservations  StockReservation[]
 
   @@map("orders")
 }
@@ -206,18 +203,4 @@ model ItemOrder {
   order     Order   @relation(fields: [orderId], references: [id])
 
   @@map("item_orders")
-}
-
-model StockReservation {
-  id        BigInt   @id @default(autoincrement())
-  orderId   BigInt   @map("order_id")
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  productId BigInt   @map("product_id")
-  product   Product  @relation(fields: [productId], references: [id])
-  quantity  Int
-  expiresAt DateTime @map("expires_at")
-
-  @@unique([orderId, productId])
-  @@index([expiresAt])
-  @@map("stock_reservations")
 }
