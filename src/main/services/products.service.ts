@@ -7,6 +7,7 @@ import {
   UpdateProductInput
 } from '../domain/types/electron-env';
 import { Prisma } from '../infrastructure/db/generated/client/client';
+import { OrderState } from '../domain/orderStateRules';
 
 export class ProductsService {
   async getProductCategories(): Promise<ProductCategory[]> {
@@ -34,12 +35,14 @@ export class ProductsService {
 
     const productId = BigInt(input.id)
 
-    // Calculamos dinámicamente las unidades reservadas por otros borradores activos (currentStateId = 1)
+    // Calculamos dinámicamente las unidades reservadas por órdenes en borrador o pendientes
     const activeReservations = await prisma.itemOrder.aggregate({
       where: {
         productId: productId,
         order: {
-          currentStateId: BigInt(1), // OrderState.Created
+          currentStateId: {
+            in: [BigInt(OrderState.Created), BigInt(OrderState.Pending)],
+          },
         },
       },
       _sum: { amount: true },
@@ -47,7 +50,7 @@ export class ProductsService {
 
     const reserved = Number(activeReservations._sum.amount ?? 0);
 
-    // Guardia atómica de stock: el nuevo stock físico no puede ser menor a lo que ya está reservado en borradores
+    // Guardia atómica de stock: el nuevo stock físico no puede ser menor a lo que ya está reservado
     if (input.stock < reserved) {
       await this.throwStockBelowReserved(productId, input.stock, reserved);
     }
@@ -76,12 +79,14 @@ export class ProductsService {
 
     const productId = BigInt(id)
 
-    // Calculamos dinámicamente las unidades reservadas por borradores activos
+    // Calculamos dinámicamente las unidades reservadas por borradores y pendientes
     const activeReservations = await prisma.itemOrder.aggregate({
       where: {
         productId: productId,
         order: {
-          currentStateId: BigInt(1), // OrderState.Created
+          currentStateId: {
+            in: [BigInt(OrderState.Created), BigInt(OrderState.Pending)],
+          },
         },
       },
       _sum: { amount: true },
@@ -144,14 +149,16 @@ export class ProductsService {
 
       const totalPages = Math.ceil(totalCount / limit) || 1;
 
-      // Calculamos el stock reservado y disponible de forma dinámica para cada producto listado
+      // Calculamos el stock reservado y disponible considerando borradores y pendientes
       const productsWithDynamicStock = await Promise.all(
         products.map(async (product) => {
           const activeReservations = await prisma.itemOrder.aggregate({
             where: {
               productId: product.id,
               order: {
-                currentStateId: BigInt(1), // OrderState.Created (Borrador activo)
+                currentStateId: {
+                  in: [BigInt(OrderState.Created), BigInt(OrderState.Pending)],
+                },
               },
             },
             _sum: { amount: true },
@@ -213,7 +220,7 @@ export class ProductsService {
 
     const reserved = knownReserved ?? 0
     throw new Error(
-      `No se puede dejar el stock de "${product.name}" en ${requestedStock}: hay ${reserved} unidades reservadas por órdenes en edición. Esperá a que terminen o ingresá un valor mayor o igual a ${reserved}.`
+      `No se puede dejar el stock de "${product.name}" en ${requestedStock}: hay ${reserved} unidades reservadas por órdenes en edición o pendientes. Esperá a que terminen o ingresá un valor mayor o igual a ${reserved}.`
     )
   }
 

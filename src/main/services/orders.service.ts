@@ -59,7 +59,7 @@ export class OrdersService {
 
   /** 
    * Valida la disponibilidad real de stock de manera dinámica:
-   * Stock Físico menos la suma de cantidades en otros borradores activos (currentStateId === OrderState.Created).
+   * Stock Físico menos la suma de cantidades en borradores activos y órdenes pendientes.
    * Permite excluir una orden en curso para que no se bloquee a sí misma al actualizarse.
    */
   private async validateStockAvailability(
@@ -82,25 +82,27 @@ export class OrdersService {
         throw new Error(`El producto con ID ${item.productId} no existe.`);
       }
 
-      // Buscamos todos los ítems en otros borradores activos (excluyendo esta orden)
-      const otherDraftItems = await tx.itemOrder.findMany({
+      // Buscamos todos los ítems en otros borradores u órdenes pendientes (excluyendo esta orden)
+      const otherReservedItems = await tx.itemOrder.findMany({
         where: {
           productId: productId,
           ...(currentOrderId && { orderId: { not: currentOrderId } }),
           order: {
-            currentStateId: BigInt(OrderState.Created),
+            currentStateId: {
+              in: [BigInt(OrderState.Created), BigInt(OrderState.Pending)],
+            },
           },
         },
         select: { amount: true },
       });
 
-      // Sumamos estrictamente lo que ocupan los DEMÁS borradores
-      const reservedByOthers = otherDraftItems.reduce((acc, curr) => acc + Number(curr.amount), 0);
+      // Sumamos estrictamente lo que ocupan las demás órdenes activas o pendientes
+      const reservedByOthers = otherReservedItems.reduce((acc, curr) => acc + Number(curr.amount), 0);
       const availableReal = product.stock - reservedByOthers;
 
       if (availableReal < requestedQuantity) {
         throw new Error(
-          `Stock insuficiente para el producto "${product.name}". Disponible real: ${availableReal} (Físico: ${product.stock}, Ocupado por otros borradores: ${reservedByOthers}), solicitado: ${requestedQuantity}.`
+          `Stock insuficiente para el producto "${product.name}". Disponible real: ${availableReal} (Físico: ${product.stock}, Ocupado por otros borradores/pendientes: ${reservedByOthers}), solicitado: ${requestedQuantity}.`
         );
       }
     }
