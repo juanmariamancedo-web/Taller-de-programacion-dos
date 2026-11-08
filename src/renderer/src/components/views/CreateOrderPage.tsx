@@ -106,8 +106,6 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [loadingSession, setLoadingSession] = useState(true)
-  const [draftOrderId, setDraftOrderId] = useState<number | null>(null)
-  const [isInitializingDraft, setIsInitializingDraft] = useState(false)
 
   useEffect(() => {
     fetchSession()
@@ -118,8 +116,8 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
   const role = getRole(session?.roleId, session?.roleName)
 
-  const isEditing = Boolean(initialOrder?.id || draftOrderId)
-  const currentOrderId = initialOrder?.id ? Number(initialOrder.id) : draftOrderId
+  const isEditing = Boolean(initialOrder?.id)
+  const currentOrderId = initialOrder?.id ? Number(initialOrder.id) : null
 
   const orderStateId = Number(
     (initialOrder as any)?.currentStateId ?? initialOrder?.currentState?.id ?? OrderState.Created
@@ -172,44 +170,11 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
   const { addresses, searchTermAddress, setSearchTermAddress, isOpenAddress, setIsOpenAddress } =
     useSeletedAddressOnOrder(formData)
 
-  // Bandera para evitar ejecuciones dobles en StrictMode o montajes concurrentes
-  const hasRequestedDraft = useRef(false)
-
-  useEffect(() => {
-    if (initialOrder?.id || draftOrderId || !session?.id || hasRequestedDraft.current) return
-
-    hasRequestedDraft.current = true // Bloqueamos inmediatamente para que no se ejecute dos veces
-
-    async function createInitialDraft() {
-      setIsInitializingDraft(true)
-      try {
-        const sellerId = role === "seller" ? Number(session?.id) : Number(session?.id || 0)
-        const response = await window.electronAPI?.createOrder?.({
-          sellerId,
-          total: 0,
-          items: [],
-          initialStateId: OrderState.Created,
-        })
-
-        if (response?.success && response?.orderId) {
-          setDraftOrderId(Number(response.orderId))
-        }
-      } catch (err) {
-        console.error("Error al crear borrador automático:", err)
-        hasRequestedDraft.current = false // Permitimos reintentar si hubo un error de red
-      } finally {
-        setIsInitializingDraft(false)
-      }
-    }
-
-    createInitialDraft()
-  }, [session, initialOrder, draftOrderId, role])
-
   useEffect(() => {
     setFormData(buildFormData(initialOrder))
     itemsDirty.current = false
 
-    if (!initialOrder?.id && !draftOrderId) {
+    if (!initialOrder?.id) {
       setSearchTermClients("")
       setSearchTermAddress("")
       const fresh = [newItem()]
@@ -234,9 +199,9 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
       setItems(mapped)
       lastValidItems.current = mapped
     }
-  }, [initialOrder, draftOrderId])
+  }, [initialOrder])
 
-  // 2. Reserva de stock en tiempo real con debounce
+  // Reserva de stock en tiempo real con debounce (solo si se está editando una orden existente)
   useEffect(() => {
     if (!currentOrderId || !canEditDetails || !itemsDirty.current) return
 
@@ -304,20 +269,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
   const total = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
 
-  // 3. Liberar reserva si se abandona la pantalla sin guardar
-  const handleCancel = async () => {
-    if (currentOrderId && items.every(i => i.productId === 0)) {
-      // Si no agregó ningún producto, podemos eliminarla o cancelarla definitivamente
-      try {
-        await window.electronAPI?.updateOrderState?.({
-          id: String(currentOrderId),
-          currentStateId: OrderState.Cancelled,
-          notes: 'Borrador vacío descartado por el usuario',
-        })
-      } catch (e) {
-        console.error("Error al descartar borrador vacío:", e)
-      }
-    }
+  const handleCancel = () => {
     dispatch(setOrderToEdit(null))
     dispatch(setCurrentTab("orders"))
   }
@@ -445,19 +397,19 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     }
   }
 
-  if (loadingSession || isInitializingDraft) {
+  if (loadingSession) {
     return (
       <div className="flex h-96 items-center justify-center">
-        <p className="text-sm text-gray-500">Iniciando borrador y reservando stock...</p>
+        <p className="text-sm text-gray-500">Cargando sesión y datos...</p>
       </div>
     )
   }
 
-  const title = !initialOrder?.id && !draftOrderId
+  const title = !initialOrder?.id
     ? "Nueva Orden"
     : `Orden #${currentOrderId}${canEditDetails ? "" : " (solo lectura)"}`
 
-  const subtitle = !initialOrder?.id && !draftOrderId
+  const subtitle = !initialOrder?.id
     ? "Ingresá los datos necesarios para registrar una nueva orden."
     : canEditDetails
     ? "Mientras la orden esté en borrador podés modificar sus datos."
@@ -658,7 +610,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
           </div>
         )}
 
-        {!initialOrder?.id && !draftOrderId && initialStateOptions.length > 1 && (
+        {!initialOrder?.id && initialStateOptions.length > 1 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>Estado inicial</label>
