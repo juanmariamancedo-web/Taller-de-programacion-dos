@@ -203,7 +203,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     }
   }, [initialOrder, draftOrderId])
 
-  // Función para garantizar la creación transparente del borrador al seleccionar el primer producto
+  // Función para garantizar la creación transparente del borrador enviando cliente y dirección actuales
   const ensureDraftOrderExists = async (currentItems: FormOrderItem[]): Promise<number | null> => {
     if (currentOrderId) return currentOrderId
     if (isInitializingDraft) return null
@@ -292,7 +292,6 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     const updatedItems = items.map((item) => (item.id === id ? { ...item, ...updatedFields } : item))
     setItems(updatedItems)
 
-    // Si elegimos un producto válido por primera vez y la orden aún no tiene ID en BD, la creamos
     if (updatedFields.productId && updatedFields.productId > 0 && !currentOrderId) {
       await ensureDraftOrderExists(updatedItems)
     }
@@ -300,17 +299,22 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
   const handleClientSelect = async (client: (typeof clients)[number]) => {
     itemsDirty.current = true
-    setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
+    const newClientId = Number(client.id)
+    
+    setFormData((prev) => ({ ...prev, clientId: newClientId, shippingAddressId: -1 }))
     setSearchTermClients(`${client.name} ${client.lastname}`)
     setSearchTermAddress("")
     setIsOpenAddress(false)
     setIsOpenClients(false)
 
-    if (currentOrderId) {
+    const activeId = currentOrderId
+    if (activeId) {
       try {
         await window.electronAPI?.updateOrder?.({
-          id: String(currentOrderId),
-          clientId: Number(client.id),
+          id: String(activeId),
+          clientId: newClientId,
+          shippingAddressId: undefined,
+          items: items.filter((i) => i.productId > 0).map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
         } as any)
       } catch (e) {
         console.error("Error al actualizar cliente en borrador:", e)
@@ -320,16 +324,21 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
   const handleAddressSelect = async (address: (typeof addresses)[number]) => {
     itemsDirty.current = true
+    const newAddressId = Number(address.id)
     const cityName = address.city?.name ? `, ${address.city.name}` : ""
-    setFormData((prev) => ({ ...prev, shippingAddressId: Number(address.id) }))
+    
+    setFormData((prev) => ({ ...prev, shippingAddressId: newAddressId }))
     setSearchTermAddress(`${address.street} ${address.number}${cityName}`)
     setIsOpenAddress(false)
 
-    if (currentOrderId) {
+    const activeId = currentOrderId
+    if (activeId) {
       try {
         await window.electronAPI?.updateOrder?.({
-          id: String(currentOrderId),
-          shippingAddressId: Number(address.id),
+          id: String(activeId),
+          clientId: formData.clientId,
+          shippingAddressId: newAddressId,
+          items: items.filter((i) => i.productId > 0).map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
         } as any)
       } catch (e) {
         console.error("Error al actualizar dirección en borrador:", e)
