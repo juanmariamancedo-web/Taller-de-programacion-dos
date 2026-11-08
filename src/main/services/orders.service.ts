@@ -58,53 +58,40 @@ export class OrdersService {
   }
 
   /** 
-   * Valida la disponibilidad real de stock de manera dinámica:
-   * Stock Físico menos la suma de cantidades en borradores activos y órdenes pendientes.
-   * Permite excluir una orden en curso para que no se bloquee a sí misma al actualizarse.
+   * Actualiza el stock reservado del producto en la base de datos.
    */
-  private async validateStockAvailability(
-    tx: Tx,
-    items: { productId: number | bigint | string; quantity: number | string }[],
-    currentOrderId?: bigint
-  ) {
+  private async updateReservedStock(tx: Tx, productId: bigint, delta: number) {
+    if (delta === 0) return;
+    
+    // Usamos updateMany con validación para evitar que el stock reservado baje de 0
+    const product = await tx.product.findUnique({ where: { id: productId }, select: { stock: true, reservedStock: true, name: true } });
+    if (!product) return;
+
+    const newReserved = product.reservedStock + delta;
+    
+    // Validación de seguridad: no podemos reservar más de lo que hay físicamente
+    if (newReserved > product.stock) {
+      throw new Error(`Stock insuficiente para "${product.name}". Stock físico: ${product.stock}, ya reservado: ${product.reservedStock}, intentas reservar: ${delta}.`);
+    }
+
+    await tx.product.update({
+      where: { id: productId },
+      data: {
+        reservedStock: Math.max(0, newReserved)
+      }
+    });
+  }
+
+  /** 
+   * Libera el stock reservado cuando la orden se cancela o se quita del borrador.
+   */
+  private async releaseReservedStock(tx: Tx, orderId: bigint) {
+    const items = await tx.itemOrder.findMany({
+      where: { orderId }
+    });
+
     for (const item of items) {
-      const productId = BigInt(item.productId);
-      const requestedQuantity = Number(item.quantity);
-
-      if (requestedQuantity <= 0) continue;
-
-      const product = await tx.product.findUnique({
-        where: { id: productId },
-        select: { id: true, name: true, stock: true },
-      });
-
-      if (!product) {
-        throw new Error(`El producto con ID ${item.productId} no existe.`);
-      }
-
-      // Buscamos todos los ítems en otros borradores u órdenes pendientes (excluyendo esta orden)
-      const otherReservedItems = await tx.itemOrder.findMany({
-        where: {
-          productId: productId,
-          ...(currentOrderId && { orderId: { not: currentOrderId } }),
-          order: {
-            currentStateId: {
-              in: [BigInt(OrderState.Created), BigInt(OrderState.Pending)],
-            },
-          },
-        },
-        select: { amount: true },
-      });
-
-      // Sumamos estrictamente lo que ocupan las demás órdenes activas o pendientes
-      const reservedByOthers = otherReservedItems.reduce((acc, curr) => acc + Number(curr.amount), 0);
-      const availableReal = product.stock - reservedByOthers;
-
-      if (availableReal < requestedQuantity) {
-        throw new Error(
-          `Stock insuficiente para el producto "${product.name}". Disponible real: ${availableReal} (Físico: ${product.stock}, Ocupado por otros borradores/pendientes: ${reservedByOthers}), solicitado: ${requestedQuantity}.`
-        );
-      }
+      await this.updateReservedStock(tx, item.productId, -Number(item.amount));
     }
   }
 
@@ -329,8 +316,11 @@ export class OrdersService {
       }
 
       const newOrder = await prisma.$transaction(async (tx) => {
-        if (items && items.length > 0) {
-          await this.validateStockAvailability(tx, items);
+        // 1. Reservar stock (si no es pagada directamente)
+        if (items && items.length > 0 && initialStateId !== OrderState.Paid) {
+          for (const item of items) {
+            await this.updateReservedStock(tx, BigInt(item.productId), Number(item.quantity));
+          }
         }
 
         let addressSnapshot = {
@@ -371,6 +361,7 @@ export class OrdersService {
           },
         });
 
+        // 2. Si se crea directamente como Pagada, descontar stock físico
         if (initialStateId === OrderState.Paid && items && items.length > 0) {
           await this.finalizeStockDeduction(
             tx, 
@@ -424,6 +415,7 @@ export class OrdersService {
 
       const existingOrder = await prisma.order.findUnique({
         where: { id: orderId },
+        include: { itemOrders: true }
       });
 
       if (!existingOrder) {
@@ -443,8 +435,18 @@ export class OrdersService {
         const hasNewItems = items !== undefined && items !== null;
         const validItems = hasNewItems ? items.filter((i) => Number(i.quantity) > 0 && Number(i.productId) > 0) : [];
 
-        if (validItems.length > 0) {
-          await this.validateStockAvailability(tx, validItems, orderId);
+        // 1. Liberamos la reserva de los ítems viejos
+        if (Number(existingOrder.currentStateId) === OrderState.Created || Number(existingOrder.currentStateId) === OrderState.Pending) {
+          for (const oldItem of existingOrder.itemOrders) {
+            await this.updateReservedStock(tx, oldItem.productId, -Number(oldItem.amount));
+          }
+        }
+
+        // 2. Reservamos el stock de los nuevos ítems
+        if (validItems.length > 0 && (Number(existingOrder.currentStateId) === OrderState.Created || Number(existingOrder.currentStateId) === OrderState.Pending)) {
+          for (const newItem of validItems) {
+            await this.updateReservedStock(tx, BigInt(newItem.productId), Number(newItem.quantity));
+          }
         }
 
         await tx.itemOrder.deleteMany({ where: { orderId } });
@@ -543,13 +545,18 @@ export class OrdersService {
         }
 
         const updatedOrder = await prisma.$transaction(async (tx) => {
-          // 1. Descontamos el stock de los productos con el SP seguro sp_actualizar_stock_producto
+          // 1. Liberamos el stock reservado (porque ahora pasa a stock físico descontado)
+          if (currentState === OrderState.Created || currentState === OrderState.Pending) {
+             await this.releaseReservedStock(tx, orderId);
+          }
+
+          // 2. Descontamos el stock físico de los productos con el SP
           await this.finalizeStockDeduction(
             tx, 
             existingOrder.itemOrders.map(i => ({ productId: i.productId, amount: i.amount }))
           );
 
-          // 2. Ejecutamos el SP procesar_pago_orden
+          // 3. Ejecutamos el SP procesar_pago_orden
           const spResult = await tx.$queryRaw<Array<{
             order_id: bigint;
             total_amount: number;
@@ -611,6 +618,11 @@ export class OrdersService {
 
       // ─── OTROS ESTADOS (Usa sp_anular_orden_borrador / sp_cambiar_estado_orden) 
       const updatedOrder = await prisma.$transaction(async (tx) => {
+        // Si se cancela o rechaza, liberamos el stock reservado
+        if (releasesStock(targetStateId) && (currentState === OrderState.Created || currentState === OrderState.Pending)) {
+           await this.releaseReservedStock(tx, orderId);
+        }
+
         // Anular mediante el SP de la base de datos si es un borrador cancelado
         if (releasesStock(targetStateId) && currentState === OrderState.Created) {
           await tx.$executeRaw`
@@ -667,9 +679,6 @@ export class OrdersService {
 
   // ─── NUEVO MÉTODO: Actualización Atómica de Ítem con SP 
 
-  /**
-   * Actualiza la cantidad de un ítem y recalcula el total de la orden usando el SP sp_actualizar_cantidad_item_orden.
-   */
   async updateItemQuantity(
     orderId: number | bigint,
     productId: number | bigint,

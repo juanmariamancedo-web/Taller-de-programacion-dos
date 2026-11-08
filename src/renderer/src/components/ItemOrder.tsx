@@ -41,8 +41,6 @@ export function ItemOrder({
 }: ItemOrderProps) {
   const [searchTerm, setSearchTerm] = useState(item.description || '')
   const [products, setProducts] = useState<ProductWithStock[]>([])
-  
-  // Guardamos el objeto completo del producto seleccionado directamente en el estado local
   const [selectedProduct, setSelectedProduct] = useState<ProductWithStock | null>(null)
 
   const [isOpen, setIsOpen] = useState(false)
@@ -52,18 +50,23 @@ export function ItemOrder({
   const dropdownRef = useRef<HTMLUListElement>(null)
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null)
 
+  // Control de debounce para no saturar el backend
+  const reserveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // Guardamos la última cantidad que confirmamos en la base de datos
+  const previousQuantityRef = useRef(item.quantity)
+
   useEffect(() => {
     setSearchTerm(item.description || '')
   }, [item.description])
 
-  // Si se resetea o borra el ítem (productId === 0), limpiamos la selección
   useEffect(() => {
     if (!item.productId) {
       setSelectedProduct(null)
     }
+    // Si el producto cambia (o se carga una orden existente), sincronizamos la cantidad previa
+    previousQuantityRef.current = item.quantity
   }, [item.productId])
 
-  // Si la orden viene guardada (edición), buscamos la info inicial del producto por su ID
   useEffect(() => {
     if (!item.productId || selectedProduct) return
 
@@ -73,18 +76,16 @@ export function ItemOrder({
         if (api?.getProducts) {
           const res = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
           const found = (res.data || []).find((p: any) => Number(p.id) === Number(item.productId))
-          if (found) {
-            setSelectedProduct(found as ProductWithStock)
-          }
+          if (found) setSelectedProduct(found as ProductWithStock)
         }
       } catch (err) {
-        console.error('Error al resolver producto del ítem:', err)
+        console.error('Error al resolver producto:', err)
       }
     }
     fetchProduct()
   }, [item.productId, item.description, selectedProduct])
 
-  // Sincronización automática periódica para refrescar el stock desde el backend
+  // Polling de stock para mantener sincronizado el frontend con lo que pasa en la BD (si otro usuario reserva)
   useEffect(() => {
     if (!item.productId) return
 
@@ -94,22 +95,13 @@ export function ItemOrder({
         if (api?.getProducts) {
           const res = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
           const found = (res.data || []).find((p: any) => Number(p.id) === Number(item.productId))
+          
           if (found) {
-            setSelectedProduct((prev) => {
-              if (!prev) return found as ProductWithStock
-              // Mantenemos la referencia pero actualizamos los valores de stock del servidor
-              return {
-                ...prev,
-                stock: found.stock,
-                physicalStock: found.physicalStock,
-                reservedStock: found.reservedStock,
-                availableStock: found.availableStock,
-              }
-            })
+            setSelectedProduct(found as ProductWithStock)
           }
         }
       } catch (err) {
-        console.error('Error al refrescar stock del ítem:', err)
+        console.error('Error al refrescar stock:', err)
       }
     }
 
@@ -179,27 +171,44 @@ export function ItemOrder({
     return !isOut && !isSelected
   })
 
-  // Priorizamos el objeto local del producto seleccionado
   const activeProduct = selectedProduct || products.find((p) => Number(p.id) === item.productId)
   
-  const rawBaseAvailable = activeProduct ? getAvailableStock(activeProduct) : 0
+  // El disponible es lo que ya calculó la BD (Físico - Reservado)
+  const dynamicAvailable = activeProduct ? getAvailableStock(activeProduct) : 0
 
-  // Cálculo robusto: Si el servidor ya reservó, el stock disponible es el del servidor. 
-  // Si estamos tipeando y el servidor todavía no respondió (debounce), restamos la delta local de forma reactiva.
-  const dynamicAvailable = rawBaseAvailable
+  // Límite del input: lo disponible + lo que ya tenemos reservado para este item
+  const maxQuantity = activeProduct ? Math.max(1, dynamicAvailable + item.quantity) : undefined
 
-  // Límite máximo para el input de cantidad
-  const maxQuantity = activeProduct ? Math.max(1, rawBaseAvailable + Number(item.quantity)) : undefined
+  // Función que llama a la nueva API del backend
+  const syncReservedStock = async (productId: number, newQty: number, prevQty: number) => {
+    try {
+      const api = window.electronAPI as any
+      if (api?.reserveStock) {
+        await api.reserveStock(String(productId), newQty, prevQty)
+      }
+    } catch (error) {
+      console.error("Error al reservar stock:", error)
+    }
+  }
 
-  const handleSelectProduct = (product: ProductWithStock) => {
+  const handleSelectProduct = async (product: ProductWithStock) => {
     if (disabled) return
+    
+    // Si había un producto anterior seleccionado, liberamos su reserva
+    if (item.productId > 0) {
+      await syncReservedStock(item.productId, 0, previousQuantityRef.current)
+    }
 
     setSelectedProduct(product)
     setSearchTerm(product.name)
     setIsOpen(false)
 
     const maxStock = Math.max(1, getAvailableStock(product))
-    const adjustedQuantity = Math.min(item.quantity, maxStock)
+    const adjustedQuantity = Math.min(1, maxStock)
+
+    // Reservamos el nuevo producto en la base de datos
+    await syncReservedStock(Number(product.id), adjustedQuantity, 0)
+    previousQuantityRef.current = adjustedQuantity
 
     onUpdateItem(item.id, {
       productId: Number(product.id),
@@ -216,29 +225,35 @@ export function ItemOrder({
     const maxVal = maxQuantity !== undefined ? Number(maxQuantity) : rawVal
     const qty = Math.min(maxVal, Math.max(minVal, rawVal))
 
-    // Actualizamos de forma inmediata el estado local del producto para reflejar reservas instantáneas
-    if (selectedProduct) {
-      const physical = Number(selectedProduct.stock ?? selectedProduct.physicalStock ?? 0)
-      const currentReserved = Number(selectedProduct.reservedStock ?? 0)
-      // Ajustamos temporalmente el reservedStock localmente para que el contador responda al instante antes del debounce
-      const diff = qty - item.quantity
-      setSelectedProduct({
-        ...selectedProduct,
-        reservedStock: Math.max(0, currentReserved + diff)
-      })
-    }
-
     onUpdateItem(item.id, { quantity: qty })
+
+    // Sincronizamos la reserva en la BD con un debounce de 400ms
+    if (item.productId > 0) {
+      if (reserveTimeoutRef.current) clearTimeout(reserveTimeoutRef.current)
+      
+      reserveTimeoutRef.current = setTimeout(async () => {
+        await syncReservedStock(item.productId, qty, previousQuantityRef.current)
+        previousQuantityRef.current = qty
+      }, 400)
+    }
   }
+
+  // Si el componente se desmonta (se elimina el ítem), liberamos el stock
+  useEffect(() => {
+    return () => {
+      if (item.productId > 0) {
+        // Fire and forget: liberar reserva al desmontar
+        window.electronAPI?.reserveStock?.(String(item.productId), 0, previousQuantityRef.current).catch(console.error)
+      }
+    }
+  }, [item.productId])
 
   const unitPriceWithVat = item.unitPrice
   const unitNetPrice = unitPriceWithVat / 1.21
   const unitVatAmount = unitPriceWithVat - unitNetPrice
   const totalSubtotal = item.quantity * unitPriceWithVat
 
-  const inputStyle =
-    'w-full rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:text-white'
-
+  const inputStyle = 'w-full rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:text-white'
   const errorStyle = stockError ? 'border-red-500 ring-2 ring-red-500/20 dark:border-red-500' : ''
 
   return (
@@ -260,14 +275,9 @@ export function ItemOrder({
             onBlur={() => setTimeout(() => setIsOpen(false), 200)}
           />
 
-          {/* INDICADOR DE STOCK REACTIVO */}
           {activeProduct && (
             <div className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${
-                  dynamicAvailable > 0 ? 'bg-emerald-500' : 'bg-red-500'
-                }`}
-              />
+              <span className={`inline-block h-2 w-2 rounded-full ${dynamicAvailable > 0 ? 'bg-emerald-500' : 'bg-red-500'}`} />
               <span>
                 Stock disponible:{' '}
                 <strong className={dynamicAvailable > 0 ? 'text-slate-700 dark:text-slate-200' : 'text-red-500 font-bold'}>
@@ -289,11 +299,7 @@ export function ItemOrder({
           {!disabled && isOpen && dropdownPosition && createPortal(
             <ul
               ref={dropdownRef}
-              style={{
-                top: dropdownPosition.top,
-                left: dropdownPosition.left,
-                width: dropdownPosition.width,
-              }}
+              style={{ top: dropdownPosition.top, left: dropdownPosition.left, width: dropdownPosition.width }}
               className="fixed z-[1000] max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
             >
               {isLoading ? (
@@ -309,9 +315,7 @@ export function ItemOrder({
                     >
                       <div>
                         <span className="font-medium block">{product.name}</span>
-                        <span className="text-[11px] text-slate-400">
-                          Disponible: {getAvailableStock(product)} un.
-                        </span>
+                        <span className="text-[11px] text-slate-400">Disponible: {getAvailableStock(product)} un.</span>
                       </div>
                       <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                         ${Number(product.price).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
