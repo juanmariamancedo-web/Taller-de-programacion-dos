@@ -767,6 +767,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
                     disabled={!canEditDetails}
                     isOnlyItem={items.length === 1 || !canEditDetails}
                     selectedProductIds={items.map((i) => i.productId).filter((id) => id > 0)}
+                    currentStateId={orderStateId}
                     onUpdateItem={handleUpdateItem}
                     onRemoveItem={handleRemoveItem}
                   />
