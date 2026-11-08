@@ -112,6 +112,8 @@ export interface CreateOrderResponse {
   success: boolean
   orderId?: number
   message?: string
+  /** Producto que causó el error de stock (para marcar la fila en el formulario). */
+  failedProductId?: number
 }
 
 
@@ -119,6 +121,17 @@ export interface OrderMutationResponse {
   success: boolean
   orderId?: number
   message?: string
+  /** Producto que causó el error de stock (para marcar la fila en el formulario). */
+  failedProductId?: number
+}
+
+// --- RESERVA DE STOCK EN EDICIÓN ---
+export interface ReserveOrderStockPayload {
+  orderId: number | string
+  items: Array<{
+    productId: number
+    quantity: number
+  }>
 }
 
 // --- DASHBOARD ---
@@ -389,6 +402,10 @@ export interface ProductListItem {
   name: string
   price: number
   stock: number
+  /** Unidades apartadas por ediciones en curso. Disponible = stock - reservedStock. */
+  reservedStock?: number
+  /** stock - reservedStock. Lo completa el servicio de productos. */
+  availableStock?: number
   lowStock: number
   image: string
   isActive: boolean
@@ -448,19 +465,22 @@ export interface UpdateOrderStatePayload {
   currentStateId: number
   trackingNumber?: string
   notes?: string
+  location?: string
+  invoiceType?: 'A' | 'B' | 'EXENTO'
+  paymentMethod?: string
 }
 
 export interface CreateOrderPayload {
-  clientId: number | string;
-  sellerId?: number | string;
-  shippingAddressId?: number | string;
-  initialStateId?: number; // Creada (por defecto), Pendiente o Pagada
+  clientId?: number | bigint; 
+  sellerId: number | bigint;
+  shippingAddressId?: number | bigint;
   total: number;
-  items: Array<{
-    productId: number;
+  items: {
+    productId: number | bigint;
     quantity: number;
     unitPrice: number;
-  }>;
+  }[];
+  initialStateId?: number;
 }
 
 export interface UpdateOrderPayload {
@@ -511,6 +531,8 @@ export interface IElectronAPI {
   createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResponse>
   updateOrder: (payload: UpdateOrderPayload) => Promise<OrderMutationResponse>
   updateOrderState: (payload: UpdateOrderStatePayload) => Promise<OrderMutationResponse>
+  reserveOrderStock: (payload: ReserveOrderStockPayload) => Promise<OrderMutationResponse>
+  releaseOrderReservation: (orderId: number | string) => Promise<OrderMutationResponse>
 
   // Clientes y Direcciones
   getProvinces: () => Promise<ProvinceOption[]>
@@ -528,6 +550,7 @@ export interface IElectronAPI {
   updateProduct: (input: UpdateProductInput) => Promise<ProductMutationResponse>
   setProductStatus: (input: ProductStatusInput) => Promise<ProductMutationResponse>
   updateProductStock: (input: ProductStockInput) => Promise<ProductMutationResponse>
+  onStockUpdated: (callback: () => void) => Unsubscribe
 
   // Autenticación y Sesión
   login: (credentials: Credentials) => Promise<AuthResponse>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useAppDispatch } from "../../store/hooks"
 import { setCurrentTab, setOrderToEdit, setGlobalAlert } from "../../store/slices/appSlice"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
@@ -50,6 +50,7 @@ interface FormData {
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 const SHOW_DEBUG = false
+const RESERVE_DEBOUNCE_MS = 400
 
 const inputClass =
   "w-full rounded-xl border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
@@ -98,13 +99,15 @@ const assertSuccess = (response: any, fallbackMessage: string) => {
   if (!response?.success) throw new Error(response?.message || fallbackMessage)
 }
 
-// ─── Componente ───────────────────────────────────────────────────────────
+// ─── Componente Principal ─────────────────────────────────────────────────
 
-export default function OrderForm({ initialOrder }: OrderFormProps) {
+export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
   const dispatch = useAppDispatch()
 
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [loadingSession, setLoadingSession] = useState(true)
+  const [draftOrderId, setDraftOrderId] = useState<number | null>(null)
+  const [isInitializingDraft, setIsInitializingDraft] = useState(false)
 
   useEffect(() => {
     fetchSession()
@@ -115,17 +118,19 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const role = getRole(session?.roleId, session?.roleName)
 
-  const isEditing = Boolean(initialOrder?.id)
+  const isEditing = Boolean(initialOrder?.id || draftOrderId)
+  const currentOrderId = initialOrder?.id ? Number(initialOrder.id) : draftOrderId
+
   const orderStateId = Number(
     (initialOrder as any)?.currentStateId ?? initialOrder?.currentState?.id ?? OrderState.Created
   )
 
-  const canEditDetails = !isEditing || canEditOrderDetails(orderStateId, role)
-  const allowedNextStates = isEditing ? getAllowedNextStates(orderStateId, role) : []
+  const allowedNextStates = currentOrderId ? getAllowedNextStates(orderStateId, role) : []
+  const canEditDetails = !currentOrderId || canEditOrderDetails(orderStateId, role)
   const canSubmit = canEditDetails || allowedNextStates.length > 0
 
   const hasInvoice = Boolean((initialOrder as any)?.invoiceType)
-  const showInvoice = isEditing && canViewInvoice(orderStateId, role) && hasInvoice
+  const showInvoice = currentOrderId && canViewInvoice(orderStateId, role) && hasInvoice
 
   const debugInfo = {
     role,
@@ -139,6 +144,11 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const [formData, setFormData] = useState<FormData>(() => buildFormData(initialOrder))
   const [items, setItems] = useState<FormOrderItem[]>([newItem()])
+
+  // Control de stock reservado
+  const lastValidItems = useRef<FormOrderItem[]>(items)
+  const itemsDirty = useRef(false)
+  const [stockErrorProductId, setStockErrorProductId] = useState<number | null>(null)
 
   const [initialStateId, setInitialStateId] = useState<number>(OrderState.Created)
 
@@ -154,7 +164,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const nextStateNeedsReason = stateChanged && requiresReason(formData.currentStateId)
 
   const isTargetStatePaid = formData.currentStateId === OrderState.Paid
-  const isInitialStatePaid = !isEditing && initialStateId === OrderState.Paid
+  const isInitialStatePaid = !currentOrderId && initialStateId === OrderState.Paid
 
   const { clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients } =
     useSeletedUserOnOrder()
@@ -162,39 +172,121 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const { addresses, searchTermAddress, setSearchTermAddress, isOpenAddress, setIsOpenAddress } =
     useSeletedAddressOnOrder(formData)
 
+  // Bandera para evitar ejecuciones dobles en StrictMode o montajes concurrentes
+  const hasRequestedDraft = useRef(false)
+
+  useEffect(() => {
+    if (initialOrder?.id || draftOrderId || !session?.id || hasRequestedDraft.current) return
+
+    hasRequestedDraft.current = true // Bloqueamos inmediatamente para que no se ejecute dos veces
+
+    async function createInitialDraft() {
+      setIsInitializingDraft(true)
+      try {
+        const sellerId = role === "seller" ? Number(session?.id) : Number(session?.id || 0)
+        const response = await window.electronAPI?.createOrder?.({
+          sellerId,
+          total: 0,
+          items: [],
+          initialStateId: OrderState.Created,
+        })
+
+        if (response?.success && response?.orderId) {
+          setDraftOrderId(Number(response.orderId))
+        }
+      } catch (err) {
+        console.error("Error al crear borrador automático:", err)
+        hasRequestedDraft.current = false // Permitimos reintentar si hubo un error de red
+      } finally {
+        setIsInitializingDraft(false)
+      }
+    }
+
+    createInitialDraft()
+  }, [session, initialOrder, draftOrderId, role])
+
   useEffect(() => {
     setFormData(buildFormData(initialOrder))
+    itemsDirty.current = false
 
-    if (!initialOrder?.id) {
+    if (!initialOrder?.id && !draftOrderId) {
       setSearchTermClients("")
       setSearchTermAddress("")
-      setItems([newItem()])
+      const fresh = [newItem()]
+      setItems(fresh)
+      lastValidItems.current = fresh
       setInitialStateId(OrderState.Created)
       return
     }
 
-    if (initialOrder.client) {
+    if (initialOrder?.client) {
       setSearchTermClients(`${initialOrder.client.name} ${initialOrder.client.lastname}`)
     }
 
-    const addr = (initialOrder as any).shippingAddress
+    const addr = (initialOrder as any)?.shippingAddress
     if (addr) {
       const city = addr.city?.name ? `, ${addr.city.name}` : ""
       setSearchTermAddress(`${addr.street ?? ""} ${addr.number ?? ""}${city}`.trim())
     }
 
-    setItems(mapOrderItems(initialOrder))
-  }, [initialOrder])
+    if (initialOrder) {
+      const mapped = mapOrderItems(initialOrder)
+      setItems(mapped)
+      lastValidItems.current = mapped
+    }
+  }, [initialOrder, draftOrderId])
 
-  const handleAddItem = () => setItems((prev) => [...prev, newItem()])
+  // 2. Reserva de stock en tiempo real con debounce
+  useEffect(() => {
+    if (!currentOrderId || !canEditDetails || !itemsDirty.current) return
 
-  const handleRemoveItem = (id: string) =>
+    const valid = items.filter((i) => i.productId > 0)
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await window.electronAPI?.updateOrder?.({
+          id: String(currentOrderId),
+          clientId: formData.clientId > 0 ? formData.clientId : undefined,
+          shippingAddressId: formData.shippingAddressId > 0 ? formData.shippingAddressId : undefined,
+          total: items.reduce((acc, it) => acc + it.quantity * it.unitPrice, 0),
+          items: valid.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
+        } as any)
+
+        if (!res?.success) {
+          setStockErrorProductId(res?.failedProductId ?? null)
+          assertSuccess(res, "Stock insuficiente para reservar.")
+        }
+        lastValidItems.current = items
+      } catch (err: any) {
+        dispatch(setGlobalAlert(err?.message || "Stock insuficiente para reservar."))
+        itemsDirty.current = false
+        setItems(lastValidItems.current)
+      }
+    }, RESERVE_DEBOUNCE_MS)
+
+    return () => clearTimeout(timer)
+  }, [items, currentOrderId, canEditDetails, formData.clientId, formData.shippingAddressId])
+
+  const handleAddItem = () => {
+    itemsDirty.current = true
+    setStockErrorProductId(null)
+    setItems((prev) => [...prev, newItem()])
+  }
+
+  const handleRemoveItem = (id: string) => {
+    itemsDirty.current = true
+    setStockErrorProductId(null)
     setItems((prev) => (prev.length === 1 ? prev : prev.filter((item) => item.id !== id)))
+  }
 
-  const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) =>
+  const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) => {
+    itemsDirty.current = true
+    setStockErrorProductId(null)
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item)))
+  }
 
   const handleClientSelect = (client: (typeof clients)[number]) => {
+    itemsDirty.current = true
     setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
     setSearchTermClients(`${client.name} ${client.lastname}`)
     setSearchTermAddress("")
@@ -203,6 +295,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   }
 
   const handleAddressSelect = (address: (typeof addresses)[number]) => {
+    itemsDirty.current = true
     const cityName = address.city?.name ? `, ${address.city.name}` : ""
     setFormData((prev) => ({ ...prev, shippingAddressId: Number(address.id) }))
     setSearchTermAddress(`${address.street} ${address.number}${cityName}`)
@@ -211,14 +304,27 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const total = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
 
-  const handleCancel = () => {
+  // 3. Liberar reserva si se abandona la pantalla sin guardar
+  const handleCancel = async () => {
+    if (currentOrderId && items.every(i => i.productId === 0)) {
+      // Si no agregó ningún producto, podemos eliminarla o cancelarla definitivamente
+      try {
+        await window.electronAPI?.updateOrderState?.({
+          id: String(currentOrderId),
+          currentStateId: OrderState.Cancelled,
+          notes: 'Borrador vacío descartado por el usuario',
+        })
+      } catch (e) {
+        console.error("Error al descartar borrador vacío:", e)
+      }
+    }
     dispatch(setOrderToEdit(null))
     dispatch(setCurrentTab("orders"))
   }
 
   const handleViewInvoice = async (docType?: 'invoice' | 'credit-note') => {
     try {
-      const response = await window.electronAPI?.openOrderInvoice?.(String(initialOrder?.id), docType)
+      const response = await window.electronAPI?.openOrderInvoice?.(String(currentOrderId), docType)
       assertSuccess(response, "No se pudo abrir el comprobante.")
     } catch (err) {
       dispatch(setGlobalAlert(err instanceof Error ? err.message : "Error al abrir el comprobante."))
@@ -232,7 +338,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       if (items.some((i) => i.productId <= 0)) return "Todos los ítems deben tener un producto seleccionado"
     }
 
-    const isPayingNow = (!isEditing && initialStateId === OrderState.Paid) || (stateChanged && formData.currentStateId === OrderState.Paid)
+    const isPayingNow = (!initialOrder?.id && initialStateId === OrderState.Paid) || (stateChanged && formData.currentStateId === OrderState.Paid)
     if (isPayingNow && !formData.paymentMethod.trim()) {
       return "Debe seleccionar un método de pago para marcar la orden como pagada."
     }
@@ -257,8 +363,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
     try {
       const currentSession = (await fetchSession().catch(() => null)) ?? session
-      const orderId = initialOrder?.id ? String(initialOrder.id) : null
-      let savedOrderId: string | null = orderId
+      const orderIdStr = currentOrderId ? String(currentOrderId) : null
+      let savedOrderId: string | null = orderIdStr
 
       if (canEditDetails) {
         const sellerId =
@@ -285,19 +391,30 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           items: items.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
         }
 
-        const response = orderId
-          ? await window.electronAPI?.updateOrder?.({ id: orderId, ...details } as any)
-          : await window.electronAPI?.createOrder?.({ ...details, initialStateId } as any)
+        let response: any
+        if (orderIdStr) {
+          response = await window.electronAPI?.updateOrder?.({ id: orderIdStr, ...details } as any)
+          if (!initialOrder?.id && initialStateId !== OrderState.Created) {
+            await window.electronAPI?.updateOrderState?.({
+              id: orderIdStr,
+              currentStateId: initialStateId,
+              invoiceType: initialStateId === OrderState.Paid ? formData.invoiceType : undefined,
+              paymentMethod: initialStateId === OrderState.Paid ? formData.paymentMethod : undefined,
+            } as any)
+          }
+        } else {
+          response = await window.electronAPI?.createOrder?.({ ...details, initialStateId } as any)
+        }
 
         assertSuccess(response, "Error al guardar la orden.")
-        if (!orderId && response?.orderId) {
+        if (!orderIdStr && response?.orderId) {
           savedOrderId = String(response.orderId)
         }
       }
 
-      if (orderId && stateChanged) {
+      if (orderIdStr && stateChanged) {
         const response = await window.electronAPI?.updateOrderState?.({
-          id: orderId,
+          id: orderIdStr,
           currentStateId: formData.currentStateId,
           trackingNumber: formData.trackingNumber.trim() || undefined,
           location: formData.location.trim() || undefined,
@@ -309,8 +426,8 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         assertSuccess(response, "Error al actualizar el estado de la orden.")
       }
 
-      const isPaidNow = (!isEditing && initialStateId === OrderState.Paid) || (isEditing && formData.currentStateId === OrderState.Paid)
-      const isCancelledOrRejected = isEditing && (formData.currentStateId === OrderState.Cancelled || formData.currentStateId === OrderState.Rejected)
+      const isPaidNow = (!initialOrder?.id && initialStateId === OrderState.Paid) || (currentOrderId && formData.currentStateId === OrderState.Paid)
+      const isCancelledOrRejected = currentOrderId && (formData.currentStateId === OrderState.Cancelled || formData.currentStateId === OrderState.Rejected)
 
       if ((isPaidNow || isCancelledOrRejected) && savedOrderId) {
         try {
@@ -328,19 +445,19 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     }
   }
 
-  if (loadingSession) {
+  if (loadingSession || isInitializingDraft) {
     return (
       <div className="flex h-96 items-center justify-center">
-        <p className="text-sm text-gray-500">Cargando datos de sesión...</p>
+        <p className="text-sm text-gray-500">Iniciando borrador y reservando stock...</p>
       </div>
     )
   }
 
-  const title = !isEditing
+  const title = !initialOrder?.id && !draftOrderId
     ? "Nueva Orden"
-    : `Orden #${initialOrder?.id}${canEditDetails ? "" : " (solo lectura)"}`
+    : `Orden #${currentOrderId}${canEditDetails ? "" : " (solo lectura)"}`
 
-  const subtitle = !isEditing
+  const subtitle = !initialOrder?.id && !draftOrderId
     ? "Ingresá los datos necesarios para registrar una nueva orden."
     : canEditDetails
     ? "Mientras la orden esté en borrador podés modificar sus datos."
@@ -351,7 +468,6 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   const statusHistory = (initialOrder as any)?.statusHistory ?? []
   const disabledFieldClass = "cursor-not-allowed opacity-60 bg-gray-100 dark:bg-zinc-800"
   const addressDisabled = !canEditDetails || formData.clientId <= 0
-  
   const isCancelledOrRejectedState = orderStateId === OrderState.Cancelled || orderStateId === OrderState.Rejected
 
   return (
@@ -410,40 +526,33 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         onSubmit={handleSubmit}
         className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm"
       >
-        {/* Selector de Tipo de Factura y Método de Pago permanente (Bloqueados si ya tiene factura / está pagada) */}
+        {/* Desplegable de Tipo de Factura y Método de Pago (Bloqueados con disabled={true} cuando ya existe factura) */}
         {hasInvoice && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="rounded-xl bg-gray-50 dark:bg-zinc-800/50 p-4 border border-gray-200 dark:border-white/10">
               <label className={labelClass}>Tipo de Factura (Bloqueado)</label>
               <select
-                disabled
+                disabled={true}
                 value={formData.invoiceType}
-                onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' | 'EXENTO' }))}
-                className={`${inputClass} bg-white dark:bg-zinc-900`}
+                className={`${inputClass} bg-white dark:bg-zinc-900 ${disabledFieldClass}`}
               >
-                <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                  Factura B (Consumidor Final / Monotributo)
-                </option>
-                <option value="EXENTO" className="bg-white dark:bg-zinc-900 ftext-gray-900 dark:text-white">
-                  Factura B - Sujeto Exento / Organismo Público
-                </option>
-                <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                  Factura A (Responsable Inscripto - IVA 21%)
-                </option>
+                <option value="B">Factura B (Consumidor Final / Monotributo)</option>
+                <option value="EXENTO">Factura B - Sujeto Exento / Organismo Público</option>
+                <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
               </select>
             </div>
 
             <div className="rounded-xl bg-gray-50 dark:bg-zinc-800/50 p-4 border border-gray-200 dark:border-white/10">
               <label className={labelClass}>Método de Pago (Bloqueado)</label>
               <select
-                value={formData.paymentMethod}
                 disabled={true}
+                value={formData.paymentMethod}
                 className={`${inputClass} bg-white dark:bg-zinc-900 ${disabledFieldClass}`}
               >
-                <option value="Efectivo" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Efectivo</option>
-                <option value="Transferencia" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Transferencia</option>
-                <option value="Tarjeta de Débito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Débito</option>
-                <option value="Tarjeta de Crédito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Crédito</option>
+                <option value="Efectivo">Efectivo</option>
+                <option value="Transferencia">Transferencia</option>
+                <option value="Tarjeta de Débito">Tarjeta de Débito</option>
+                <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
               </select>
             </div>
           </div>
@@ -461,18 +570,15 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                   onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))}
                   className="w-full rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-zinc-900 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value={orderStateId} className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                    {getStateLabel(orderStateId)} (actual)
-                  </option>
+                  <option value={orderStateId}>{getStateLabel(orderStateId)} (actual)</option>
                   {allowedNextStates.map((stateId) => (
-                    <option key={stateId} value={stateId} className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                    <option key={stateId} value={stateId}>
                       {STATE_LABELS[stateId]}
                     </option>
                   ))}
                 </select>
               </div>
 
-              {/* Si estamos transicionando a Paid y aún no tenía factura */}
               {isTargetStatePaid && !hasInvoice && (
                 <>
                   <div>
@@ -482,15 +588,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                       onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' | 'EXENTO' }))}
                       className={`${inputClass} bg-white dark:bg-zinc-900`}
                     >
-                      <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                        Factura B (Consumidor Final / Monotributo)
-                      </option>
-                      <option value="EXENTO" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                        Factura B - Sujeto Exento / Organismo Público
-                      </option>
-                      <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                        Factura A (Responsable Inscripto - IVA 21%)
-                      </option>
+                      <option value="B">Factura B (Consumidor Final / Monotributo)</option>
+                      <option value="EXENTO">Factura B - Sujeto Exento / Organismo Público</option>
+                      <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
                     </select>
                   </div>
 
@@ -501,10 +601,10 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                       onChange={(e) => setFormData((prev) => ({ ...prev, paymentMethod: e.target.value }))}
                       className={`${inputClass} bg-white dark:bg-zinc-900`}
                     >
-                      <option value="Efectivo" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Efectivo</option>
-                      <option value="Transferencia" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Transferencia</option>
-                      <option value="Tarjeta de Débito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Débito</option>
-                      <option value="Tarjeta de Crédito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Crédito</option>
+                      <option value="Efectivo">Efectivo</option>
+                      <option value="Transferencia">Transferencia</option>
+                      <option value="Tarjeta de Débito">Tarjeta de Débito</option>
+                      <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
                     </select>
                   </div>
                 </>
@@ -558,7 +658,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           </div>
         )}
 
-        {!isEditing && initialStateOptions.length > 1 && (
+        {!initialOrder?.id && !draftOrderId && initialStateOptions.length > 1 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>Estado inicial</label>
@@ -568,7 +668,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 className="w-full rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-zinc-900 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
               >
                 {initialStateOptions.map((stateId) => (
-                  <option key={stateId} value={stateId} className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
+                  <option key={stateId} value={stateId}>
                     {STATE_LABELS[stateId]}
                   </option>
                 ))}
@@ -584,15 +684,9 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                     onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' | 'EXENTO' }))}
                     className={`${inputClass} bg-white dark:bg-zinc-900`}
                   >
-                    <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                      Factura B (Consumidor Final / Monotributo)
-                    </option>
-                    <option value="EXENTO" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                      Factura B - Sujeto Exento / Organismo Público
-                    </option>
-                    <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                      Factura A (Responsable Inscripto - IVA 21%)
-                    </option>
+                    <option value="B">Factura B (Consumidor Final / Monotributo)</option>
+                    <option value="EXENTO">Factura B - Sujeto Exento / Organismo Público</option>
+                    <option value="A">Factura A (Responsable Inscripto - IVA 21%)</option>
                   </select>
                 </div>
 
@@ -603,10 +697,10 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                     onChange={(e) => setFormData((prev) => ({ ...prev, paymentMethod: e.target.value }))}
                     className={`${inputClass} bg-white dark:bg-zinc-900`}
                   >
-                    <option value="Efectivo" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Efectivo</option>
-                    <option value="Transferencia" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Transferencia</option>
-                    <option value="Tarjeta de Débito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Débito</option>
-                    <option value="Tarjeta de Crédito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Crédito</option>
+                    <option value="Efectivo">Efectivo</option>
+                    <option value="Transferencia">Transferencia</option>
+                    <option value="Tarjeta de Débito">Tarjeta de Débito</option>
+                    <option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
                   </select>
                 </div>
               </>
@@ -708,7 +802,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 <tr>
                   <th className="px-4 py-3">Producto</th>
                   <th className="w-28 px-4 py-3">Cantidad</th>
-                  <th className="w-36 px-4 py-3">Precio unit.</th>
+                  <th className="w-36 px-4 py-3 text-right">Precio unit.</th>
                   <th className="w-32 px-4 py-3 text-right">Subtotal</th>
                   <th className="w-12 px-4 py-3 text-center"></th>
                 </tr>
@@ -729,6 +823,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             </table>
           </div>
 
+          {/* Resumen impositivo Ley 27.743 */}
           <div className="mt-4 flex flex-col items-end gap-1">
             <div className="text-xs text-slate-500 dark:text-slate-400 flex gap-4">
               <span>Neto: ${(total / 1.21).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>

@@ -19,6 +19,8 @@ export class ProductsService {
   }
 
   async createProduct(input: ProductInput): Promise<{ id: string }> {
+    this.assertValidStock(input.stock)
+
     const product = await prisma.product.create({
       data: this.toProductData(input),
       select: { id: true }
@@ -28,11 +30,33 @@ export class ProductsService {
   }
 
   async updateProduct(input: UpdateProductInput): Promise<{ id: string }> {
+    this.assertValidStock(input.stock)
+
+    const productId = BigInt(input.id)
+
+    // Calculamos dinámicamente las unidades reservadas por otros borradores activos (currentStateId = 1)
+    const activeReservations = await prisma.itemOrder.aggregate({
+      where: {
+        productId: productId,
+        order: {
+          currentStateId: BigInt(1), // OrderState.Created
+        },
+      },
+      _sum: { amount: true },
+    });
+
+    const reserved = Number(activeReservations._sum.amount ?? 0);
+
+    // Guardia atómica de stock: el nuevo stock físico no puede ser menor a lo que ya está reservado en borradores
+    if (input.stock < reserved) {
+      await this.throwStockBelowReserved(productId, input.stock, reserved);
+    }
+
     const product = await prisma.product.update({
-      where: { id: BigInt(input.id) },
+      where: { id: productId },
       data: this.toProductData(input),
       select: { id: true }
-    })
+    });
 
     return { id: product.id.toString() }
   }
@@ -48,11 +72,32 @@ export class ProductsService {
   }
 
   async updateProductStock(id: string, stock: number): Promise<{ id: string }> {
+    this.assertValidStock(stock)
+
+    const productId = BigInt(id)
+
+    // Calculamos dinámicamente las unidades reservadas por borradores activos
+    const activeReservations = await prisma.itemOrder.aggregate({
+      where: {
+        productId: productId,
+        order: {
+          currentStateId: BigInt(1), // OrderState.Created
+        },
+      },
+      _sum: { amount: true },
+    });
+
+    const reserved = Number(activeReservations._sum.amount ?? 0);
+
+    if (stock < reserved) {
+      await this.throwStockBelowReserved(productId, stock, reserved);
+    }
+
     const product = await prisma.product.update({
-      where: { id: BigInt(id) },
+      where: { id: productId },
       data: { stock },
       select: { id: true }
-    })
+    });
 
     return { id: product.id.toString() }
   }
@@ -90,7 +135,7 @@ export class ProductsService {
           skip: (page - 1) * limit,
           take: limit,
           include: {
-            category: true, // Incluye la relación con la categoría si es necesaria en el frontend
+            category: true,
           },
           orderBy,
         }),
@@ -99,18 +144,40 @@ export class ProductsService {
 
       const totalPages = Math.ceil(totalCount / limit) || 1;
 
+      // Calculamos el stock reservado y disponible de forma dinámica para cada producto listado
+      const productsWithDynamicStock = await Promise.all(
+        products.map(async (product) => {
+          const activeReservations = await prisma.itemOrder.aggregate({
+            where: {
+              productId: product.id,
+              order: {
+                currentStateId: BigInt(1), // OrderState.Created (Borrador activo)
+              },
+            },
+            _sum: { amount: true },
+          });
+
+          const reservedStock = Number(activeReservations._sum.amount ?? 0);
+          const availableStock = Math.max(0, product.stock - reservedStock);
+
+          return {
+            id: product.id.toString(),
+            name: product.name,
+            price: Number(product.price),
+            stock: product.stock,
+            reservedStock,
+            availableStock,
+            lowStock: product.lowStock,
+            image: product.image,
+            isActive: product.isActive,
+            categoryId: product.categoryId.toString()
+          }
+        })
+      );
+
       return {
         success: true,
-        data: products.map((product) => ({
-          id: product.id.toString(),
-          name: product.name,
-          price: Number(product.price),
-          stock: product.stock,
-          lowStock: product.lowStock,
-          image: product.image,
-          isActive: product.isActive,
-          categoryId: product.categoryId.toString()
-        })),
+        data: productsWithDynamicStock,
         totalPages,
         totalCount,
         currentPage: page,
@@ -126,6 +193,28 @@ export class ProductsService {
         currentPage: 1,
       };
     }
+  }
+
+  private assertValidStock(stock: number) {
+    if (!Number.isInteger(stock) || stock < 0) {
+      throw new Error('El stock debe ser un número entero mayor o igual a 0.')
+    }
+  }
+
+  private async throwStockBelowReserved(productId: bigint, requestedStock: number, knownReserved?: number): Promise<never> {
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      select: { name: true }
+    })
+
+    if (!product) {
+      throw new Error('El producto no existe.')
+    }
+
+    const reserved = knownReserved ?? 0
+    throw new Error(
+      `No se puede dejar el stock de "${product.name}" en ${requestedStock}: hay ${reserved} unidades reservadas por órdenes en edición. Esperá a que terminen o ingresá un valor mayor o igual a ${reserved}.`
+    )
   }
 
   private toProductData(input: ProductInput): Prisma.ProductUncheckedCreateInput {

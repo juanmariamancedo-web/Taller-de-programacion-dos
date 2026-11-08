@@ -8,17 +8,36 @@ interface ItemOrderProps {
   isOnlyItem: boolean
   disabled?: boolean
   selectedProductIds: number[]
+  /** Orden ya guardada: el límite real de cantidad lo decide el servidor al reservar. */
+  isExistingOrder?: boolean
+  /** El servidor rechazó este ítem por stock insuficiente. */
+  stockError?: boolean
+  /** Estado logístico actual de la orden (1 = Created / Borrador) */
+  currentStateId?: number
   onUpdateItem: (id: string, updatedFields: Partial<FormOrderItem>) => void
   onRemoveItem: (id: string) => void
 }
 
-type ProductWithStock = ProductListItem & { stock: number }
+type ProductWithStock = ProductListItem & { stock: number; reservedStock?: number; availableStock?: number }
+
+/** Unidades disponibles generales del producto (Físico - Reservado global) */
+const getAvailableStock = (product: ProductWithStock): number => {
+  if (product.availableStock !== undefined) {
+    return Number(product.availableStock)
+  }
+  const physical = Number(product.stock ?? 0)
+  const reserved = Number(product.reservedStock ?? 0)
+  return Math.max(0, physical - reserved)
+}
 
 export function ItemOrder({
   item,
   isOnlyItem,
   disabled = false,
   selectedProductIds,
+  isExistingOrder = false,
+  stockError = false,
+  currentStateId = 1,
   onUpdateItem,
   onRemoveItem,
 }: ItemOrderProps) {
@@ -37,6 +56,77 @@ export function ItemOrder({
   useEffect(() => {
     setSearchTerm(item.description || '')
   }, [item.description])
+
+  // Función para refrescar el producto actual bajo demanda o por sincronización
+  const refreshCurrentProduct = async () => {
+    if (!item.productId) return
+    try {
+      const api = window.electronAPI as any
+      if (api?.getProducts) {
+        const res = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
+        const found = (res.data || []).find((p: any) => Number(p.id) === Number(item.productId))
+        if (found) {
+          setProducts((prev) => {
+            const updatedMap = new Map<number, ProductWithStock>(prev.map((p) => [Number(p.id), p]))
+            updatedMap.set(Number(found.id), found as ProductWithStock)
+            return Array.from(updatedMap.values())
+          })
+        }
+      }
+    } catch (err) {
+      console.error('Error al refrescar producto:', err)
+    }
+  }
+
+  // Cargar la info del producto actual al montar si ya tiene un productId asignado
+  useEffect(() => {
+    async function fetchCurrentProduct() {
+      if (!item.productId) return
+      try {
+        const api = window.electronAPI as any
+        if (api?.getProducts) {
+          const res = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
+          const found = (res.data || []).find((p: any) => Number(p.id) === Number(item.productId))
+          if (found) {
+            setProducts((prev) => {
+              if (prev.some((p) => Number(p.id) === Number(found.id))) return prev
+              return [...prev, found as ProductWithStock]
+            })
+          }
+        }
+      } catch (err) {
+        console.error('Error al cargar producto inicial del ítem:', err)
+      }
+    }
+    fetchCurrentProduct()
+  }, [item.productId, item.description])
+
+  const isDraft = currentStateId === 1
+
+  // Sincronización automática en tiempo real por intervalos cortos para asegurar actualización entre ventanas
+  useEffect(() => {
+    if (!isDraft || !item.productId) return
+
+    const interval = setInterval(() => {
+      refreshCurrentProduct()
+    }, 2000)
+
+    return () => clearInterval(interval)
+  }, [isDraft, item.productId, item.description])
+
+  // Suscripción al evento IPC global de Electron
+  useEffect(() => {
+    const api = window.electronAPI as any
+    if (!api?.onStockUpdated) return
+
+    const unsubscribe = api.onStockUpdated(async () => {
+      refreshCurrentProduct()
+    })
+
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe()
+    }
+  }, [item.productId, item.description])
 
   const updateDropdownPosition = (): void => {
     const input = inputRef.current
@@ -58,8 +148,9 @@ export function ItemOrder({
     const timer = setTimeout(async () => {
       setIsLoading(true)
       try {
-        if (window.electronAPI?.getProducts) {
-          const res = await window.electronAPI?.getProducts({ search: searchTerm, page: 1, sort: 'nameDesc' })
+        const api = window.electronAPI as any
+        if (api?.getProducts) {
+          const res = await api.getProducts({ search: searchTerm, page: 1, sort: 'nameDesc' })
           setProducts((res.data || []) as ProductWithStock[])
         }
       } catch (error) {
@@ -94,22 +185,33 @@ export function ItemOrder({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  // Filtrado seguro para el Dropdown evitando ocultar el producto actual en edición
   const availableProducts = products.filter((product) => {
-    const stock = Number(product.stock ?? 0)
-    const isOutOfStock = stock <= 0
-    const isAlreadySelected = Number(product.id) !== item.productId && selectedProductIds.includes(Number(product.id))
+    const isCurrentItemProduct = Number(product.id) === item.productId
+    const isOutOfStock = getAvailableStock(product) <= 0 && !isCurrentItemProduct
+    const isAlreadySelected = !isCurrentItemProduct && selectedProductIds.includes(Number(product.id))
 
     return !isOutOfStock && !isAlreadySelected
   })
 
-  const currentProductStock = products.find((p) => Number(p.id) === item.productId)?.stock
+  const currentProduct = products.find((p) => Number(p.id) === item.productId)
+  
+  // Stock base disponible informado por el backend
+  const baseAvailable = currentProduct ? getAvailableStock(currentProduct) : 0
+
+  // El límite máximo para el input es lo que queda libre + lo que ya tiene asignado este ítem en la orden actual
+  const currentProductAvailable = currentProduct 
+    ? baseAvailable + Number(item.quantity)
+    : undefined
+
+  const maxQuantity = currentProductAvailable !== undefined ? Math.max(1, currentProductAvailable) : undefined
 
   const handleSelectProduct = (product: ProductWithStock) => {
     if (disabled) return
     setSearchTerm(product.name)
     setIsOpen(false)
 
-    const maxStock = Number(product.stock ?? 1)
+    const maxStock = Math.max(1, getAvailableStock(product))
     const adjustedQuantity = Math.min(item.quantity, maxStock)
 
     onUpdateItem(item.id, {
@@ -125,7 +227,7 @@ export function ItemOrder({
     const rawVal = Number(e.target.value) || 1
     const minVal = 1
 
-    const maxVal = currentProductStock !== undefined ? Number(currentProductStock) : rawVal
+    const maxVal = maxQuantity !== undefined ? Number(maxQuantity) : rawVal
     const qty = Math.min(maxVal, Math.max(minVal, rawVal))
 
     onUpdateItem(item.id, { quantity: qty })
@@ -143,6 +245,8 @@ export function ItemOrder({
   const inputStyle =
     'w-full rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:text-white'
 
+  const errorStyle = stockError ? 'border-red-500 ring-2 ring-red-500/20 dark:border-red-500' : ''
+
   return (
     <tr className="border-b border-slate-200/80 transition hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.02]">
       {/* Producto */}
@@ -152,18 +256,45 @@ export function ItemOrder({
             ref={inputRef}
             type="text"
             disabled={disabled}
-            className={`${inputStyle} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+            className={`${inputStyle} ${errorStyle} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
             placeholder="Buscar producto..."
             value={searchTerm}
             onChange={(e) => {
               setSearchTerm(e.target.value)
               openDropdown()
             }}
-            onFocus={openDropdown}
+            onFocus={() => {
+              refreshCurrentProduct()
+              openDropdown()
+            }}
             onBlur={() => {
               setTimeout(() => setIsOpen(false), 200)
             }}
           />
+
+          {/* Indicador de stock en tiempo real */}
+          {isDraft && currentProduct && (
+            <div className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${
+                  baseAvailable > 0 || Number(item.quantity) > 0 ? 'bg-emerald-500' : 'bg-red-500'
+                }`}
+              />
+              <span>
+                Stock disponible:{' '}
+                <strong className="text-slate-700 dark:text-slate-200">{baseAvailable}</strong> un.
+              </span>
+              <span className="text-slate-400 font-normal">
+                (Físico: {currentProduct.stock}, Res.: {currentProduct.reservedStock ?? 0})
+              </span>
+            </div>
+          )}
+
+          {stockError && (
+            <p className="mt-1 text-[11px] font-medium text-red-500">
+              Stock insuficiente: se restauró la última cantidad válida.
+            </p>
+          )}
 
           {!disabled && isOpen && dropdownPosition && createPortal(
             <ul
@@ -188,7 +319,12 @@ export function ItemOrder({
                     >
                       <div>
                         <span className="font-medium block">{product.name}</span>
-                        <span className="text-[11px] text-slate-400">Stock: {String(product.stock ?? 0)} un.</span>
+                        <span className="text-[11px] text-slate-400">
+                          Disponible: {getAvailableStock(product)} un.
+                          {Number(product.reservedStock ?? 0) > 0 && (
+                            <> ({Number(product.reservedStock)} reservadas)</>
+                          )}
+                        </span>
                       </div>
                       <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                         ${Number(product.price).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -213,17 +349,22 @@ export function ItemOrder({
           <input
             type="number"
             min={1}
-            max={currentProductStock !== undefined ? Number(currentProductStock) : undefined}
+            max={maxQuantity !== undefined ? Number(maxQuantity) : undefined}
             disabled={disabled}
             value={item.quantity}
             onChange={handleQuantityChange}
-            className={`${inputStyle} text-center ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
-            title={currentProductStock !== undefined ? `Stock máximo disponible: ${currentProductStock}` : undefined}
+            onFocus={refreshCurrentProduct}
+            className={`${inputStyle} ${errorStyle} text-center ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+            title={
+              maxQuantity !== undefined
+                ? `Stock máximo disponible: ${maxQuantity}`
+                : undefined
+            }
           />
         </div>
       </td>
 
-      {/* Precio Unitario (Con desglose neto / IVA) */}
+      {/* Precio Unitario */}
       <td className="w-44 px-4 py-3 text-right">
         <div className="font-medium text-slate-900 dark:text-white">
           ${unitPriceWithVat.toLocaleString('es-AR', { minimumFractionDigits: 2 })}

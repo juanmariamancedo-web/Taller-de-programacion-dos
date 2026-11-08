@@ -29,7 +29,7 @@ export interface UserSessionContext {
 
 type Tx = Prisma.TransactionClient;
 
-/** Estados que cierran la orden sin entregarla: el stock vuelve al inventario. */
+/** Estados que cierran la orden liberando el stock. */
 const releasesStock = (stateId: number) =>
   stateId === OrderState.Rejected || stateId === OrderState.Cancelled;
 
@@ -51,21 +51,27 @@ export class OrdersService {
     return getRole(roleId, session?.roleName);
   }
 
-  /** Un seller solo puede operar sobre sus propias órdenes. */
   private assertSellerOwnsOrder(role: Role | null, orderSellerId: bigint, userId?: number) {
     if (role === 'seller' && Number(orderSellerId) !== userId) {
       throw new Error('No tenés permisos para modificar órdenes de otros vendedores.');
     }
   }
 
-  /** Verifica el stock de cada ítem y lo descuenta. */
-  private async reserveStock(
+  /** 
+   * Valida la disponibilidad real de stock de manera dinámica:
+   * Stock Físico menos la suma de cantidades en otros borradores activos (currentStateId === OrderState.Created).
+   * Permite excluir una orden en curso para que no se bloquee a sí misma al actualizarse.
+   */
+  private async validateStockAvailability(
     tx: Tx,
-    items: { productId: number | bigint | string; quantity: number | string }[]
+    items: { productId: number | bigint | string; quantity: number | string }[],
+    currentOrderId?: bigint
   ) {
     for (const item of items) {
       const productId = BigInt(item.productId);
       const requestedQuantity = Number(item.quantity);
+
+      if (requestedQuantity <= 0) continue;
 
       const product = await tx.product.findUnique({
         where: { id: productId },
@@ -76,30 +82,48 @@ export class OrdersService {
         throw new Error(`El producto con ID ${item.productId} no existe.`);
       }
 
-      if (product.stock < requestedQuantity) {
+      // Buscamos todos los ítems en otros borradores activos (excluyendo esta orden)
+      const otherDraftItems = await tx.itemOrder.findMany({
+        where: {
+          productId: productId,
+          ...(currentOrderId && { orderId: { not: currentOrderId } }),
+          order: {
+            currentStateId: BigInt(OrderState.Created),
+          },
+        },
+        select: { amount: true },
+      });
+
+      // Sumamos estrictamente lo que ocupan los DEMÁS borradores
+      const reservedByOthers = otherDraftItems.reduce((acc, curr) => acc + Number(curr.amount), 0);
+      const availableReal = product.stock - reservedByOthers;
+
+      if (availableReal < requestedQuantity) {
         throw new Error(
-          `Stock insuficiente para el producto "${product.name}". Disponible: ${product.stock}, solicitado: ${requestedQuantity}.`
+          `Stock insuficiente para el producto "${product.name}". Disponible real: ${availableReal} (Físico: ${product.stock}, Ocupado por otros borradores: ${reservedByOthers}), solicitado: ${requestedQuantity}.`
         );
       }
-
-      await tx.product.update({
-        where: { id: productId },
-        data: { stock: { decrement: requestedQuantity } },
-      });
     }
   }
 
-  /** Devuelve al inventario el stock de ítems ya guardados en la base. */
-  private async releaseStock(tx: Tx, items: { productId: bigint; amount: number | bigint }[]) {
+  /** 
+   * Descuenta el stock físico definitivamente 
+   * (Se ejecuta cuando la orden pasa a pagada/efectivizada).
+   */
+  private async finalizeStockDeduction(tx: Tx, items: { productId: bigint; amount: number | bigint }[]) {
     for (const item of items) {
+      const qty = Number(item.amount);
+      if (qty <= 0) continue;
+
       await tx.product.update({
         where: { id: item.productId },
-        data: { stock: { increment: Number(item.amount) } },
+        data: {
+          stock: { decrement: qty },
+        },
       });
     }
   }
 
-  /** Obtiene los datos de la dirección para generar el snapshot histórico. */
   private async fetchAddressSnapshot(tx: Tx, shippingAddressId: number | bigint) {
     const dbAddress = await tx.address.findUnique({
       where: { id: BigInt(shippingAddressId) },
@@ -207,7 +231,7 @@ export class OrdersService {
       return {
         ...order,
         id: Number(order.id),
-        clientId: Number(order.clientId),
+        clientId: order.clientId ? Number(order.clientId) : null,
         sellerId: Number(order.sellerId),
         currentStateId: Number(order.currentStateId),
         shippingAddressId: order.shippingAddressId ? Number(order.shippingAddressId) : null,
@@ -221,15 +245,15 @@ export class OrdersService {
         shippingPostalCode: postalCode,
         shippingCityName: cityName,
 
-        shippingAddress: {
-          id: order.shippingAddressId ? Number(order.shippingAddressId) : null,
+        shippingAddress: order.shippingAddressId ? {
+          id: Number(order.shippingAddressId),
           street,
           number,
           floor,
           apartment,
           postalCode,
           city: { name: cityName },
-        },
+        } : null,
 
         items: order.itemOrders.map((item) => ({
           id: Number(item.id),
@@ -258,7 +282,7 @@ export class OrdersService {
     };
   }
 
-  // ─── Crear ──────────────────────────────────────────────────────────────
+  // ─── Crear / Borrador Inicial ───────────────────────────────────────────
 
   async createOrder(
     payload: CreateOrderPayload & {
@@ -278,16 +302,17 @@ export class OrdersService {
         };
       }
 
-      const clientId = Number(payload.clientId);
+      const clientId = payload.clientId ? Number(payload.clientId) : null;
       const shippingAddressId = payload.shippingAddressId ? Number(payload.shippingAddressId) : null;
+      
       const currentUserId = this.getSessionUserId(activeSession);
       const sellerId = role === 'seller' ? currentUserId : Number(payload.sellerId);
       const { items, total, invoiceType, paymentMethod } = payload;
 
-      if (!clientId || !sellerId || !items || items.length === 0) {
+      if (!sellerId) {
         return {
           success: false,
-          message: 'Datos de la orden incompletos (cliente, seller e ítems son obligatorios)',
+          message: 'Identificador de vendedor no válido.',
         };
       }
 
@@ -304,18 +329,11 @@ export class OrdersService {
         };
       }
 
-      if (initialStateId === OrderState.Paid) {
-        const selectedInvoiceType = invoiceType?.toUpperCase();
-        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B' && selectedInvoiceType !== 'EXENTO') {
-          return {
-            success: false,
-            message: 'Debe especificar si la factura es de tipo A, B o Exento para crear una orden pagada.',
-          };
-        }
-      }
-
       const newOrder = await prisma.$transaction(async (tx) => {
-        await this.reserveStock(tx, items);
+        // Validamos disponibilidad real antes de crear
+        if (items && items.length > 0) {
+          await this.validateStockAvailability(tx, items);
+        }
 
         let addressSnapshot = {
           shippingStreet: '',
@@ -335,38 +353,37 @@ export class OrdersService {
 
         const order = await tx.order.create({
           data: {
-            clientId: BigInt(clientId),
             sellerId: BigInt(sellerId),
-            total: Number(total),
+            total: Number(total || 0),
             currentStateId: BigInt(initialStateId),
             invoiceType: normalizedInvoiceType,
             paymentMethod: paymentMethod || 'Efectivo',
+            ...(clientId && { clientId: BigInt(clientId) }),
             ...(shippingAddressId && { shippingAddressId: BigInt(shippingAddressId) }),
             ...addressSnapshot,
-            itemOrders: {
-              create: items.map((item) => ({
-                productId: BigInt(item.productId),
-                amount: Number(item.quantity),
-                unitPrice: Number(item.unitPrice),
-              })),
-            },
+            ...(items && items.length > 0 && {
+              itemOrders: {
+                create: items.map((item) => ({
+                  productId: BigInt(item.productId),
+                  amount: Number(item.quantity),
+                  unitPrice: Number(item.unitPrice),
+                })),
+              },
+            }),
           },
         });
 
+        if (initialStateId === OrderState.Paid && items && items.length > 0) {
+          await this.finalizeStockDeduction(
+            tx, 
+            items.map(i => ({ productId: BigInt(i.productId), amount: Number(i.quantity) }))
+          );
+        }
+
         if (shippingAddressId) {
           let historyNotes = initialStateId === OrderState.Created
-            ? 'Creación de la orden de compra y descuento de stock'
-            : `Creación de la orden en estado "${getStateLabel(initialStateId)}" y descuento de stock`;
-
-          if (initialStateId === OrderState.Paid) {
-            const selectedInv = normalizedInvoiceType || 'B';
-            const numericTotal = Number(total);
-            const requiresVatCalculation = selectedInv === 'A' || selectedInv === 'EXENTO';
-            const netAmount = requiresVatCalculation ? Number((numericTotal / 1.21).toFixed(2)) : numericTotal;
-            const vatAmount = requiresVatCalculation ? Number((numericTotal - netAmount).toFixed(2)) : 0.00;
-
-            historyNotes = `Orden creada y pagada con Factura ${selectedInv}. Neto: $${netAmount}, IVA 21%: $${vatAmount}.`;
-          }
+            ? 'Creación de borrador de orden y reserva inicial de stock'
+            : `Creación de la orden en estado "${getStateLabel(initialStateId)}"`;
 
           await tx.orderStatusHistory.create({
             data: {
@@ -384,35 +401,18 @@ export class OrdersService {
       return {
         success: true,
         orderId: Number(newOrder.id),
-        message: 'Orden creada exitosamente y stock actualizado.',
+        message: 'Borrador de orden creado exitosamente y stock sincronizado.',
       };
     } catch (err: any) {
-      console.error('Error en servicio de órdenes:', err);
-      let errorMessage = err.message || 'Error en la operación de la base de datos';
-
-      const errorMsg = String(err?.message || '');
-      const errorCode = err?.code;
-      const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
-
-      if (
-        errorCode === 'P2002' ||
-        errorMsg.includes('P2002') ||
-        errorMsg.includes('tracking_number') ||
-        errorMsg.includes('Unique constraint failed') ||
-        driverError.includes('UniqueConstraintViolation') ||
-        driverError.includes('tracking_number')
-      ) {
-        errorMessage = 'El número de seguimiento (tracking) ya se encuentra registrado en otra orden.';
-      }
-
+      console.error('Error en servicio de órdenes (createOrder):', err);
       return {
         success: false,
-        message: errorMessage,
+        message: err.message || 'Error en la operación de la base de datos',
       };
     }
   }
 
-  // ─── Editar datos (solo mientras es borrador) ───────────────────────────
+  // ─── Actualizar / Sincronizar Borrador ─────────────────────────────────
 
   async updateOrder(
     payload: UpdateOrderPayload & { paymentMethod?: string },
@@ -424,7 +424,10 @@ export class OrdersService {
       const { id, clientId, shippingAddressId, items, total, paymentMethod } = payload;
       const orderId = BigInt(id);
 
-      const existingOrder = await prisma.order.findUnique({ where: { id: orderId } });
+      const existingOrder = await prisma.order.findUnique({
+        where: { id: orderId },
+      });
+
       if (!existingOrder) {
         return { success: false, message: 'La orden no existe' };
       }
@@ -439,18 +442,20 @@ export class OrdersService {
       }
 
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        const hasNewItems = Boolean(items && items.length > 0);
+        const hasNewItems = items !== undefined && items !== null;
+        const validItems = hasNewItems ? items.filter((i) => Number(i.quantity) > 0 && Number(i.productId) > 0) : [];
 
-        if (hasNewItems) {
-          const previousItems = await tx.itemOrder.findMany({ where: { orderId } });
-          await this.releaseStock(tx, previousItems);
-          await tx.itemOrder.deleteMany({ where: { orderId } });
-          await this.reserveStock(tx, items!);
+        // Validamos stock pasando el orderId actual para excluirnos a nosotros mismos de la resta de otros borradores
+        if (validItems.length > 0) {
+          await this.validateStockAvailability(tx, validItems, orderId);
         }
+
+        // Borramos los ítems viejos de la orden
+        await tx.itemOrder.deleteMany({ where: { orderId } });
 
         let addressSnapshotUpdates = {};
         if (shippingAddressId) {
-          const snapshot = await this.fetchAddressSnapshot(tx, BigInt(shippingAddressId)); 
+          const snapshot = await this.fetchAddressSnapshot(tx, BigInt(shippingAddressId));
           if (snapshot) addressSnapshotUpdates = snapshot;
         }
 
@@ -462,9 +467,9 @@ export class OrdersService {
             total: total !== undefined ? Number(total) : Number(existingOrder.total),
             paymentMethod: paymentMethod || existingOrder.paymentMethod,
             ...addressSnapshotUpdates,
-            ...(hasNewItems && {
+            ...(validItems.length > 0 && {
               itemOrders: {
-                create: items!.map((item) => ({
+                create: validItems.map((item) => ({
                   productId: BigInt(item.productId),
                   amount: Number(item.quantity),
                   unitPrice: Number(item.unitPrice),
@@ -478,35 +483,19 @@ export class OrdersService {
       return {
         success: true,
         orderId: Number(updatedOrder.id),
-        message: 'Orden actualizada exitosamente',
+        message: 'Orden actualizada y stock reservado sincronizado correctamente.',
       };
     } catch (err: any) {
-      console.error('Error en servicio de órdenes:', err);
-      let errorMessage = err.message || 'Error en la operación de la base de datos';
-
-      const errorMsg = String(err?.message || '');
-      const errorCode = err?.code;
-      const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
-
-      if (
-        errorCode === 'P2002' ||
-        errorMsg.includes('P2002') ||
-        errorMsg.includes('tracking_number') ||
-        errorMsg.includes('Unique constraint failed') ||
-        driverError.includes('UniqueConstraintViolation') ||
-        driverError.includes('tracking_number')
-      ) {
-        errorMessage = 'El número de seguimiento (tracking) ya se encuentra registrado en otra orden.';
-      }
-
+      console.error('Error en servicio de órdenes (updateOrder):', err);
       return {
         success: false,
-        message: errorMessage,
+        message: err.message || 'Error en la operación de la base de datos',
       };
     }
   }
 
-  // ─── Cambiar estado ─────────────────────────────────────────────────────
+  // ─── Cambiar Estado ─────────────────────────────────────────────────────
+
   async updateOrderState(
     payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B' | 'EXENTO'; paymentMethod?: string },
     sessionContext?: UserSessionContext | null
@@ -546,7 +535,7 @@ export class OrdersService {
 
       const isLeavingDraft = currentState === OrderState.Created && targetStateId !== OrderState.Created;
 
-      // ─── LÓGICA DE PAGO CON PROCEDIMIENTO ALMACENADO (Factura A / B / Exento) ───────────
+      // ─── PAGO Y FACTURACIÓN ────────────────────────────────────────────────
       if (targetStateId === OrderState.Paid) {
         const selectedInvoiceType = invoiceType?.toUpperCase();
         if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B' && selectedInvoiceType !== 'EXENTO') {
@@ -558,6 +547,12 @@ export class OrdersService {
         }
 
         const updatedOrder = await prisma.$transaction(async (tx) => {
+          // Descontamos stock físico definitivamente al pagar
+          await this.finalizeStockDeduction(
+            tx, 
+            existingOrder.itemOrders.map(i => ({ productId: i.productId, amount: i.amount }))
+          );
+
           const spResult = await tx.$queryRaw<Array<{
             order_id: bigint;
             total_amount: number;
@@ -594,7 +589,7 @@ export class OrdersService {
             },
           });
 
-          const addressIdToUse = existingOrder.shippingAddressId ?? (await tx.address.findFirst({ where: { clientId: existingOrder.clientId } }))?.id;
+          const addressIdToUse = existingOrder.shippingAddressId ?? (await tx.address.findFirst({ where: { clientId: existingOrder.clientId! } }))?.id;
 
           if (addressIdToUse) {
             await tx.orderStatusHistory.create({
@@ -617,12 +612,8 @@ export class OrdersService {
         };
       }
 
-      // ─── FLUJO ESTÁNDAR PARA OTROS ESTADOS ──────────────────────────────────
+      // ─── OTROS ESTADOS (Cancelado, Rechazado, etc.) ───────────────────────
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        if (releasesStock(targetStateId)) {
-          await this.releaseStock(tx, existingOrder.itemOrders);
-        }
-
         let addressSnapshotUpdates = {};
         if (isLeavingDraft && existingOrder.shippingAddressId) {
           const snapshot = await this.fetchAddressSnapshot(tx, existingOrder.shippingAddressId);
@@ -642,7 +633,7 @@ export class OrdersService {
           const noteParts = [
             location?.trim() && `Ubicación: ${location.trim()}.`,
             notes?.trim(),
-            releasesStock(targetStateId) && '(Stock devuelto)',
+            releasesStock(targetStateId) && '(Borrador cancelado / stock liberado)',
           ].filter(Boolean);
 
           await tx.orderStatusHistory.create({
@@ -662,31 +653,14 @@ export class OrdersService {
         success: true,
         orderId: Number(updatedOrder.id),
         message: releasesStock(targetStateId)
-          ? 'Orden cerrada y stock devuelto al inventario.'
+          ? 'Orden cerrada y stock liberado correctamente.'
           : 'Estado de la orden actualizado correctamente.',
       };
     } catch (err: any) {
-      console.error('Error en servicio de órdenes:', err);
-      let errorMessage = err.message || 'Error en la operación de la base de datos';
-
-      const errorMsg = String(err?.message || '');
-      const errorCode = err?.code;
-      const driverError = String(err?.meta?.driverAdapterError?.cause?.message || err?.meta?.driverAdapterError || '');
-
-      if (
-        errorCode === 'P2002' ||
-        errorMsg.includes('P2002') ||
-        errorMsg.includes('tracking_number') ||
-        errorMsg.includes('Unique constraint failed') ||
-        driverError.includes('UniqueConstraintViolation') ||
-        driverError.includes('tracking_number')
-      ) {
-        errorMessage = 'El número de seguimiento (tracking) ya se encuentra registrado en otra orden.';
-      }
-
+      console.error('Error en servicio de órdenes (updateOrderState):', err);
       return {
         success: false,
-        message: errorMessage,
+        message: err.message || 'Error en la operación de la base de datos',
       };
     }
   }
