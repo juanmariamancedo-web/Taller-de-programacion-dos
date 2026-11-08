@@ -107,20 +107,17 @@ export class OrdersService {
   }
 
   /** 
-   * Descuenta el stock físico definitivamente 
-   * (Se ejecuta cuando la orden pasa a pagada/efectivizada).
+   * [PROCEDIMIENTO ALMACENADO] 
+   * Descuenta el stock físico definitivamente invocando el SP transaccional en la BD.
    */
   private async finalizeStockDeduction(tx: Tx, items: { productId: bigint; amount: number | bigint }[]) {
     for (const item of items) {
       const qty = Number(item.amount);
       if (qty <= 0) continue;
 
-      await tx.product.update({
-        where: { id: item.productId },
-        data: {
-          stock: { decrement: qty },
-        },
-      });
+      await tx.$executeRaw`
+        SELECT sp_actualizar_stock_producto(${item.productId}::bigint, ${-qty}::integer)
+      `;
     }
   }
 
@@ -282,7 +279,7 @@ export class OrdersService {
     };
   }
 
-  // ─── Crear / Borrador Inicial ───────────────────────────────────────────
+  // ─── Crear / Borrador Inicial 
 
   async createOrder(
     payload: CreateOrderPayload & {
@@ -330,7 +327,6 @@ export class OrdersService {
       }
 
       const newOrder = await prisma.$transaction(async (tx) => {
-        // Validamos disponibilidad real antes de crear
         if (items && items.length > 0) {
           await this.validateStockAvailability(tx, items);
         }
@@ -412,7 +408,7 @@ export class OrdersService {
     }
   }
 
-  // ─── Actualizar / Sincronizar Borrador ─────────────────────────────────
+  // ─── Actualizar / Sincronizar Borrador 
 
   async updateOrder(
     payload: UpdateOrderPayload & { paymentMethod?: string },
@@ -445,12 +441,10 @@ export class OrdersService {
         const hasNewItems = items !== undefined && items !== null;
         const validItems = hasNewItems ? items.filter((i) => Number(i.quantity) > 0 && Number(i.productId) > 0) : [];
 
-        // Validamos stock pasando el orderId actual para excluirnos a nosotros mismos de la resta de otros borradores
         if (validItems.length > 0) {
           await this.validateStockAvailability(tx, validItems, orderId);
         }
 
-        // Borramos los ítems viejos de la orden
         await tx.itemOrder.deleteMany({ where: { orderId } });
 
         let addressSnapshotUpdates = {};
@@ -494,7 +488,7 @@ export class OrdersService {
     }
   }
 
-  // ─── Cambiar Estado ─────────────────────────────────────────────────────
+  // ─── Cambiar Estado (Usa Procedimientos Almacenados) 
 
   async updateOrderState(
     payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B' | 'EXENTO'; paymentMethod?: string },
@@ -535,7 +529,7 @@ export class OrdersService {
 
       const isLeavingDraft = currentState === OrderState.Created && targetStateId !== OrderState.Created;
 
-      // ─── PAGO Y FACTURACIÓN ────────────────────────────────────────────────
+      // ─── PAGO Y FACTURACIÓN (Usa procesar_pago_orden) 
       if (targetStateId === OrderState.Paid) {
         const selectedInvoiceType = invoiceType?.toUpperCase();
         if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B' && selectedInvoiceType !== 'EXENTO') {
@@ -547,12 +541,13 @@ export class OrdersService {
         }
 
         const updatedOrder = await prisma.$transaction(async (tx) => {
-          // Descontamos stock físico definitivamente al pagar
+          // 1. Descontamos el stock de los productos con el SP seguro sp_actualizar_stock_producto
           await this.finalizeStockDeduction(
             tx, 
             existingOrder.itemOrders.map(i => ({ productId: i.productId, amount: i.amount }))
           );
 
+          // 2. Ejecutamos el SP procesar_pago_orden
           const spResult = await tx.$queryRaw<Array<{
             order_id: bigint;
             total_amount: number;
@@ -612,41 +607,44 @@ export class OrdersService {
         };
       }
 
-      // ─── OTROS ESTADOS (Cancelado, Rechazado, etc.) ───────────────────────
+      // ─── OTROS ESTADOS (Usa sp_anular_orden_borrador / sp_cambiar_estado_orden) 
       const updatedOrder = await prisma.$transaction(async (tx) => {
+        // Anular mediante el SP de la base de datos si es un borrador cancelado
+        if (releasesStock(targetStateId) && currentState === OrderState.Created) {
+          await tx.$executeRaw`
+            SELECT sp_anular_orden_borrador(${orderId}::bigint)
+          `;
+        } else {
+          // Registrar cambio de estado e historial mediante el SP sp_cambiar_estado_orden
+          const noteParts = [
+            location?.trim() && `Ubicación: ${location.trim()}.`,
+            notes?.trim(),
+          ].filter(Boolean);
+
+          const finalNotes = noteParts.length > 0 ? noteParts.join(' ') : `Estado actualizado a "${getStateLabel(targetStateId)}"`;
+
+          await tx.$executeRaw`
+            SELECT sp_cambiar_estado_orden(
+              ${orderId}::bigint, 
+              ${BigInt(targetStateId)}::bigint, 
+              ${finalNotes}::text
+            )
+          `;
+        }
+
         let addressSnapshotUpdates = {};
         if (isLeavingDraft && existingOrder.shippingAddressId) {
           const snapshot = await this.fetchAddressSnapshot(tx, existingOrder.shippingAddressId);
           if (snapshot) addressSnapshotUpdates = snapshot;
         }
 
-        const updated = await tx.order.update({
+        return tx.order.update({
           where: { id: orderId },
           data: {
-            currentStateId: BigInt(targetStateId),
             ...(trackingNumber?.trim() && { trackingNumber: trackingNumber.trim() }),
             ...addressSnapshotUpdates,
           },
         });
-
-        if (updated.shippingAddressId) {
-          const noteParts = [
-            location?.trim() && `Ubicación: ${location.trim()}.`,
-            notes?.trim(),
-            releasesStock(targetStateId) && '(Borrador cancelado / stock liberado)',
-          ].filter(Boolean);
-
-          await tx.orderStatusHistory.create({
-            data: {
-              orderId: updated.id,
-              stateId: BigInt(targetStateId),
-              addressId: updated.shippingAddressId,
-              notes: noteParts.length > 0 ? noteParts.join(' ') : `Estado actualizado a "${getStateLabel(targetStateId)}"`,
-            },
-          });
-        }
-
-        return updated;
       });
 
       return {
@@ -661,6 +659,41 @@ export class OrdersService {
       return {
         success: false,
         message: err.message || 'Error en la operación de la base de datos',
+      };
+    }
+  }
+
+  // ─── NUEVO MÉTODO: Actualización Atómica de Ítem con SP 
+
+  /**
+   * Actualiza la cantidad de un ítem y recalcula el total de la orden usando el SP sp_actualizar_cantidad_item_orden.
+   */
+  async updateItemQuantity(
+    orderId: number | bigint,
+    productId: number | bigint,
+    newQuantity: number
+  ): Promise<OrderMutationResponse> {
+    try {
+      const result = await prisma.$queryRaw<Array<{ sp_actualizar_cantidad_item_orden: number }>>`
+        SELECT sp_actualizar_cantidad_item_orden(
+          ${BigInt(orderId)}::bigint, 
+          ${BigInt(productId)}::bigint, 
+          ${newQuantity}::integer
+        )
+      `;
+
+      const nuevoTotal = result[0]?.sp_actualizar_cantidad_item_orden ?? 0;
+
+      return {
+        success: true,
+        orderId: Number(orderId),
+        message: `Cantidad actualizada correctamente. Nuevo total de la orden: $${nuevoTotal}`,
+      };
+    } catch (err: any) {
+      console.error('Error al actualizar ítem con SP:', err);
+      return {
+        success: false,
+        message: err.message || 'Error al actualizar la cantidad del ítem en la base de datos',
       };
     }
   }
