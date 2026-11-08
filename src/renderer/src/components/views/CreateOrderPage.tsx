@@ -106,6 +106,8 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [loadingSession, setLoadingSession] = useState(true)
+  const [draftOrderId, setDraftOrderId] = useState<number | null>(null)
+  const [isInitializingDraft, setIsInitializingDraft] = useState(false)
 
   useEffect(() => {
     fetchSession()
@@ -116,8 +118,8 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
   const role = getRole(session?.roleId, session?.roleName)
 
-  const isEditing = Boolean(initialOrder?.id)
-  const currentOrderId = initialOrder?.id ? Number(initialOrder.id) : null
+  const isEditing = Boolean(initialOrder?.id || draftOrderId)
+  const currentOrderId = initialOrder?.id ? Number(initialOrder.id) : draftOrderId
 
   const orderStateId = Number(
     (initialOrder as any)?.currentStateId ?? initialOrder?.currentState?.id ?? OrderState.Created
@@ -174,7 +176,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     setFormData(buildFormData(initialOrder))
     itemsDirty.current = false
 
-    if (!initialOrder?.id) {
+    if (!initialOrder?.id && !draftOrderId) {
       setSearchTermClients("")
       setSearchTermAddress("")
       const fresh = [newItem()]
@@ -199,22 +201,61 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
       setItems(mapped)
       lastValidItems.current = mapped
     }
-  }, [initialOrder])
+  }, [initialOrder, draftOrderId])
 
-  // Reserva de stock en tiempo real con debounce (solo si se está editando una orden existente)
+  // Función para garantizar la creación transparente del borrador al seleccionar el primer producto
+  const ensureDraftOrderExists = async (currentItems: FormOrderItem[]): Promise<number | null> => {
+    if (currentOrderId) return currentOrderId
+    if (isInitializingDraft) return null
+
+    const validItems = currentItems.filter((i) => i.productId > 0)
+    if (validItems.length === 0) return null
+
+    setIsInitializingDraft(true)
+    try {
+      const sellerId = role === "seller" ? Number(session?.id) : Number(session?.id || 0)
+
+      const response = await window.electronAPI?.createOrder?.({
+        sellerId,
+        clientId: formData.clientId > 0 ? formData.clientId : undefined,
+        shippingAddressId: formData.shippingAddressId > 0 ? formData.shippingAddressId : undefined,
+        total: currentItems.reduce((acc, it) => acc + it.quantity * it.unitPrice, 0),
+        initialStateId: OrderState.Created,
+        items: validItems.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
+      })
+
+      if (response?.success && response?.orderId) {
+        const newId = Number(response.orderId)
+        setDraftOrderId(newId)
+        return newId
+      }
+    } catch (err) {
+      console.error("Error al crear borrador diferido:", err)
+    } finally {
+      setIsInitializingDraft(false)
+    }
+    return null
+  }
+
+  // Reserva de stock en tiempo real con debounce
   useEffect(() => {
-    if (!currentOrderId || !canEditDetails || !itemsDirty.current) return
-
-    const valid = items.filter((i) => i.productId > 0)
+    const validItems = items.filter((i) => i.productId > 0)
+    if (validItems.length === 0 || !canEditDetails || !itemsDirty.current) return
 
     const timer = setTimeout(async () => {
       try {
+        let activeId = currentOrderId
+        if (!activeId) {
+          activeId = await ensureDraftOrderExists(items)
+          if (!activeId) return
+        }
+
         const res = await window.electronAPI?.updateOrder?.({
-          id: String(currentOrderId),
+          id: String(activeId),
           clientId: formData.clientId > 0 ? formData.clientId : undefined,
           shippingAddressId: formData.shippingAddressId > 0 ? formData.shippingAddressId : undefined,
           total: items.reduce((acc, it) => acc + it.quantity * it.unitPrice, 0),
-          items: valid.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
+          items: validItems.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
         } as any)
 
         if (!res?.success) {
@@ -244,32 +285,72 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     setItems((prev) => (prev.length === 1 ? prev : prev.filter((item) => item.id !== id)))
   }
 
-  const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) => {
+  const handleUpdateItem = async (id: string, updatedFields: Partial<FormOrderItem>) => {
     itemsDirty.current = true
     setStockErrorProductId(null)
-    setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item)))
+
+    const updatedItems = items.map((item) => (item.id === id ? { ...item, ...updatedFields } : item))
+    setItems(updatedItems)
+
+    // Si elegimos un producto válido por primera vez y la orden aún no tiene ID en BD, la creamos
+    if (updatedFields.productId && updatedFields.productId > 0 && !currentOrderId) {
+      await ensureDraftOrderExists(updatedItems)
+    }
   }
 
-  const handleClientSelect = (client: (typeof clients)[number]) => {
+  const handleClientSelect = async (client: (typeof clients)[number]) => {
     itemsDirty.current = true
     setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
     setSearchTermClients(`${client.name} ${client.lastname}`)
     setSearchTermAddress("")
     setIsOpenAddress(false)
     setIsOpenClients(false)
+
+    if (currentOrderId) {
+      try {
+        await window.electronAPI?.updateOrder?.({
+          id: String(currentOrderId),
+          clientId: Number(client.id),
+        } as any)
+      } catch (e) {
+        console.error("Error al actualizar cliente en borrador:", e)
+      }
+    }
   }
 
-  const handleAddressSelect = (address: (typeof addresses)[number]) => {
+  const handleAddressSelect = async (address: (typeof addresses)[number]) => {
     itemsDirty.current = true
     const cityName = address.city?.name ? `, ${address.city.name}` : ""
     setFormData((prev) => ({ ...prev, shippingAddressId: Number(address.id) }))
     setSearchTermAddress(`${address.street} ${address.number}${cityName}`)
     setIsOpenAddress(false)
+
+    if (currentOrderId) {
+      try {
+        await window.electronAPI?.updateOrder?.({
+          id: String(currentOrderId),
+          shippingAddressId: Number(address.id),
+        } as any)
+      } catch (e) {
+        console.error("Error al actualizar dirección en borrador:", e)
+      }
+    }
   }
 
   const total = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
+    if (draftOrderId && items.every((i) => i.productId === 0)) {
+      try {
+        await window.electronAPI?.updateOrderState?.({
+          id: String(draftOrderId),
+          currentStateId: OrderState.Cancelled,
+          notes: 'Borrador vacío descartado por el usuario',
+        })
+      } catch (e) {
+        console.error("Error al cancelar borrador vacío:", e)
+      }
+    }
     dispatch(setOrderToEdit(null))
     dispatch(setCurrentTab("orders"))
   }
@@ -315,7 +396,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
     try {
       const currentSession = (await fetchSession().catch(() => null)) ?? session
-      const orderIdStr = currentOrderId ? String(currentOrderId) : null
+      let orderIdStr = currentOrderId ? String(currentOrderId) : null
       let savedOrderId: string | null = orderIdStr
 
       if (canEditDetails) {
@@ -405,11 +486,11 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     )
   }
 
-  const title = !initialOrder?.id
+  const title = !initialOrder?.id && !draftOrderId
     ? "Nueva Orden"
     : `Orden #${currentOrderId}${canEditDetails ? "" : " (solo lectura)"}`
 
-  const subtitle = !initialOrder?.id
+  const subtitle = !initialOrder?.id && !draftOrderId
     ? "Ingresá los datos necesarios para registrar una nueva orden."
     : canEditDetails
     ? "Mientras la orden esté en borrador podés modificar sus datos."
@@ -478,7 +559,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
         onSubmit={handleSubmit}
         className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm"
       >
-        {/* Desplegable de Tipo de Factura y Método de Pago (Bloqueados con disabled={true} cuando ya existe factura) */}
+        {/* Desplegable de Tipo de Factura y Método de Pago */}
         {hasInvoice && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="rounded-xl bg-gray-50 dark:bg-zinc-800/50 p-4 border border-gray-200 dark:border-white/10">
@@ -610,7 +691,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
           </div>
         )}
 
-        {!initialOrder?.id && initialStateOptions.length > 1 && (
+        {!initialOrder?.id && !draftOrderId && initialStateOptions.length > 1 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>Estado inicial</label>

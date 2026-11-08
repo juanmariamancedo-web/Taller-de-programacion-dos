@@ -84,6 +84,39 @@ export function ItemOrder({
     fetchProduct()
   }, [item.productId, item.description, selectedProduct])
 
+  // Sincronización automática periódica para refrescar el stock desde el backend
+  useEffect(() => {
+    if (!item.productId) return
+
+    const refreshProductStock = async () => {
+      try {
+        const api = window.electronAPI as any
+        if (api?.getProducts) {
+          const res = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
+          const found = (res.data || []).find((p: any) => Number(p.id) === Number(item.productId))
+          if (found) {
+            setSelectedProduct((prev) => {
+              if (!prev) return found as ProductWithStock
+              // Mantenemos la referencia pero actualizamos los valores de stock del servidor
+              return {
+                ...prev,
+                stock: found.stock,
+                physicalStock: found.physicalStock,
+                reservedStock: found.reservedStock,
+                availableStock: found.availableStock,
+              }
+            })
+          }
+        }
+      } catch (err) {
+        console.error('Error al refrescar stock del ítem:', err)
+      }
+    }
+
+    const interval = setInterval(refreshProductStock, 2000)
+    return () => clearInterval(interval)
+  }, [item.productId, item.description])
+
   const updateDropdownPosition = (): void => {
     const input = inputRef.current
     if (!input) return
@@ -146,22 +179,21 @@ export function ItemOrder({
     return !isOut && !isSelected
   })
 
-  // Priorizamos el objeto local del producto seleccionado directamente al hacer clic
+  // Priorizamos el objeto local del producto seleccionado
   const activeProduct = selectedProduct || products.find((p) => Number(p.id) === item.productId)
   
-  // Stock base proporcionado por el backend
   const rawBaseAvailable = activeProduct ? getAvailableStock(activeProduct) : 0
 
-  // Stock disponible dinámico restando la cantidad ingresada en el input en tiempo real
-  const dynamicAvailable = Math.max(0, rawBaseAvailable - Number(item.quantity))
+  // Cálculo robusto: Si el servidor ya reservó, el stock disponible es el del servidor. 
+  // Si estamos tipeando y el servidor todavía no respondió (debounce), restamos la delta local de forma reactiva.
+  const dynamicAvailable = rawBaseAvailable
 
   // Límite máximo para el input de cantidad
-  const maxQuantity = activeProduct ? Math.max(1, rawBaseAvailable) : undefined
+  const maxQuantity = activeProduct ? Math.max(1, rawBaseAvailable + Number(item.quantity)) : undefined
 
   const handleSelectProduct = (product: ProductWithStock) => {
     if (disabled) return
 
-    // 1. Guardar de forma inmediata el producto seleccionado en el estado interno
     setSelectedProduct(product)
     setSearchTerm(product.name)
     setIsOpen(false)
@@ -169,7 +201,6 @@ export function ItemOrder({
     const maxStock = Math.max(1, getAvailableStock(product))
     const adjustedQuantity = Math.min(item.quantity, maxStock)
 
-    // 2. Notificar al componente padre
     onUpdateItem(item.id, {
       productId: Number(product.id),
       description: product.name,
@@ -184,6 +215,19 @@ export function ItemOrder({
     const minVal = 1
     const maxVal = maxQuantity !== undefined ? Number(maxQuantity) : rawVal
     const qty = Math.min(maxVal, Math.max(minVal, rawVal))
+
+    // Actualizamos de forma inmediata el estado local del producto para reflejar reservas instantáneas
+    if (selectedProduct) {
+      const physical = Number(selectedProduct.stock ?? selectedProduct.physicalStock ?? 0)
+      const currentReserved = Number(selectedProduct.reservedStock ?? 0)
+      // Ajustamos temporalmente el reservedStock localmente para que el contador responda al instante antes del debounce
+      const diff = qty - item.quantity
+      setSelectedProduct({
+        ...selectedProduct,
+        reservedStock: Math.max(0, currentReserved + diff)
+      })
+    }
+
     onUpdateItem(item.id, { quantity: qty })
   }
 
@@ -216,7 +260,7 @@ export function ItemOrder({
             onBlur={() => setTimeout(() => setIsOpen(false), 200)}
           />
 
-          {/* INDICADOR DE STOCK DINÁMICO EN TIEMPO REAL */}
+          {/* INDICADOR DE STOCK REACTIVO */}
           {activeProduct && (
             <div className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
               <span
