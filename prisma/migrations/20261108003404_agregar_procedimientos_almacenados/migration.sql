@@ -1,6 +1,7 @@
 -- Eliminar versiones previas 
 DROP FUNCTION IF EXISTS sp_actualizar_stock_producto(BIGINT, INT);
 DROP FUNCTION IF EXISTS sp_anular_orden_borrador(BIGINT);
+DROP FUNCTION IF EXISTS sp_cancelar_orden(BIGINT, BIGINT, TEXT);
 DROP FUNCTION IF EXISTS sp_actualizar_cantidad_item_orden(BIGINT, BIGINT, INT);
 DROP FUNCTION IF EXISTS sp_cambiar_estado_orden(BIGINT, BIGINT, VARCHAR);
 DROP FUNCTION IF EXISTS procesar_pago_orden(BIGINT, VARCHAR, BIGINT);
@@ -40,7 +41,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- 2. ANULAR / CANCELAR BORRADOR DE ORDEN
+-- 2. ANULAR / CANCELAR ORDEN (CON TRAZABILIDAD)
 CREATE OR REPLACE FUNCTION sp_cancelar_orden(
     p_order_id BIGINT,
     p_cancelled_state_id BIGINT,
@@ -74,6 +75,18 @@ BEGIN
     );
 END;
 $$ LANGUAGE plpgsql;
+
+-- 2.1. COMPATIBILIDAD: Puente para sp_anular_orden_borrador (usado por el backend de Node)
+CREATE OR REPLACE FUNCTION sp_anular_orden_borrador(
+    p_order_id BIGINT
+)
+RETURNS VOID AS $$
+BEGIN
+    -- Llama a la función principal forzando el estado a Cancelado (3) y un motivo por defecto
+    PERFORM sp_cancelar_orden(p_order_id, 3::bigint, 'Borrador anulado / vaciado por el sistema');
+END;
+$$ LANGUAGE plpgsql;
+
 
 -- 3. ACTUALIZAR CANTIDAD DE UN ÍTEM EN BORRADOR Y RECALCULAR TOTAL
 CREATE OR REPLACE FUNCTION sp_actualizar_cantidad_item_orden(
@@ -129,7 +142,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 
--- 4. PROCESAR PAGO
+-- 4. PROCESAR PAGO (Única fuente de verdad para cálculos impositivos)
 CREATE OR REPLACE FUNCTION procesar_pago_orden(
     p_order_id BIGINT,
     p_invoice_type VARCHAR,
@@ -156,15 +169,17 @@ BEGIN
         RAISE EXCEPTION 'La orden con ID % no existe.', p_order_id;
     END IF;
 
-    IF p_invoice_type = 'A' OR p_invoice_type = 'EXENTO' THEN
+    IF p_invoice_type = 'A' THEN
         v_net := ROUND(v_total / 1.21, 2);
         v_vat := ROUND(v_total - v_net, 2);
+        v_new_total := v_total;
         
-        IF p_invoice_type = 'EXENTO' THEN
-            v_new_total := v_net;
-        ELSE
-            v_new_total := v_total;
-        END IF;
+    ELSIF p_invoice_type = 'EXENTO' THEN
+        -- ACÁ ESTÁ LA CORRECCIÓN: Dividimos y guardamos el Neto
+        v_net := ROUND(v_total / 1.21, 2); 
+        v_vat := 0.00;
+        v_new_total := v_net; -- Se guarda $202.479,34
+        
     ELSE
         v_net := v_total;
         v_vat := 0.00;
@@ -187,7 +202,6 @@ BEGIN
     RETURN NEXT;
 END;
 $$;
-
 
 -- 5. CAMBIO CENTRALIZADO DE ESTADO Y TRAZABILIDAD
 CREATE OR REPLACE FUNCTION sp_cambiar_estado_orden(

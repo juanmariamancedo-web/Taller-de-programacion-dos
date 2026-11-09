@@ -112,16 +112,13 @@ export interface CreateOrderResponse {
   success: boolean
   orderId?: number
   message?: string
-  /** Producto que causó el error de stock (para marcar la fila en el formulario). */
   failedProductId?: number
 }
-
 
 export interface OrderMutationResponse {
   success: boolean
   orderId?: number
   message?: string
-  /** Producto que causó el error de stock (para marcar la fila en el formulario). */
   failedProductId?: number
 }
 
@@ -402,9 +399,7 @@ export interface ProductListItem {
   name: string
   price: number
   stock: number
-  /** Unidades apartadas por ediciones en curso. Disponible = stock - reservedStock. */
   reservedStock?: number
-  /** stock - reservedStock. Lo completa el servicio de productos. */
   availableStock?: number
   lowStock: number
   image: string
@@ -487,9 +482,9 @@ export interface UpdateOrderPayload {
   id: number | string;
   clientId?: number | string;
   sellerId?: number | string;
-  shippingAddressId?: number | string; // <-- Agregar
+  shippingAddressId?: number | string;
   currentStateId?: number | string;
-  trackingNumber?: string;             // <-- Agregar
+  trackingNumber?: string;
   total?: number;
   items?: Array<{
     productId: number;
@@ -550,6 +545,7 @@ export interface IElectronAPI {
   updateProduct: (input: UpdateProductInput) => Promise<ProductMutationResponse>
   setProductStatus: (input: ProductStatusInput) => Promise<ProductMutationResponse>
   updateProductStock: (input: ProductStockInput) => Promise<ProductMutationResponse>
+  reserveStock: (productId: string, quantity: number, previousQuantity?: number) => Promise<{ success: boolean; message?: string }> // <-- NUEVA
   onStockUpdated: (callback: () => void) => Unsubscribe
 
   // Autenticación y Sesión

@@ -123,18 +123,19 @@ model Category {
 }
 
 model Product {
-  id          BigInt      @id @default(autoincrement())
-  name        String
-  price       Decimal
-  stock       Int         @default(0)
-  lowStock    Int         @map("low_stock")
-  image       String
-  isActive    Boolean     @default(true) @map("is_active")
-  categoryId  BigInt      @map("category_id")
-  category    Category    @relation(fields: [categoryId], references: [id])
-  createdAt   DateTime?   @default(now()) @map("created_at")
-  updatedAt   DateTime?   @updatedAt @map("updated_at")
-  itemOrders  ItemOrder[]
+  id            BigInt      @id @default(autoincrement())
+  name          String
+  price         Decimal
+  stock         Int         @default(0)
+  reservedStock Int         @default(0) @map("reserved_stock") // <--- NUEVO CAMPO
+  lowStock      Int         @map("low_stock")
+  image         String
+  isActive      Boolean     @default(true) @map("is_active")
+  categoryId    BigInt      @map("category_id")
+  category      Category    @relation(fields: [categoryId], references: [id])
+  createdAt     DateTime?   @default(now()) @map("created_at")
+  updatedAt     DateTime?   @updatedAt @map("updated_at")
+  itemOrders    ItemOrder[]
 
   @@map("products")
 }

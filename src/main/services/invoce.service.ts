@@ -34,7 +34,6 @@ export class InvoiceService {
     const isInvoiceA = rawInvoiceType === 'A'
     const isExempt = rawInvoiceType === 'EXENTO'
 
-    // Definición estricta de la condición fiscal según el comprobante solicitado
     let clientTaxCondition = 'CONSUMIDOR_FINAL'
     if (isInvoiceA) {
       clientTaxCondition = 'RESPONSABLE_INSCRIPTO'
@@ -49,7 +48,6 @@ export class InvoiceService {
     const currentStateId = Number(order.currentStateId)
     const isCancelledOrRejected = !forceInvoice && (currentStateId === OrderState.Rejected || currentStateId === OrderState.Cancelled)
 
-    // Definición del título del comprobante según el tipo
     let documentTitle = `FACTURA B`
     let badgeLabel = 'B'
     if (isInvoiceA) {
@@ -64,13 +62,17 @@ export class InvoiceService {
       documentTitle = `NOTA DE CRÉDITO ${badgeLabel}`
     }
 
+    // Leemos el total de la BD (que ahora guarda el Neto para EXENTO)
     const total = Number(order.total)
 
-    // Cálculos fiscales:
-    const netAmount = Number((total / 1.21).toFixed(2))
-    const vatAmount = Number((total - netAmount).toFixed(2))
-    
-    const finalTotal = isExempt ? netAmount : total
+    let netAmount = total
+    let vatAmount = 0
+    const finalTotal = total
+
+    if (isInvoiceA) {
+      netAmount = Number((total / 1.21).toFixed(2))
+      vatAmount = Number((total - netAmount).toFixed(2))
+    }
 
     const rows = order.itemOrders
       .map((item) => {
@@ -96,7 +98,6 @@ export class InvoiceService {
     .company-info h2 { font-size: 16px; margin: 0 0 4px; font-weight: bold; }
     .company-info p { margin: 2px 0; color: #444; font-size: 11px; }
     
-    /* Letra central tipo A/B de AFIP */
     .invoice-type-box { position: absolute; left: 50%; transform: translateX(-50%); top: 0; width: 50px; border: 2px solid #111; text-align: center; background: #fff; }
     .invoice-type-letter { font-size: 24px; font-weight: bold; display: block; line-height: 1; padding: 4px 0; border-bottom: 1px solid #111; }
     .invoice-type-code { font-size: 10px; font-weight: bold; padding: 2px 0; }
@@ -194,14 +195,14 @@ export class InvoiceService {
       ${
         isCancelledOrRejected
           ? `
-        <div class="totals-row"><span>Neto Anulado:</span> <span>${money(-netAmount)}</span></div>
-        <div class="totals-row"><span>IVA (21%):</span> <span>${money(-vatAmount)}</span></div>
-        <div class="transparency-notice">${isExempt ? 'Sujeto Exento - IVA no alcanzado' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
+        <div class="totals-row"><span>${isExempt ? 'Neto Exento' : 'Neto Gravado'}:</span> <span>${money(-netAmount)}</span></div>
+        ${!isExempt ? `<div class="totals-row"><span>IVA (21%):</span> <span>${money(-vatAmount)}</span></div>` : ''}
+        <div class="transparency-notice">${isExempt ? 'Sujeto Exento (IVA no gravado)' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
         <div class="totals-row final"><span>Total Reintegrado:</span> <span>${money(-finalTotal)}</span></div>
       `
           : `
-        <div class="totals-row"><span>Neto Gravado:</span> <span>${money(netAmount)}</span></div>
-        <div class="totals-row"><span>IVA (21%):</span> <span>${money(vatAmount)}</span></div>
+        <div class="totals-row"><span>${isExempt ? 'Neto Exento' : 'Neto Gravado'}:</span> <span>${money(netAmount)}</span></div>
+        ${!isExempt ? `<div class="totals-row"><span>IVA (21%):</span> <span>${money(vatAmount)}</span></div>` : ''}
         <div class="transparency-notice">${isExempt ? 'Sujeto Exento (IVA no gravado)' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
         <div class="totals-row final"><span>Total:</span> <span>${money(finalTotal)}</span></div>
       `

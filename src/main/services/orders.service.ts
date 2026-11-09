@@ -57,59 +57,32 @@ export class OrdersService {
     }
   }
 
-  /** 
-   * Valida la disponibilidad real de stock de manera dinámica:
-   * Stock Físico menos la suma de cantidades en otros borradores activos (currentStateId === OrderState.Created).
-   * Permite excluir una orden en curso para que no se bloquee a sí misma al actualizarse.
-   */
-  private async validateStockAvailability(
-    tx: Tx,
-    items: { productId: number | bigint | string; quantity: number | string }[],
-    currentOrderId?: bigint
-  ) {
+  private async updateReservedStock(tx: Tx, productId: bigint, delta: number) {
+    if (delta === 0) return;
+    
+    const product = await tx.product.findUnique({ where: { id: productId }, select: { stock: true, reservedStock: true, name: true } });
+    if (!product) return;
+
+    const newReserved = product.reservedStock + delta;
+    
+    if (newReserved > product.stock) {
+      throw new Error(`Stock insuficiente para "${product.name}". Stock físico: ${product.stock}, ya reservado: ${product.reservedStock}, intentas reservar: ${delta}.`);
+    }
+
+    await tx.product.update({
+      where: { id: productId },
+      data: { reservedStock: Math.max(0, newReserved) }
+    });
+  }
+
+  private async releaseReservedStock(tx: Tx, orderId: bigint) {
+    const items = await tx.itemOrder.findMany({ where: { orderId } });
+
     for (const item of items) {
-      const productId = BigInt(item.productId);
-      const requestedQuantity = Number(item.quantity);
-
-      if (requestedQuantity <= 0) continue;
-
-      const product = await tx.product.findUnique({
-        where: { id: productId },
-        select: { id: true, name: true, stock: true },
-      });
-
-      if (!product) {
-        throw new Error(`El producto con ID ${item.productId} no existe.`);
-      }
-
-      // Buscamos todos los ítems en otros borradores activos (excluyendo esta orden)
-      const otherDraftItems = await tx.itemOrder.findMany({
-        where: {
-          productId: productId,
-          ...(currentOrderId && { orderId: { not: currentOrderId } }),
-          order: {
-            currentStateId: BigInt(OrderState.Created),
-          },
-        },
-        select: { amount: true },
-      });
-
-      // Sumamos estrictamente lo que ocupan los DEMÁS borradores
-      const reservedByOthers = otherDraftItems.reduce((acc, curr) => acc + Number(curr.amount), 0);
-      const availableReal = product.stock - reservedByOthers;
-
-      if (availableReal < requestedQuantity) {
-        throw new Error(
-          `Stock insuficiente para el producto "${product.name}". Disponible real: ${availableReal} (Físico: ${product.stock}, Ocupado por otros borradores: ${reservedByOthers}), solicitado: ${requestedQuantity}.`
-        );
-      }
+      await this.updateReservedStock(tx, item.productId, -Number(item.amount));
     }
   }
 
-  /** 
-   * [PROCEDIMIENTO ALMACENADO] 
-   * Descuenta el stock físico definitivamente invocando el SP transaccional en la BD.
-   */
   private async finalizeStockDeduction(tx: Tx, items: { productId: bigint; amount: number | bigint }[]) {
     for (const item of items) {
       const qty = Number(item.amount);
@@ -168,12 +141,7 @@ export class OrdersService {
 
     const where: Prisma.OrderWhereInput = {
       ...(search && {
-        client: {
-          name: {
-            contains: search,
-            mode: 'insensitive',
-          },
-        },
+        client: { name: { contains: search, mode: 'insensitive' } },
       }),
     };
 
@@ -195,14 +163,8 @@ export class OrdersService {
         include: {
           currentState: { select: { id: true, name: true } },
           client: true,
-          shippingAddress: {
-            include: { city: true },
-          },
-          itemOrders: {
-            include: {
-              product: true,
-            },
-          },
+          shippingAddress: { include: { city: true } },
+          itemOrders: { include: { product: true } },
           orderStatusHistory: {
             orderBy: { id: 'asc' },
             include: {
@@ -282,10 +244,7 @@ export class OrdersService {
   // ─── Crear / Borrador Inicial 
 
   async createOrder(
-    payload: CreateOrderPayload & {
-      invoiceType?: 'A' | 'B' | 'EXENTO';
-      paymentMethod?: string;
-    },
+    payload: CreateOrderPayload & { invoiceType?: 'A' | 'B' | 'EXENTO'; paymentMethod?: string },
     sessionContext?: UserSessionContext | null
   ): Promise<CreateOrderResponse> {
     try {
@@ -293,10 +252,7 @@ export class OrdersService {
       const role = this.getSessionRole(activeSession);
 
       if (role !== 'seller' && role !== 'admin') {
-        return {
-          success: false,
-          message: 'Tu rol no tiene permisos para emitir nuevas órdenes de compra',
-        };
+        return { success: false, message: 'Tu rol no tiene permisos para emitir nuevas órdenes de compra' };
       }
 
       const clientId = payload.clientId ? Number(payload.clientId) : null;
@@ -306,12 +262,7 @@ export class OrdersService {
       const sellerId = role === 'seller' ? currentUserId : Number(payload.sellerId);
       const { items, total, invoiceType, paymentMethod } = payload;
 
-      if (!sellerId) {
-        return {
-          success: false,
-          message: 'Identificador de vendedor no válido.',
-        };
-      }
+      if (!sellerId) return { success: false, message: 'Identificador de vendedor no válido.' };
 
       const initialStateId = Number(payload.initialStateId ?? OrderState.Created);
       const creatableStates: number[] = [OrderState.Created, OrderState.Pending, OrderState.Paid];
@@ -320,24 +271,19 @@ export class OrdersService {
         (initialStateId === OrderState.Created || canChangeState(OrderState.Created, initialStateId, role));
 
       if (!isAllowedInitialState) {
-        return {
-          success: false,
-          message: `Tu rol no puede crear órdenes en estado "${getStateLabel(initialStateId)}".`,
-        };
+        return { success: false, message: `Tu rol no puede crear órdenes en estado "${getStateLabel(initialStateId)}".` };
       }
 
       const newOrder = await prisma.$transaction(async (tx) => {
-        if (items && items.length > 0) {
-          await this.validateStockAvailability(tx, items);
+        if (items && items.length > 0 && initialStateId !== OrderState.Paid) {
+          for (const item of items) {
+            await this.updateReservedStock(tx, BigInt(item.productId), Number(item.quantity));
+          }
         }
 
         let addressSnapshot = {
-          shippingStreet: '',
-          shippingNumber: 0,
-          shippingFloor: null as string | null,
-          shippingApartment: null as string | null,
-          shippingPostalCode: '',
-          shippingCityName: '',
+          shippingStreet: '', shippingNumber: 0, shippingFloor: null as string | null,
+          shippingApartment: null as string | null, shippingPostalCode: '', shippingCityName: '',
         };
 
         if (shippingAddressId) {
@@ -369,11 +315,18 @@ export class OrdersService {
           },
         });
 
+        // Si se crea directamente como Pagada, descontamos stock y aplicamos la facturación (SP)
         if (initialStateId === OrderState.Paid && items && items.length > 0) {
-          await this.finalizeStockDeduction(
-            tx, 
-            items.map(i => ({ productId: BigInt(i.productId), amount: Number(i.quantity) }))
-          );
+          await this.finalizeStockDeduction(tx, items.map(i => ({ productId: BigInt(i.productId), amount: Number(i.quantity) })));
+          
+          // ⚡ Ejecutamos el SP para calcular y guardar el Neto en la BD
+          await tx.$queryRaw`
+            SELECT * FROM procesar_pago_orden(
+              ${order.id}::bigint, 
+              ${normalizedInvoiceType}::varchar, 
+              ${BigInt(OrderState.Paid)}::bigint
+            )
+          `;
         }
 
         if (shippingAddressId) {
@@ -401,10 +354,7 @@ export class OrdersService {
       };
     } catch (err: any) {
       console.error('Error en servicio de órdenes (createOrder):', err);
-      return {
-        success: false,
-        message: err.message || 'Error en la operación de la base de datos',
-      };
+      return { success: false, message: err.message || 'Error en la operación de la base de datos' };
     }
   }
 
@@ -422,27 +372,31 @@ export class OrdersService {
 
       const existingOrder = await prisma.order.findUnique({
         where: { id: orderId },
+        include: { itemOrders: true }
       });
 
-      if (!existingOrder) {
-        return { success: false, message: 'La orden no existe' };
-      }
+      if (!existingOrder) return { success: false, message: 'La orden no existe' };
 
       this.assertSellerOwnsOrder(role, existingOrder.sellerId, this.getSessionUserId(activeSession));
 
       if (!canEditOrderDetails(Number(existingOrder.currentStateId), role)) {
-        return {
-          success: false,
-          message: 'La orden ya fue confirmada: solo se puede editar mientras es un borrador.',
-        };
+        return { success: false, message: 'La orden ya fue confirmada: solo se puede editar mientras es un borrador.' };
       }
 
       const updatedOrder = await prisma.$transaction(async (tx) => {
         const hasNewItems = items !== undefined && items !== null;
         const validItems = hasNewItems ? items.filter((i) => Number(i.quantity) > 0 && Number(i.productId) > 0) : [];
 
-        if (validItems.length > 0) {
-          await this.validateStockAvailability(tx, validItems, orderId);
+        if (Number(existingOrder.currentStateId) === OrderState.Created || Number(existingOrder.currentStateId) === OrderState.Pending) {
+          for (const oldItem of existingOrder.itemOrders) {
+            await this.updateReservedStock(tx, oldItem.productId, -Number(oldItem.amount));
+          }
+        }
+
+        if (validItems.length > 0 && (Number(existingOrder.currentStateId) === OrderState.Created || Number(existingOrder.currentStateId) === OrderState.Pending)) {
+          for (const newItem of validItems) {
+            await this.updateReservedStock(tx, BigInt(newItem.productId), Number(newItem.quantity));
+          }
         }
 
         await tx.itemOrder.deleteMany({ where: { orderId } });
@@ -481,10 +435,7 @@ export class OrdersService {
       };
     } catch (err: any) {
       console.error('Error en servicio de órdenes (updateOrder):', err);
-      return {
-        success: false,
-        message: err.message || 'Error en la operación de la base de datos',
-      };
+      return { success: false, message: err.message || 'Error en la operación de la base de datos' };
     }
   }
 
@@ -506,17 +457,13 @@ export class OrdersService {
         include: { itemOrders: true },
       });
 
-      if (!existingOrder) {
-        throw new Error('La orden especificada no existe.');
-      }
+      if (!existingOrder) throw new Error('La orden especificada no existe.');
 
       this.assertSellerOwnsOrder(role, existingOrder.sellerId, this.getSessionUserId(activeSession));
 
       const currentState = Number(existingOrder.currentStateId);
       if (!canChangeState(currentState, targetStateId, role)) {
-        throw new Error(
-          `Tu rol no puede pasar la orden de "${getStateLabel(currentState)}" a "${getStateLabel(targetStateId)}".`
-        );
+        throw new Error(`Tu rol no puede pasar la orden de "${getStateLabel(currentState)}" a "${getStateLabel(targetStateId)}".`);
       }
 
       if (requiresTracking(targetStateId) && !trackingNumber?.trim() && !existingOrder.trackingNumber) {
@@ -529,31 +476,23 @@ export class OrdersService {
 
       const isLeavingDraft = currentState === OrderState.Created && targetStateId !== OrderState.Created;
 
-      // ─── PAGO Y FACTURACIÓN (Usa procesar_pago_orden) 
       if (targetStateId === OrderState.Paid) {
         const selectedInvoiceType = invoiceType?.toUpperCase();
         if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B' && selectedInvoiceType !== 'EXENTO') {
           throw new Error('Debe especificar si la factura es de tipo A, B o Exento para marcar la orden como pagada.');
         }
 
-        if (!paymentMethod?.trim()) {
-          throw new Error('Debe indicar un método de pago para marcar la orden como pagada.');
-        }
+        if (!paymentMethod?.trim()) throw new Error('Debe indicar un método de pago para marcar la orden como pagada.');
 
         const updatedOrder = await prisma.$transaction(async (tx) => {
-          // 1. Descontamos el stock de los productos con el SP seguro sp_actualizar_stock_producto
-          await this.finalizeStockDeduction(
-            tx, 
-            existingOrder.itemOrders.map(i => ({ productId: i.productId, amount: i.amount }))
-          );
+          if (currentState === OrderState.Created || currentState === OrderState.Pending) {
+             await this.releaseReservedStock(tx, orderId);
+          }
 
-          // 2. Ejecutamos el SP procesar_pago_orden
+          await this.finalizeStockDeduction(tx, existingOrder.itemOrders.map(i => ({ productId: i.productId, amount: i.amount })));
+
           const spResult = await tx.$queryRaw<Array<{
-            order_id: bigint;
-            total_amount: number;
-            invoice_type: string;
-            net_amount: number;
-            vat_amount: number;
+            order_id: bigint; total_amount: number; invoice_type: string; net_amount: number; vat_amount: number;
           }>>`
             SELECT * FROM procesar_pago_orden(
               ${orderId}::bigint, 
@@ -562,9 +501,7 @@ export class OrdersService {
             )
           `;
 
-          if (!spResult || spResult.length === 0) {
-            throw new Error('Error al ejecutar el procedimiento almacenado de facturación.');
-          }
+          if (!spResult || spResult.length === 0) throw new Error('Error al ejecutar el procedimiento almacenado de facturación.');
 
           const fiscalData = spResult[0];
 
@@ -607,20 +544,15 @@ export class OrdersService {
         };
       }
 
-      // ─── OTROS ESTADOS (Usa sp_anular_orden_borrador / sp_cambiar_estado_orden) 
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        // Anular mediante el SP de la base de datos si es un borrador cancelado
-        if (releasesStock(targetStateId) && currentState === OrderState.Created) {
-          await tx.$executeRaw`
-            SELECT sp_anular_orden_borrador(${orderId}::bigint)
-          `;
-        } else {
-          // Registrar cambio de estado e historial mediante el SP sp_cambiar_estado_orden
-          const noteParts = [
-            location?.trim() && `Ubicación: ${location.trim()}.`,
-            notes?.trim(),
-          ].filter(Boolean);
+        if (releasesStock(targetStateId) && (currentState === OrderState.Created || currentState === OrderState.Pending)) {
+           await this.releaseReservedStock(tx, orderId);
+        }
 
+        if (releasesStock(targetStateId) && currentState === OrderState.Created) {
+          await tx.$executeRaw`SELECT sp_anular_orden_borrador(${orderId}::bigint)`;
+        } else {
+          const noteParts = [location?.trim() && `Ubicación: ${location.trim()}.`, notes?.trim()].filter(Boolean);
           const finalNotes = noteParts.length > 0 ? noteParts.join(' ') : `Estado actualizado a "${getStateLabel(targetStateId)}"`;
 
           await tx.$executeRaw`
@@ -656,18 +588,10 @@ export class OrdersService {
       };
     } catch (err: any) {
       console.error('Error en servicio de órdenes (updateOrderState):', err);
-      return {
-        success: false,
-        message: err.message || 'Error en la operación de la base de datos',
-      };
+      return { success: false, message: err.message || 'Error en la operación de la base de datos' };
     }
   }
 
-  // ─── NUEVO MÉTODO: Actualización Atómica de Ítem con SP 
-
-  /**
-   * Actualiza la cantidad de un ítem y recalcula el total de la orden usando el SP sp_actualizar_cantidad_item_orden.
-   */
   async updateItemQuantity(
     orderId: number | bigint,
     productId: number | bigint,
@@ -691,10 +615,7 @@ export class OrdersService {
       };
     } catch (err: any) {
       console.error('Error al actualizar ítem con SP:', err);
-      return {
-        success: false,
-        message: err.message || 'Error al actualizar la cantidad del ítem en la base de datos',
-      };
+      return { success: false, message: err.message || 'Error al actualizar la cantidad del ítem en la base de datos' };
     }
   }
 }

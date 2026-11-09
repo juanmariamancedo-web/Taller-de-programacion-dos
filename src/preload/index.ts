@@ -120,6 +120,10 @@ const api = {
     ipcRenderer.invoke('products:set-status', input),
   updateProductStock: (input: ProductStockInput): Promise<ProductMutationResponse> =>
     ipcRenderer.invoke('products:update-stock', input),
+  
+  // ⚡ NUEVA FUNCIÓN PARA RESERVAR STOCK
+  reserveStock: (productId: string, quantity: number, previousQuantity: number = 0): Promise<{ success: boolean; message?: string }> =>
+    ipcRenderer.invoke('products:reserve', productId, quantity, previousQuantity),
 
   // --- SISTEMA Y SESIÓN ---
   logout: () => ipcRenderer.invoke('auth:logout'),

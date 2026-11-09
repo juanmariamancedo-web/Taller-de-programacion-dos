@@ -34,22 +34,15 @@ export class ProductsService {
 
     const productId = BigInt(input.id)
 
-    // Calculamos dinámicamente las unidades reservadas por otros borradores activos (currentStateId = 1)
-    const activeReservations = await prisma.itemOrder.aggregate({
-      where: {
-        productId: productId,
-        order: {
-          currentStateId: BigInt(1), // OrderState.Created
-        },
-      },
-      _sum: { amount: true },
-    });
+    const currentProduct = await prisma.product.findUnique({
+      where: { id: productId },
+      select: { reservedStock: true, name: true }
+    })
 
-    const reserved = Number(activeReservations._sum.amount ?? 0);
+    if (!currentProduct) throw new Error("El producto no existe.")
 
-    // Guardia atómica de stock: el nuevo stock físico no puede ser menor a lo que ya está reservado en borradores
-    if (input.stock < reserved) {
-      await this.throwStockBelowReserved(productId, input.stock, reserved);
+    if (input.stock < currentProduct.reservedStock) {
+      throw new Error(`No se puede dejar el stock de "${currentProduct.name}" en ${input.stock}: hay ${currentProduct.reservedStock} unidades reservadas.`)
     }
 
     const product = await prisma.product.update({
@@ -76,21 +69,15 @@ export class ProductsService {
 
     const productId = BigInt(id)
 
-    // Calculamos dinámicamente las unidades reservadas por borradores activos
-    const activeReservations = await prisma.itemOrder.aggregate({
-      where: {
-        productId: productId,
-        order: {
-          currentStateId: BigInt(1), // OrderState.Created
-        },
-      },
-      _sum: { amount: true },
-    });
+    const currentProduct = await prisma.product.findUnique({
+      where: { id: productId },
+      select: { reservedStock: true, name: true }
+    })
 
-    const reserved = Number(activeReservations._sum.amount ?? 0);
+    if (!currentProduct) throw new Error("El producto no existe.")
 
-    if (stock < reserved) {
-      await this.throwStockBelowReserved(productId, stock, reserved);
+    if (stock < currentProduct.reservedStock) {
+      throw new Error(`No se puede dejar el stock de "${currentProduct.name}" en ${stock}: hay ${currentProduct.reservedStock} unidades reservadas.`)
     }
 
     const product = await prisma.product.update({
@@ -100,6 +87,38 @@ export class ProductsService {
     });
 
     return { id: product.id.toString() }
+  }
+
+  // ─── NUEVO MÉTODO PARA RESERVAR STOCK EN VIVO ───────────────────────────────
+  async reserveProductStock(productId: string, quantity: number, previousQuantity: number = 0) {
+    try {
+      const pId = BigInt(productId);
+      const product = await prisma.product.findUnique({
+        where: { id: pId },
+        select: { id: true, stock: true, reservedStock: true, name: true }
+      });
+
+      if (!product) return { success: false, message: "Producto no encontrado" };
+
+      const delta = quantity - previousQuantity; 
+      if (delta === 0) return { success: true };
+
+      const newReserved = Math.max(0, product.reservedStock + delta);
+
+      if (newReserved > product.stock) {
+        return { success: false, message: `Stock insuficiente para ${product.name}` };
+      }
+
+      await prisma.product.update({
+        where: { id: pId },
+        data: { reservedStock: newReserved }
+      });
+
+      return { success: true };
+    } catch (err: any) {
+      console.error("Error al reservar stock:", err);
+      return { success: false, message: err.message };
+    }
   }
 
   async getProducts(searchParams?: SearchParams): Promise<ProductsResponse> {
@@ -144,40 +163,27 @@ export class ProductsService {
 
       const totalPages = Math.ceil(totalCount / limit) || 1;
 
-      // Calculamos el stock reservado y disponible de forma dinámica para cada producto listado
-      const productsWithDynamicStock = await Promise.all(
-        products.map(async (product) => {
-          const activeReservations = await prisma.itemOrder.aggregate({
-            where: {
-              productId: product.id,
-              order: {
-                currentStateId: BigInt(1), // OrderState.Created (Borrador activo)
-              },
-            },
-            _sum: { amount: true },
-          });
+      const productsWithStock = products.map((product) => {
+        const reservedStock = product.reservedStock;
+        const availableStock = Math.max(0, product.stock - reservedStock);
 
-          const reservedStock = Number(activeReservations._sum.amount ?? 0);
-          const availableStock = Math.max(0, product.stock - reservedStock);
-
-          return {
-            id: product.id.toString(),
-            name: product.name,
-            price: Number(product.price),
-            stock: product.stock,
-            reservedStock,
-            availableStock,
-            lowStock: product.lowStock,
-            image: product.image,
-            isActive: product.isActive,
-            categoryId: product.categoryId.toString()
-          }
-        })
-      );
+        return {
+          id: product.id.toString(),
+          name: product.name,
+          price: Number(product.price),
+          stock: product.stock, // Físico
+          reservedStock,       // Reservado
+          availableStock,      // Disponible (Físico - Reservado)
+          lowStock: product.lowStock,
+          image: product.image,
+          isActive: product.isActive,
+          categoryId: product.categoryId.toString()
+        }
+      });
 
       return {
         success: true,
-        data: productsWithDynamicStock,
+        data: productsWithStock,
         totalPages,
         totalCount,
         currentPage: page,
@@ -199,22 +205,6 @@ export class ProductsService {
     if (!Number.isInteger(stock) || stock < 0) {
       throw new Error('El stock debe ser un número entero mayor o igual a 0.')
     }
-  }
-
-  private async throwStockBelowReserved(productId: bigint, requestedStock: number, knownReserved?: number): Promise<never> {
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
-      select: { name: true }
-    })
-
-    if (!product) {
-      throw new Error('El producto no existe.')
-    }
-
-    const reserved = knownReserved ?? 0
-    throw new Error(
-      `No se puede dejar el stock de "${product.name}" en ${requestedStock}: hay ${reserved} unidades reservadas por órdenes en edición. Esperá a que terminen o ingresá un valor mayor o igual a ${reserved}.`
-    )
   }
 
   private toProductData(input: ProductInput): Prisma.ProductUncheckedCreateInput {
