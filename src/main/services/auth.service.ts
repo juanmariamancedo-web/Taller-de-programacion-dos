@@ -20,13 +20,19 @@ export class AuthService {
       }
     });
 
-    return user ? {
+    // Si el usuario fue desactivado mientras tenía la sesión abierta, cerramos su sesión
+    if (!user || !user.isActive) {
+      sessionService.clearSession();
+      return null;
+    }
+
+    return {
       id: user.id,
       username: user.username,
       isActive: user.isActive,
       roleId: Number(user.roleId),
       roleName: user.role.name
-    } : null;
+    };
   }
 
   async login(credentials: Credentials): Promise<AuthResponse> {
@@ -46,7 +52,15 @@ export class AuthService {
         };
       }
 
-      // 2. Validar contraseña
+      // 2. Validar que el usuario esté activo
+      if (!user.isActive) {
+        return {
+          success: false,
+          message: 'Tu cuenta está desactivada. Contactá al administrador.'
+        };
+      }
+
+      // 3. Validar contraseña
       const isPasswordValid = await bcrypt.compare(password, user.password);
 
       if (!isPasswordValid) {
@@ -56,10 +70,10 @@ export class AuthService {
         };
       }
 
-      // 3. Persistir sesión encriptada en disco
+      // 4. Persistir sesión encriptada en disco
       sessionService.saveToken(String(user.id));
 
-      // 4. Devolver respuesta exitosa con los datos del usuario
+      // 5. Devolver respuesta exitosa con los datos del usuario
       return {
         success: true,
         user: {

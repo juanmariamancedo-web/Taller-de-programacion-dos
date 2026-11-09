@@ -80,6 +80,18 @@ export function registerProductsIPC(): void {
         }
     });
 
+    // ─── NUEVO HANDLER PARA RESERVAR STOCK ───
+    ipcMain.handle('products:reserve', async (_event, productId: string, quantity: number, previousQuantity: number) => {
+        try {
+            return await productsService.reserveProductStock(productId, quantity, previousQuantity);
+        } catch (error) {
+            return {
+                success: false,
+                message: error instanceof Error ? error.message : 'No se pudo reservar el stock.'
+            };
+        }
+    });
+
     ipcMain.handle('products:getProducts', async (_event, searchParams: SearchParams) => {
         try {
             const rawData = await productsService.getProducts(searchParams);

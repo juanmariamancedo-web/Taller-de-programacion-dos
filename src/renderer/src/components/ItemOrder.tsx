@@ -8,40 +8,107 @@ interface ItemOrderProps {
   isOnlyItem: boolean
   disabled?: boolean
   selectedProductIds: number[]
+  isExistingOrder?: boolean
+  stockError?: boolean
+  currentStateId?: number
   onUpdateItem: (id: string, updatedFields: Partial<FormOrderItem>) => void
   onRemoveItem: (id: string) => void
 }
 
-type ProductWithStock = ProductListItem & { stock: number }
+type ProductWithStock = ProductListItem & {
+  stock?: number
+  physicalStock?: number
+  reservedStock?: number
+  availableStock?: number
+}
+
+const getAvailableStock = (product: ProductWithStock): number => {
+  if (product.availableStock !== undefined) return Number(product.availableStock)
+  const physical = Number(product.stock ?? product.physicalStock ?? 0)
+  const reserved = Number(product.reservedStock ?? 0)
+  return Math.max(0, physical - reserved)
+}
 
 export function ItemOrder({
   item,
   isOnlyItem,
   disabled = false,
   selectedProductIds,
+  stockError = false,
+  currentStateId = 1,
   onUpdateItem,
   onRemoveItem,
 }: ItemOrderProps) {
   const [searchTerm, setSearchTerm] = useState(item.description || '')
   const [products, setProducts] = useState<ProductWithStock[]>([])
+  const [selectedProduct, setSelectedProduct] = useState<ProductWithStock | null>(null)
+
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+
   const inputRef = useRef<HTMLInputElement>(null)
   const dropdownRef = useRef<HTMLUListElement>(null)
-  const [dropdownPosition, setDropdownPosition] = useState<{
-    top: number
-    left: number
-    width: number
-  } | null>(null)
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null)
+
+  const reserveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const previousQuantityRef = useRef(item.quantity)
 
   useEffect(() => {
     setSearchTerm(item.description || '')
   }, [item.description])
 
+  useEffect(() => {
+    if (!item.productId) {
+      setSelectedProduct(null)
+    }
+    previousQuantityRef.current = item.quantity
+  }, [item.productId])
+
+  useEffect(() => {
+    if (!item.productId || selectedProduct) return
+
+    async function fetchProduct() {
+      try {
+        const api = window.electronAPI as any
+        if (api?.getProducts) {
+          const res = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
+          const found = (res.data || []).find((p: any) => Number(p.id) === Number(item.productId))
+          if (found) setSelectedProduct(found as ProductWithStock)
+        }
+      } catch (err) {
+        console.error('Error al resolver producto:', err)
+      }
+    }
+    fetchProduct()
+  }, [item.productId, item.description, selectedProduct])
+
+  // Polling de stock real
+  useEffect(() => {
+    if (!item.productId) return
+
+    const refreshProductStock = async () => {
+      try {
+        const api = window.electronAPI as any
+        if (api?.getProducts) {
+          const res = await api.getProducts({ search: item.description || '', page: 1, sort: 'nameDesc' })
+          const found = (res.data || []).find((p: any) => Number(p.id) === Number(item.productId))
+          
+          if (found) {
+            setSelectedProduct(found as ProductWithStock)
+          }
+        }
+      } catch (err) {
+        console.error('Error al refrescar stock:', err)
+      }
+    }
+
+    const interval = setInterval(refreshProductStock, 2000)
+    return () => clearInterval(interval)
+  }, [item.productId, item.description])
+
   const updateDropdownPosition = (): void => {
     const input = inputRef.current
     if (!input) return
-
     const bounds = input.getBoundingClientRect()
     setDropdownPosition({ top: bounds.bottom + 4, left: bounds.left, width: bounds.width })
   }
@@ -58,12 +125,13 @@ export function ItemOrder({
     const timer = setTimeout(async () => {
       setIsLoading(true)
       try {
-        if (window.electronAPI?.getProducts) {
-          const res = await window.electronAPI?.getProducts({ search: searchTerm, page: 1, sort: 'nameDesc' })
+        const api = window.electronAPI as any
+        if (api?.getProducts) {
+          const res = await api.getProducts({ search: searchTerm, page: 1, sort: 'nameDesc' })
           setProducts((res.data || []) as ProductWithStock[])
         }
       } catch (error) {
-        console.error('Error al obtener productos desde IPC:', error)
+        console.error('Error al obtener productos:', error)
       } finally {
         setIsLoading(false)
       }
@@ -74,7 +142,6 @@ export function ItemOrder({
 
   useEffect(() => {
     if (!isOpen) return
-
     window.addEventListener('resize', updateDropdownPosition)
     window.addEventListener('scroll', updateDropdownPosition, true)
     return () => {
@@ -95,22 +162,54 @@ export function ItemOrder({
   }, [])
 
   const availableProducts = products.filter((product) => {
-    const stock = Number(product.stock ?? 0)
-    const isOutOfStock = stock <= 0
-    const isAlreadySelected = Number(product.id) !== item.productId && selectedProductIds.includes(Number(product.id))
-
-    return !isOutOfStock && !isAlreadySelected
+    const isCurrent = Number(product.id) === item.productId
+    const isOut = getAvailableStock(product) <= 0 && !isCurrent
+    const isSelected = !isCurrent && selectedProductIds.includes(Number(product.id))
+    return !isOut && !isSelected
   })
 
-  const currentProductStock = products.find((p) => Number(p.id) === item.productId)?.stock
+  const activeProduct = selectedProduct || products.find((p) => Number(p.id) === item.productId)
+  
+  // ─── CÁLCULO DE LÍMITES CORREGIDO ───────────────────────────────────────────
+  // El availableStock de la BD ya descuenta lo que está reservado por este ítem.
+  // Para el límite máximo del input, usamos el stock físico total, ya que no podemos 
+  // comprar más de lo que existe en el depósito (12 en tu caso).
+  const physicalStock = activeProduct ? Number(activeProduct.stock ?? activeProduct.physicalStock ?? 0) : 0
+  const dynamicAvailable = activeProduct ? getAvailableStock(activeProduct) : 0
 
-  const handleSelectProduct = (product: ProductWithStock) => {
+  // Si estamos editando una orden existente, el límite máximo es el stock físico.
+  // Si es una orden nueva, también es el stock físico. La validación final la hace el backend.
+  const maxQuantity = activeProduct ? physicalStock : undefined
+
+  const syncReservedStock = async (productId: number, newQty: number, prevQty: number) => {
+    try {
+      const api = window.electronAPI as any
+      if (api?.reserveStock) {
+        const res = await api.reserveStock(String(productId), newQty, prevQty)
+        return res
+      }
+    } catch (error) {
+      console.error("Error al reservar stock:", error)
+    }
+    return { success: false }
+  }
+
+  const handleSelectProduct = async (product: ProductWithStock) => {
     if (disabled) return
+    
+    if (item.productId > 0) {
+      await syncReservedStock(item.productId, 0, previousQuantityRef.current)
+    }
+
+    setSelectedProduct(product)
     setSearchTerm(product.name)
     setIsOpen(false)
 
-    const maxStock = Number(product.stock ?? 1)
-    const adjustedQuantity = Math.min(item.quantity, maxStock)
+    const maxStock = Math.max(1, getAvailableStock(product))
+    const adjustedQuantity = Math.min(1, maxStock)
+
+    await syncReservedStock(Number(product.id), adjustedQuantity, 0)
+    previousQuantityRef.current = adjustedQuantity
 
     onUpdateItem(item.id, {
       productId: Number(product.id),
@@ -124,35 +223,53 @@ export function ItemOrder({
     if (disabled) return
     const rawVal = Number(e.target.value) || 1
     const minVal = 1
-
-    const maxVal = currentProductStock !== undefined ? Number(currentProductStock) : rawVal
+    const maxVal = maxQuantity !== undefined ? Number(maxQuantity) : rawVal
     const qty = Math.min(maxVal, Math.max(minVal, rawVal))
 
     onUpdateItem(item.id, { quantity: qty })
+
+    if (item.productId > 0) {
+      if (reserveTimeoutRef.current) clearTimeout(reserveTimeoutRef.current)
+      
+      reserveTimeoutRef.current = setTimeout(async () => {
+        // Verificamos que el backend acepte la reserva
+        const res = await syncReservedStock(item.productId, qty, previousQuantityRef.current)
+        if (res && !res.success) {
+          // Si el backend dice que no hay stock (porque otro usuario compró), revertimos el input
+          onUpdateItem(item.id, { quantity: previousQuantityRef.current })
+          window.alert(res.message || "Stock insuficiente.")
+        } else {
+          previousQuantityRef.current = qty
+        }
+      }, 400)
+    }
   }
 
-  // Cálculos fiscales por ítem (asumiendo precios con IVA incluido)
+  useEffect(() => {
+    return () => {
+      if (item.productId > 0) {
+        window.electronAPI?.reserveStock?.(String(item.productId), 0, previousQuantityRef.current).catch(console.error)
+      }
+    }
+  }, [item.productId])
+
   const unitPriceWithVat = item.unitPrice
   const unitNetPrice = unitPriceWithVat / 1.21
   const unitVatAmount = unitPriceWithVat - unitNetPrice
-
   const totalSubtotal = item.quantity * unitPriceWithVat
-  const netSubtotal = item.quantity * unitNetPrice
-  const vatSubtotal = totalSubtotal - netSubtotal
 
-  const inputStyle =
-    'w-full rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:text-white'
+  const inputStyle = 'w-full rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-1.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-white/10 dark:bg-white/[0.04] dark:text-white'
+  const errorStyle = stockError ? 'border-red-500 ring-2 ring-red-500/20 dark:border-red-500' : ''
 
   return (
     <tr className="border-b border-slate-200/80 transition hover:bg-slate-50/50 dark:border-white/5 dark:hover:bg-white/[0.02]">
-      {/* Producto */}
       <td className="px-4 py-3">
         <div className="relative">
           <input
             ref={inputRef}
             type="text"
             disabled={disabled}
-            className={`${inputStyle} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+            className={`${inputStyle} ${errorStyle} ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
             placeholder="Buscar producto..."
             value={searchTerm}
             onChange={(e) => {
@@ -160,19 +277,34 @@ export function ItemOrder({
               openDropdown()
             }}
             onFocus={openDropdown}
-            onBlur={() => {
-              setTimeout(() => setIsOpen(false), 200)
-            }}
+            onBlur={() => setTimeout(() => setIsOpen(false), 200)}
           />
+
+          {activeProduct && (
+            <div className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              <span className={`inline-block h-2 w-2 rounded-full ${dynamicAvailable > 0 ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              <span>
+                Stock disponible:{' '}
+                <strong className={dynamicAvailable > 0 ? 'text-slate-700 dark:text-slate-200' : 'text-red-500 font-bold'}>
+                  {dynamicAvailable}
+                </strong> un.
+              </span>
+              <span className="text-slate-400 font-normal">
+                (Físico: {activeProduct.stock ?? activeProduct.physicalStock ?? 0}, Res.: {activeProduct.reservedStock ?? 0})
+              </span>
+            </div>
+          )}
+
+          {stockError && (
+            <p className="mt-1 text-[11px] font-medium text-red-500">
+              Stock insuficiente: se restauró la última cantidad válida.
+            </p>
+          )}
 
           {!disabled && isOpen && dropdownPosition && createPortal(
             <ul
               ref={dropdownRef}
-              style={{
-                top: dropdownPosition.top,
-                left: dropdownPosition.left,
-                width: dropdownPosition.width,
-              }}
+              style={{ top: dropdownPosition.top, left: dropdownPosition.left, width: dropdownPosition.width }}
               className="fixed z-[1000] max-h-56 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900"
             >
               {isLoading ? (
@@ -188,7 +320,7 @@ export function ItemOrder({
                     >
                       <div>
                         <span className="font-medium block">{product.name}</span>
-                        <span className="text-[11px] text-slate-400">Stock: {String(product.stock ?? 0)} un.</span>
+                        <span className="text-[11px] text-slate-400">Disponible: {getAvailableStock(product)} un.</span>
                       </div>
                       <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
                         ${Number(product.price).toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -197,9 +329,7 @@ export function ItemOrder({
                   </li>
                 ))
               ) : (
-                <li className="px-4 py-2 text-xs text-slate-400">
-                  {products.length > 0 ? 'Sin stock disponible o ya seleccionado' : 'Sin resultados'}
-                </li>
+                <li className="px-4 py-2 text-xs text-slate-400">Sin resultados</li>
               )}
             </ul>,
             document.body
@@ -207,23 +337,18 @@ export function ItemOrder({
         </div>
       </td>
 
-      {/* Cantidad */}
       <td className="w-24 px-4 py-3">
-        <div className="relative">
-          <input
-            type="number"
-            min={1}
-            max={currentProductStock !== undefined ? Number(currentProductStock) : undefined}
-            disabled={disabled}
-            value={item.quantity}
-            onChange={handleQuantityChange}
-            className={`${inputStyle} text-center ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
-            title={currentProductStock !== undefined ? `Stock máximo disponible: ${currentProductStock}` : undefined}
-          />
-        </div>
+        <input
+          type="number"
+          min={1}
+          max={maxQuantity}
+          disabled={disabled}
+          value={item.quantity}
+          onChange={handleQuantityChange}
+          className={`${inputStyle} ${errorStyle} text-center ${disabled ? 'cursor-not-allowed opacity-60' : ''}`}
+        />
       </td>
 
-      {/* Precio Unitario (Con desglose neto / IVA) */}
       <td className="w-44 px-4 py-3 text-right">
         <div className="font-medium text-slate-900 dark:text-white">
           ${unitPriceWithVat.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
@@ -233,36 +358,23 @@ export function ItemOrder({
         </div>
       </td>
 
-      {/* Subtotal */}
       <td className="w-40 px-4 py-3 text-right">
         <div className="font-semibold text-slate-900 dark:text-white">
           ${totalSubtotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
         </div>
-        <div className="text-[11px] text-slate-400">
-          IVA inc. (${vatSubtotal.toLocaleString('es-AR', { minimumFractionDigits: 2 })})
-        </div>
       </td>
 
-      {/* Eliminar Ítem */}
       <td className="w-12 px-4 py-3 text-center">
         <button
           type="button"
           onClick={() => onRemoveItem(item.id)}
           disabled={isOnlyItem || disabled}
-          title={isOnlyItem ? 'La orden debe tener al menos un ítem' : 'Eliminar ítem'}
           className={`inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition ${
-            isOnlyItem || disabled
-              ? 'cursor-not-allowed opacity-30'
-              : 'hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-400'
+            isOnlyItem || disabled ? 'cursor-not-allowed opacity-30' : 'hover:bg-red-50 hover:text-red-500'
           }`}
         >
           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-            />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
           </svg>
         </button>
       </td>

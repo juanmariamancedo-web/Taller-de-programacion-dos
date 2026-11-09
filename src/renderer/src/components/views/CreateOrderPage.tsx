@@ -47,10 +47,6 @@ interface FormData {
   paymentMethod: string
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
-
-const SHOW_DEBUG = false
-
 const inputClass =
   "w-full rounded-xl border border-gray-300 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
 
@@ -67,7 +63,7 @@ const newItem = (): FormOrderItem => ({
 const buildFormData = (order?: OrderWithState | null): FormData => ({
   clientId: Number(order?.client?.id ?? -1),
   shippingAddressId: Number(order?.shippingAddressId ?? -1),
-  currentStateId: Number(order?.currentState?.id ?? OrderState.Created),
+  currentStateId: Number(order?.currentStateId ?? order?.currentState?.id ?? OrderState.Created),
   trackingNumber: order?.trackingNumber || "",
   location: "",
   notes: "",
@@ -98,13 +94,12 @@ const assertSuccess = (response: any, fallbackMessage: string) => {
   if (!response?.success) throw new Error(response?.message || fallbackMessage)
 }
 
-// ─── Componente ───────────────────────────────────────────────────────────
-
-export default function OrderForm({ initialOrder }: OrderFormProps) {
+export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
   const dispatch = useAppDispatch()
 
   const [session, setSession] = useState<SessionInfo | null>(null)
   const [loadingSession, setLoadingSession] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
     fetchSession()
@@ -114,33 +109,37 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   }, [])
 
   const role = getRole(session?.roleId, session?.roleName)
-
-  const isEditing = Boolean(initialOrder?.id)
+  const currentOrderId = initialOrder?.id ? Number(initialOrder.id) : null
+  const isEditing = Boolean(currentOrderId)
+  
   const orderStateId = Number(
     (initialOrder as any)?.currentStateId ?? initialOrder?.currentState?.id ?? OrderState.Created
   )
 
-  const canEditDetails = !isEditing || canEditOrderDetails(orderStateId, role)
-  const allowedNextStates = isEditing ? getAllowedNextStates(orderStateId, role) : []
+  const allowedNextStates = currentOrderId ? getAllowedNextStates(orderStateId, role) : []
+  const canEditDetails = !currentOrderId || canEditOrderDetails(orderStateId, role)
   const canSubmit = canEditDetails || allowedNextStates.length > 0
 
   const hasInvoice = Boolean((initialOrder as any)?.invoiceType)
-  const showInvoice = isEditing && canViewInvoice(orderStateId, role) && hasInvoice
-
-  const debugInfo = {
-    role,
-    roleName: session?.roleName,
-    roleId: session?.roleId,
-    orderStateId,
-    allowedNextStates,
-    rawState: initialOrder?.currentState,
-    rawStateId: (initialOrder as any)?.currentStateId,
-  }
+  const showInvoice = currentOrderId && canViewInvoice(orderStateId, role) && hasInvoice
 
   const [formData, setFormData] = useState<FormData>(() => buildFormData(initialOrder))
   const [items, setItems] = useState<FormOrderItem[]>([newItem()])
+  
+  const [stockErrorProductId, setStockErrorProductId] = useState<number | null>(null)
 
-  const [initialStateId, setInitialStateId] = useState<number>(OrderState.Created)
+  const stateChanged = formData.currentStateId !== orderStateId
+  const nextStateNeedsTracking = stateChanged && requiresTracking(formData.currentStateId)
+  const nextStateNeedsReason = stateChanged && requiresReason(formData.currentStateId)
+
+  const isTargetStatePaid = formData.currentStateId === OrderState.Paid
+  const isInitialStatePaid = !currentOrderId && formData.currentStateId === OrderState.Paid
+
+  const { clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients } =
+    useSeletedUserOnOrder()
+
+  const { addresses, searchTermAddress, setSearchTermAddress, isOpenAddress, setIsOpenAddress } =
+    useSeletedAddressOnOrder(formData)
 
   const initialStateOptions = [
     OrderState.Created,
@@ -149,53 +148,52 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
     ),
   ]
 
-  const stateChanged = formData.currentStateId !== orderStateId
-  const nextStateNeedsTracking = stateChanged && requiresTracking(formData.currentStateId)
-  const nextStateNeedsReason = stateChanged && requiresReason(formData.currentStateId)
-
-  const isTargetStatePaid = formData.currentStateId === OrderState.Paid
-  const isInitialStatePaid = !isEditing && initialStateId === OrderState.Paid
-
-  const { clients, searchTermClients, setSearchTermClients, isOpenClients, setIsOpenClients } =
-    useSeletedUserOnOrder()
-
-  const { addresses, searchTermAddress, setSearchTermAddress, isOpenAddress, setIsOpenAddress } =
-    useSeletedAddressOnOrder(formData)
-
   useEffect(() => {
     setFormData(buildFormData(initialOrder))
-
     if (!initialOrder?.id) {
       setSearchTermClients("")
       setSearchTermAddress("")
       setItems([newItem()])
-      setInitialStateId(OrderState.Created)
       return
     }
 
-    if (initialOrder.client) {
+    if (initialOrder?.client) {
       setSearchTermClients(`${initialOrder.client.name} ${initialOrder.client.lastname}`)
     }
 
-    const addr = (initialOrder as any).shippingAddress
+    const addr = (initialOrder as any)?.shippingAddress
     if (addr) {
       const city = addr.city?.name ? `, ${addr.city.name}` : ""
       setSearchTermAddress(`${addr.street ?? ""} ${addr.number ?? ""}${city}`.trim())
     }
 
-    setItems(mapOrderItems(initialOrder))
+    if (initialOrder) {
+      setItems(mapOrderItems(initialOrder))
+    }
   }, [initialOrder])
 
-  const handleAddItem = () => setItems((prev) => [...prev, newItem()])
+  const handleAddItem = () => {
+    if (formData.clientId <= 0) {
+      dispatch(setGlobalAlert("Debe seleccionar un cliente antes de agregar ítems."))
+      return
+    }
+    setStockErrorProductId(null)
+    setItems((prev) => [...prev, newItem()])
+  }
 
-  const handleRemoveItem = (id: string) =>
+  const handleRemoveItem = (id: string) => {
+    setStockErrorProductId(null)
     setItems((prev) => (prev.length === 1 ? prev : prev.filter((item) => item.id !== id)))
+  }
 
-  const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) =>
+  const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) => {
+    setStockErrorProductId(null)
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item)))
+  }
 
   const handleClientSelect = (client: (typeof clients)[number]) => {
-    setFormData((prev) => ({ ...prev, clientId: Number(client.id), shippingAddressId: -1 }))
+    const newClientId = Number(client.id)
+    setFormData((prev) => ({ ...prev, clientId: newClientId, shippingAddressId: -1 }))
     setSearchTermClients(`${client.name} ${client.lastname}`)
     setSearchTermAddress("")
     setIsOpenAddress(false)
@@ -203,13 +201,12 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
   }
 
   const handleAddressSelect = (address: (typeof addresses)[number]) => {
+    const newAddressId = Number(address.id)
     const cityName = address.city?.name ? `, ${address.city.name}` : ""
-    setFormData((prev) => ({ ...prev, shippingAddressId: Number(address.id) }))
+    setFormData((prev) => ({ ...prev, shippingAddressId: newAddressId }))
     setSearchTermAddress(`${address.street} ${address.number}${cityName}`)
     setIsOpenAddress(false)
   }
-
-  const total = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
 
   const handleCancel = () => {
     dispatch(setOrderToEdit(null))
@@ -218,105 +215,100 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const handleViewInvoice = async (docType?: 'invoice' | 'credit-note') => {
     try {
-      const response = await window.electronAPI?.openOrderInvoice?.(String(initialOrder?.id), docType)
+      const response = await window.electronAPI?.openOrderInvoice?.(String(currentOrderId), docType)
       assertSuccess(response, "No se pudo abrir el comprobante.")
     } catch (err) {
       dispatch(setGlobalAlert(err instanceof Error ? err.message : "Error al abrir el comprobante."))
     }
   }
 
-  const validate = (): string | null => {
-    if (canEditDetails) {
-      if (formData.clientId <= 0) return "Debe seleccionar un cliente"
-      if (formData.shippingAddressId <= 0) return "Debe seleccionar una dirección"
-      if (items.some((i) => i.productId <= 0)) return "Todos los ítems deben tener un producto seleccionado"
-    }
-
-    const isPayingNow = (!isEditing && initialStateId === OrderState.Paid) || (stateChanged && formData.currentStateId === OrderState.Paid)
-    if (isPayingNow && !formData.paymentMethod.trim()) {
-      return "Debe seleccionar un método de pago para marcar la orden como pagada."
-    }
-
-    if (nextStateNeedsTracking && !formData.trackingNumber.trim()) {
-      return "El número de seguimiento (tracking) es obligatorio para poner la orden en camino."
-    }
-    if (nextStateNeedsReason && !formData.notes.trim()) {
-      return "Indicá el motivo del rechazo o la cancelación en Observaciones."
-    }
-    return null
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    const validationError = validate()
-    if (validationError) {
-      dispatch(setGlobalAlert(validationError))
-      return
+    
+    let finalClientId = formData.clientId
+    if (finalClientId <= 0 && searchTermClients.trim().length > 2 && clients.length > 0) {
+      const matchedClient = clients.find(c => `${c.name} ${c.lastname}`.toLowerCase().includes(searchTermClients.toLowerCase()))
+      if (matchedClient) finalClientId = Number(matchedClient.id)
     }
 
+    let finalAddressId = formData.shippingAddressId
+    if (finalAddressId <= 0 && searchTermAddress.trim().length > 2 && addresses.length > 0) {
+      const matchedAddress = addresses.find(a => `${a.street} ${a.number}`.toLowerCase().includes(searchTermAddress.toLowerCase()))
+      if (matchedAddress) finalAddressId = Number(matchedAddress.id)
+    }
+
+    if (canEditDetails) {
+      if (!finalClientId || finalClientId <= 0) return dispatch(setGlobalAlert("Debe seleccionar un cliente de la lista."))
+      if (!finalAddressId || finalAddressId <= 0) return dispatch(setGlobalAlert("Debe seleccionar una dirección de la lista."))
+      if (items.some((i) => i.productId <= 0)) return dispatch(setGlobalAlert("Todos los ítems deben tener un producto seleccionado"))
+    }
+
+    const isPayingNow = formData.currentStateId === OrderState.Paid
+    if (isPayingNow && !formData.paymentMethod.trim()) return dispatch(setGlobalAlert("Debe seleccionar un método de pago."))
+    if (nextStateNeedsTracking && !formData.trackingNumber.trim()) return dispatch(setGlobalAlert("El número de seguimiento es obligatorio."))
+    if (nextStateNeedsReason && !formData.notes.trim()) return dispatch(setGlobalAlert("Indicá el motivo del rechazo."))
+
+    setIsSaving(true)
+    let generatedOrderId: number | null = currentOrderId
+
     try {
-      const currentSession = (await fetchSession().catch(() => null)) ?? session
-      const orderId = initialOrder?.id ? String(initialOrder.id) : null
-      let savedOrderId: string | null = orderId
+      const selectedAddress = addresses.find((a) => Number(a.id) === finalAddressId) || (initialOrder as any)?.shippingAddress
+      const sellerId = role === "seller" ? Number(session?.id) : Number(initialOrder?.sellerId || session?.id || 0)
+      
+      const details = {
+        clientId: finalClientId,
+        shippingAddressId: finalAddressId,
+        sellerId,
+        // Se envía el total bruto (ej. $245.000) para que el SP lo divida y guarde el neto.
+        total: items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0), 
+        shippingStreet: selectedAddress?.street ?? "",
+        shippingNumber: Number(selectedAddress?.number ?? 0),
+        shippingFloor: selectedAddress?.floor ?? null,
+        shippingApartment: selectedAddress?.apartment ?? null,
+        shippingPostalCode: selectedAddress?.postalCode ?? "",
+        shippingCityName: selectedAddress?.city?.name ?? "",
+        items: items.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
+      }
 
-      if (canEditDetails) {
-        const sellerId =
-          role === "seller"
-            ? Number(currentSession?.id)
-            : Number(initialOrder?.sellerId || currentSession?.id || 0)
-
-        const selectedAddress = addresses.find((a) => Number(a.id) === formData.shippingAddressId) || (initialOrder as any)?.shippingAddress
-
-        const details = {
-          clientId: formData.clientId,
-          shippingAddressId: formData.shippingAddressId,
-          sellerId,
-          currentStateId: orderStateId,
-          total,
-          paymentMethod: isInitialStatePaid ? formData.paymentMethod : undefined,
-          invoiceType: isInitialStatePaid ? formData.invoiceType : undefined,
-          shippingStreet: selectedAddress?.street ?? "",
-          shippingNumber: Number(selectedAddress?.number ?? 0),
-          shippingFloor: selectedAddress?.floor ?? null,
-          shippingApartment: selectedAddress?.apartment ?? null,
-          shippingPostalCode: selectedAddress?.postalCode ?? "",
-          shippingCityName: selectedAddress?.city?.name ?? "",
-          items: items.map(({ productId, quantity, unitPrice }) => ({ productId, quantity, unitPrice })),
+      if (!currentOrderId) {
+        const payload = {
+          ...details,
+          initialStateId: formData.currentStateId,
+          paymentMethod: isPayingNow ? formData.paymentMethod : undefined,
+          invoiceType: isPayingNow ? formData.invoiceType : undefined,
         }
+        const response = await window.electronAPI?.createOrder?.(payload as any)
+        assertSuccess(response, "Error al crear la orden.")
+        
+        if (response?.orderId) {
+          generatedOrderId = Number(response.orderId)
+        }
+      } else {
+        const updateRes = await window.electronAPI?.updateOrder?.({ id: String(currentOrderId), ...details } as any)
+        assertSuccess(updateRes, "Error al actualizar los datos.")
 
-        const response = orderId
-          ? await window.electronAPI?.updateOrder?.({ id: orderId, ...details } as any)
-          : await window.electronAPI?.createOrder?.({ ...details, initialStateId } as any)
-
-        assertSuccess(response, "Error al guardar la orden.")
-        if (!orderId && response?.orderId) {
-          savedOrderId = String(response.orderId)
+        if (formData.currentStateId !== orderStateId) {
+          const statePayload = {
+            id: String(currentOrderId),
+            currentStateId: formData.currentStateId,
+            trackingNumber: formData.trackingNumber.trim() || undefined,
+            location: formData.location.trim() || undefined,
+            notes: formData.notes.trim() || undefined,
+            invoiceType: isTargetStatePaid ? formData.invoiceType : undefined,
+            paymentMethod: isTargetStatePaid ? formData.paymentMethod : undefined,
+          }
+          const stateResponse = await window.electronAPI?.updateOrderState?.(statePayload as any)
+          assertSuccess(stateResponse, "Error al actualizar el estado de la orden.")
         }
       }
 
-      if (orderId && stateChanged) {
-        const response = await window.electronAPI?.updateOrderState?.({
-          id: orderId,
-          currentStateId: formData.currentStateId,
-          trackingNumber: formData.trackingNumber.trim() || undefined,
-          location: formData.location.trim() || undefined,
-          notes: formData.notes.trim() || undefined,
-          invoiceType: isTargetStatePaid ? formData.invoiceType : undefined,
-          paymentMethod: isTargetStatePaid ? formData.paymentMethod : undefined,
-        } as any)
+      const isCancelledOrRejected = formData.currentStateId === OrderState.Cancelled || formData.currentStateId === OrderState.Rejected
 
-        assertSuccess(response, "Error al actualizar el estado de la orden.")
-      }
-
-      const isPaidNow = (!isEditing && initialStateId === OrderState.Paid) || (isEditing && formData.currentStateId === OrderState.Paid)
-      const isCancelledOrRejected = isEditing && (formData.currentStateId === OrderState.Cancelled || formData.currentStateId === OrderState.Rejected)
-
-      if ((isPaidNow || isCancelledOrRejected) && savedOrderId) {
+      if ((isPayingNow || isCancelledOrRejected) && generatedOrderId) {
         try {
-          await window.electronAPI?.openOrderInvoice?.(savedOrderId)
+          await window.electronAPI?.openOrderInvoice?.(String(generatedOrderId))
         } catch (invoiceErr) {
-          console.error("No se pudo abrir el comprobante automáticamente:", invoiceErr)
+          console.error("No se pudo abrir el comprobante:", invoiceErr)
         }
       }
 
@@ -324,23 +316,25 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
       setTimeout(() => dispatch(setCurrentTab("orders")), 150)
     } catch (err) {
       console.error("Error al guardar la orden:", err)
-      dispatch(setGlobalAlert(err instanceof Error ? err.message : "Error de comunicación con el proceso principal de Electron."))
+      dispatch(setGlobalAlert(err instanceof Error ? err.message : "Error de comunicación."))
+    } finally {
+      setIsSaving(false)
     }
   }
 
   if (loadingSession) {
     return (
       <div className="flex h-96 items-center justify-center">
-        <p className="text-sm text-gray-500">Cargando datos de sesión...</p>
+        <p className="text-sm text-gray-500">Cargando sesión...</p>
       </div>
     )
   }
 
-  const title = !isEditing
+  const title = !initialOrder?.id
     ? "Nueva Orden"
-    : `Orden #${initialOrder?.id}${canEditDetails ? "" : " (solo lectura)"}`
+    : `Orden #${currentOrderId}${canEditDetails ? "" : " (solo lectura)"}`
 
-  const subtitle = !isEditing
+  const subtitle = !initialOrder?.id
     ? "Ingresá los datos necesarios para registrar una nueva orden."
     : canEditDetails
     ? "Mientras la orden esté en borrador podés modificar sus datos."
@@ -350,9 +344,17 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
 
   const statusHistory = (initialOrder as any)?.statusHistory ?? []
   const disabledFieldClass = "cursor-not-allowed opacity-60 bg-gray-100 dark:bg-zinc-800"
-  const addressDisabled = !canEditDetails || formData.clientId <= 0
-  
+  const addressDisabled = !canEditDetails || (formData.clientId <= 0 && searchTermClients.trim().length === 0)
   const isCancelledOrRejectedState = orderStateId === OrderState.Cancelled || orderStateId === OrderState.Rejected
+
+  const rawSubtotal = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
+  const isExento = formData.invoiceType === 'EXENTO'
+  
+  // 1. Calculamos el monto neto (si es exento, dividimos el bruto por 1.21)
+  const netAmount = isExento ? Number((rawSubtotal / 1.21).toFixed(2)) : rawSubtotal
+  
+  // 2. El Total a pagar será el Neto si es exento, o el bruto si es Factura A/B
+  const displayTotal = isExento ? netAmount : rawSubtotal
 
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col gap-6 p-6">
@@ -365,85 +367,33 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         <div className="flex gap-2">
           {showInvoice && hasInvoice && isCancelledOrRejectedState ? (
             <>
-              <button
-                type="button"
-                onClick={() => handleViewInvoice('invoice')}
-                className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-              >
-                Ver factura original
-              </button>
-              <button
-                type="button"
-                onClick={() => handleViewInvoice('credit-note')}
-                className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700"
-              >
-                Ver nota de crédito
-              </button>
+              <button type="button" onClick={() => handleViewInvoice('invoice')} className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Ver factura original</button>
+              <button type="button" onClick={() => handleViewInvoice('credit-note')} className="rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700">Ver nota de crédito</button>
             </>
           ) : showInvoice ? (
-            <button
-              type="button"
-              onClick={() => handleViewInvoice()}
-              className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-            >
-              Ver comprobante
-            </button>
+            <button type="button" onClick={() => handleViewInvoice()} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Ver comprobante</button>
           ) : null}
 
-          <button
-            type="button"
-            onClick={handleCancel}
-            className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5"
-          >
+          <button type="button" onClick={handleCancel} className="rounded-xl border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5">
             ← Volver
           </button>
         </div>
       </div>
 
-      {SHOW_DEBUG && (
-        <pre className="rounded bg-yellow-100 p-2 text-xs text-black">
-          {JSON.stringify(debugInfo, (_, v) => (typeof v === "bigint" ? v.toString() : v), 2)}
-        </pre>
-      )}
-
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm"
-      >
-        {/* Selector de Tipo de Factura y Método de Pago permanente (Bloqueados si ya tiene factura / está pagada) */}
+      <form onSubmit={handleSubmit} className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm">
+        
         {hasInvoice && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="rounded-xl bg-gray-50 dark:bg-zinc-800/50 p-4 border border-gray-200 dark:border-white/10">
               <label className={labelClass}>Tipo de Factura (Bloqueado)</label>
-              <select
-                disabled
-                value={formData.invoiceType}
-                onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' | 'EXENTO' }))}
-                className={`${inputClass} bg-white dark:bg-zinc-900`}
-              >
-                <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                  Factura B (Consumidor Final / Monotributo)
-                </option>
-                <option value="EXENTO" className="bg-white dark:bg-zinc-900 ftext-gray-900 dark:text-white">
-                  Factura B - Sujeto Exento / Organismo Público
-                </option>
-                <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                  Factura A (Responsable Inscripto - IVA 21%)
-                </option>
+              <select disabled={true} value={formData.invoiceType} className={`${inputClass} ${disabledFieldClass}`}>
+                <option value="B">Factura B</option><option value="EXENTO">Factura B - Sujeto Exento</option><option value="A">Factura A</option>
               </select>
             </div>
-
             <div className="rounded-xl bg-gray-50 dark:bg-zinc-800/50 p-4 border border-gray-200 dark:border-white/10">
               <label className={labelClass}>Método de Pago (Bloqueado)</label>
-              <select
-                value={formData.paymentMethod}
-                disabled={true}
-                className={`${inputClass} bg-white dark:bg-zinc-900 ${disabledFieldClass}`}
-              >
-                <option value="Efectivo" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Efectivo</option>
-                <option value="Transferencia" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Transferencia</option>
-                <option value="Tarjeta de Débito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Débito</option>
-                <option value="Tarjeta de Crédito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Crédito</option>
+              <select disabled={true} value={formData.paymentMethod} className={`${inputClass} ${disabledFieldClass}`}>
+                <option value="Efectivo">Efectivo</option><option value="Transferencia">Transferencia</option><option value="Tarjeta de Débito">Tarjeta de Débito</option><option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
               </select>
             </div>
           </div>
@@ -452,161 +402,74 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
         {allowedNextStates.length > 0 && (
           <div className="rounded-xl bg-blue-50/50 p-4 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 flex flex-col gap-4">
             <h3 className="text-sm font-bold text-blue-900 dark:text-blue-300">Cambio de estado</h3>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelClass}>Estado</label>
-                <select
-                  value={formData.currentStateId}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))}
-                  className="w-full rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-zinc-900 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value={orderStateId} className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                    {getStateLabel(orderStateId)} (actual)
-                  </option>
-                  {allowedNextStates.map((stateId) => (
-                    <option key={stateId} value={stateId} className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                      {STATE_LABELS[stateId]}
-                    </option>
-                  ))}
+                <select value={formData.currentStateId} onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))} className="w-full rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-zinc-900 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500">
+                  <option value={orderStateId}>{getStateLabel(orderStateId)} (actual)</option>
+                  {allowedNextStates.map((stateId) => (<option key={stateId} value={stateId}>{STATE_LABELS[stateId]}</option>))}
                 </select>
               </div>
-
-              {/* Si estamos transicionando a Paid y aún no tenía factura */}
               {isTargetStatePaid && !hasInvoice && (
                 <>
                   <div>
                     <label className={labelClass}>Tipo de Factura <span className="text-red-500">*</span></label>
-                    <select
-                      value={formData.invoiceType}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' | 'EXENTO' }))}
-                      className={`${inputClass} bg-white dark:bg-zinc-900`}
-                    >
-                      <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                        Factura B (Consumidor Final / Monotributo)
-                      </option>
-                      <option value="EXENTO" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                        Factura B - Sujeto Exento / Organismo Público
-                      </option>
-                      <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                        Factura A (Responsable Inscripto - IVA 21%)
-                      </option>
+                    <select value={formData.invoiceType} onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as any }))} className={`${inputClass} bg-white dark:bg-zinc-900`}>
+                      <option value="B">Factura B</option><option value="EXENTO">Factura B - Sujeto Exento</option><option value="A">Factura A</option>
                     </select>
                   </div>
-
                   <div>
                     <label className={labelClass}>Método de Pago <span className="text-red-500">*</span></label>
-                    <select
-                      value={formData.paymentMethod}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, paymentMethod: e.target.value }))}
-                      className={`${inputClass} bg-white dark:bg-zinc-900`}
-                    >
-                      <option value="Efectivo" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Efectivo</option>
-                      <option value="Transferencia" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Transferencia</option>
-                      <option value="Tarjeta de Débito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Débito</option>
-                      <option value="Tarjeta de Crédito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Crédito</option>
+                    <select value={formData.paymentMethod} onChange={(e) => setFormData((prev) => ({ ...prev, paymentMethod: e.target.value }))} className={`${inputClass} bg-white dark:bg-zinc-900`}>
+                      <option value="Efectivo">Efectivo</option><option value="Transferencia">Transferencia</option><option value="Tarjeta de Débito">Tarjeta de Débito</option><option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
                     </select>
                   </div>
                 </>
               )}
-
               {nextStateNeedsTracking && (
                 <div>
-                  <label className={labelClass}>Número de seguimiento (tracking)</label>
-                  <input
-                    type="text"
-                    value={formData.trackingNumber}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, trackingNumber: e.target.value }))}
-                    placeholder="Ej. TRK-98234123"
-                    className={inputClass}
-                    required
-                  />
+                  <label className={labelClass}>Número de seguimiento</label>
+                  <input type="text" value={formData.trackingNumber} onChange={(e) => setFormData(prev => ({...prev, trackingNumber: e.target.value}))} placeholder="Ej. TRK-98234" className={inputClass} required />
                 </div>
               )}
             </div>
-
             {stateChanged && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {isLogisticsRole(role) && (
                   <div>
-                    <label className={labelClass}>Ubicación física actual (opcional)</label>
-                    <input
-                      type="text"
-                      value={formData.location}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
-                      placeholder="Ej. Depósito Central Corrientes"
-                      className={inputClass}
-                    />
+                    <label className={labelClass}>Ubicación (opcional)</label>
+                    <input type="text" value={formData.location} onChange={(e) => setFormData(prev => ({...prev, location: e.target.value}))} placeholder="Ej. Depósito Central" className={inputClass} />
                   </div>
                 )}
-
                 <div>
-                  <label className={labelClass}>
-                    {nextStateNeedsReason ? "Motivo (obligatorio)" : "Observaciones (opcional)"}
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.notes}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
-                    placeholder={nextStateNeedsReason ? "Ej. Sin stock del producto" : "Ej. Paquete listo para transporte"}
-                    className={inputClass}
-                    required={nextStateNeedsReason}
-                  />
+                  <label className={labelClass}>{nextStateNeedsReason ? "Motivo (obligatorio)" : "Observaciones (opcional)"}</label>
+                  <input type="text" value={formData.notes} onChange={(e) => setFormData(prev => ({...prev, notes: e.target.value}))} placeholder="Ej. Motivo..." className={inputClass} required={nextStateNeedsReason} />
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {!isEditing && initialStateOptions.length > 1 && (
+        {!initialOrder?.id && initialStateOptions.length > 1 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>Estado inicial</label>
-              <select
-                value={initialStateId}
-                onChange={(e) => setInitialStateId(Number(e.target.value))}
-                className="w-full rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-zinc-900 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {initialStateOptions.map((stateId) => (
-                  <option key={stateId} value={stateId} className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                    {STATE_LABELS[stateId]}
-                  </option>
-                ))}
+              <select value={formData.currentStateId} onChange={(e) => setFormData((prev) => ({ ...prev, currentStateId: Number(e.target.value) }))} className="w-full rounded-xl border border-gray-300 dark:border-white/10 bg-white dark:bg-zinc-900 px-4 py-2.5 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500">
+                {initialStateOptions.map((stateId) => (<option key={stateId} value={stateId}>{STATE_LABELS[stateId]}</option>))}
               </select>
             </div>
-
             {isInitialStatePaid && (
               <>
                 <div>
                   <label className={labelClass}>Tipo de Factura <span className="text-red-500">*</span></label>
-                  <select
-                    value={formData.invoiceType}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, invoiceType: e.target.value as 'A' | 'B' | 'EXENTO' }))}
-                    className={`${inputClass} bg-white dark:bg-zinc-900`}
-                  >
-                    <option value="B" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                      Factura B (Consumidor Final / Monotributo)
-                    </option>
-                    <option value="EXENTO" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                      Factura B - Sujeto Exento / Organismo Público
-                    </option>
-                    <option value="A" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">
-                      Factura A (Responsable Inscripto - IVA 21%)
-                    </option>
+                  <select value={formData.invoiceType} onChange={(e) => setFormData(prev => ({...prev, invoiceType: e.target.value as any}))} className={`${inputClass} bg-white dark:bg-zinc-900`}>
+                    <option value="B">Factura B</option><option value="EXENTO">Factura B - Sujeto Exento</option><option value="A">Factura A</option>
                   </select>
                 </div>
-
                 <div>
                   <label className={labelClass}>Método de Pago <span className="text-red-500">*</span></label>
-                  <select
-                    value={formData.paymentMethod}
-                    onChange={(e) => setFormData((prev) => ({ ...prev, paymentMethod: e.target.value }))}
-                    className={`${inputClass} bg-white dark:bg-zinc-900`}
-                  >
-                    <option value="Efectivo" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Efectivo</option>
-                    <option value="Transferencia" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Transferencia</option>
-                    <option value="Tarjeta de Débito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Débito</option>
-                    <option value="Tarjeta de Crédito" className="bg-white dark:bg-zinc-900 text-gray-900 dark:text-white">Tarjeta de Crédito</option>
+                  <select value={formData.paymentMethod} onChange={(e) => setFormData(prev => ({...prev, paymentMethod: e.target.value}))} className={`${inputClass} bg-white dark:bg-zinc-900`}>
+                    <option value="Efectivo">Efectivo</option><option value="Transferencia">Transferencia</option><option value="Tarjeta de Débito">Tarjeta de Débito</option><option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
                   </select>
                 </div>
               </>
@@ -621,7 +484,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
               type="text"
               disabled={!canEditDetails}
               className={`${inputClass} ${!canEditDetails ? disabledFieldClass : ""}`}
-              placeholder="Buscar cliente por nombre o DNI..."
+              placeholder="Buscar cliente..."
               value={searchTermClients}
               onChange={(e) => setSearchTermClients(e.target.value)}
               onFocus={() => setIsOpenClients(true)}
@@ -629,23 +492,14 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             />
             {isOpenClients && canEditDetails && (
               <ul className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 text-gray-900 dark:text-white">
-                {clients.length > 0 ? (
-                  clients.map((client) => (
-                    <li key={String(client.id)}>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => handleClientSelect(client)}
-                        className="flex w-full items-center justify-between px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-zinc-800"
-                      >
-                        <span>{`${client.name} ${client.lastname}`}</span>
-                        <span className="text-xs text-gray-400">#{String(client.id)}</span>
-                      </button>
-                    </li>
-                  ))
-                ) : (
-                  <li className="px-4 py-3 text-center text-sm text-gray-500">No se encontraron clientes</li>
-                )}
+                {clients.length > 0 ? clients.map((client) => (
+                  <li key={String(client.id)}>
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => handleClientSelect(client)} className="flex w-full items-center justify-between px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-zinc-800">
+                      <span>{`${client.name} ${client.lastname}`}</span>
+                      <span className="text-xs text-gray-400">#{String(client.id)}</span>
+                    </button>
+                  </li>
+                )) : (<li className="px-4 py-3 text-center text-sm text-gray-500">No se encontraron clientes</li>)}
               </ul>
             )}
           </div>
@@ -664,25 +518,14 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
             />
             {isOpenAddress && !addressDisabled && (
               <ul className="absolute z-50 mt-1 max-h-60 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-zinc-900 text-gray-900 dark:text-white">
-                {addresses.length > 0 ? (
-                  addresses.map((address) => (
-                    <li key={String(address.id)}>
-                      <button
-                        type="button"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => handleAddressSelect(address)}
-                        className="flex w-full items-center justify-between px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-zinc-800"
-                      >
-                        <span>{`${address.street} ${address.number}`}</span>
-                        <span className="text-xs text-gray-400">#{String(address.id)}</span>
-                      </button>
-                    </li>
-                  ))
-                ) : (
-                  <li className="px-4 py-3 text-center text-sm text-gray-500">
-                    No se encontraron direcciones para este cliente
+                {addresses.length > 0 ? addresses.map((address) => (
+                  <li key={String(address.id)}>
+                    <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => handleAddressSelect(address)} className="flex w-full items-center justify-between px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-zinc-800">
+                      <span>{`${address.street} ${address.number}`}</span>
+                      <span className="text-xs text-gray-400">#{String(address.id)}</span>
+                    </button>
                   </li>
-                )}
+                )) : (<li className="px-4 py-3 text-center text-sm text-gray-500">No se encontraron direcciones</li>)}
               </ul>
             )}
           </div>
@@ -692,11 +535,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">Ítems de la orden</h2>
             {canEditDetails && (
-              <button
-                type="button"
-                onClick={handleAddItem}
-                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-100 dark:border-white/10 dark:bg-white/5 dark:text-gray-200 dark:hover:bg-white/10"
-              >
+              <button type="button" onClick={handleAddItem} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-100 dark:border-white/10 dark:bg-white/5 dark:text-gray-200 dark:hover:bg-white/10">
                 + Agregar ítem
               </button>
             )}
@@ -708,7 +547,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                 <tr>
                   <th className="px-4 py-3">Producto</th>
                   <th className="w-28 px-4 py-3">Cantidad</th>
-                  <th className="w-36 px-4 py-3">Precio unit.</th>
+                  <th className="w-36 px-4 py-3 text-right">Precio unit.</th>
                   <th className="w-32 px-4 py-3 text-right">Subtotal</th>
                   <th className="w-12 px-4 py-3 text-center"></th>
                 </tr>
@@ -721,6 +560,7 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
                     disabled={!canEditDetails}
                     isOnlyItem={items.length === 1 || !canEditDetails}
                     selectedProductIds={items.map((i) => i.productId).filter((id) => id > 0)}
+                    currentStateId={orderStateId}
                     onUpdateItem={handleUpdateItem}
                     onRemoveItem={handleRemoveItem}
                   />
@@ -728,73 +568,35 @@ export default function OrderForm({ initialOrder }: OrderFormProps) {
               </tbody>
             </table>
           </div>
-
+          
           <div className="mt-4 flex flex-col items-end gap-1">
             <div className="text-xs text-slate-500 dark:text-slate-400 flex gap-4">
-              <span>Neto: ${(total / 1.21).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              <span>IVA (21%): ${(total - (total / 1.21)).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              <span>Neto {isExento ? 'Exento' : 'Gravado'}: ${netAmount.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              {!isExento && formData.invoiceType === 'A' && (
+                <span>IVA (21%): ${(rawSubtotal - (rawSubtotal / 1.21)).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              )}
             </div>
             <div className="flex items-center gap-4 text-base font-bold text-gray-900 dark:text-white">
               <span>Total:</span>
               <span className="text-xl text-blue-600 dark:text-blue-400">
-                ${total.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
+                ${displayTotal.toLocaleString("es-AR", { minimumFractionDigits: 2 })}
               </span>
             </div>
           </div>
         </div>
 
-        <StatusTimeline history={statusHistory} />
-
         <div className="flex justify-end gap-4 border-t border-gray-200 pt-4 dark:border-white/10">
-          <button
-            type="button"
-            onClick={handleCancel}
-            className="rounded-xl px-5 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5"
-          >
+          <button type="button" onClick={handleCancel} className="rounded-xl px-5 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5">
             {canSubmit ? "Cancelar" : "Volver a la lista"}
           </button>
 
           {canSubmit && (
-            <button
-              type="submit"
-              className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700"
-            >
-              {isEditing ? "Guardar cambios" : "Guardar orden"}
+            <button type="submit" disabled={isSaving} className="rounded-xl bg-blue-600 px-6 py-2.5 font-semibold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 disabled:opacity-50">
+              {isSaving ? "Guardando..." : isEditing ? "Guardar cambios" : "Guardar orden"}
             </button>
           )}
         </div>
       </form>
-    </div>
-  )
-}
-
-function StatusTimeline({ history }: { history: any[] }) {
-  if (history.length === 0) return null
-
-  return (
-    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-white/10">
-      <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-4">Historial de seguimiento</h2>
-
-      <div className="relative border-l-2 border-blue-500 ml-3 flex flex-col gap-6 pl-6 py-2">
-        {history.map((event) => (
-          <div key={String(event.id)} className="relative">
-            <span className="absolute -left-[31px] top-1.5 h-4 w-4 rounded-full bg-blue-600 ring-4 ring-white dark:ring-zinc-900" />
-
-            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center">
-              <span className="font-semibold text-gray-900 dark:text-white">
-                {getStateLabel(Number(event.stateId), event.stateName)}
-              </span>
-              <span className="text-xs text-gray-400">
-                {event.createdAt ? new Date(event.createdAt).toLocaleString("es-AR") : ""}
-              </span>
-            </div>
-
-            {event.notes && (
-              <p className="text-sm font-medium text-blue-600 dark:text-blue-400 mt-1">{event.notes}</p>
-            )}
-          </div>
-        ))}
-      </div>
     </div>
   )
 }

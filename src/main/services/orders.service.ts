@@ -245,7 +245,7 @@ export class OrdersService {
     };
   }
 
-  // ─── Crear / Borrador Inicial ──────────────────────────────────────────
+  // ─── Crear / Borrador Inicial 
 
   async createOrder(
     payload: CreateOrderPayload & { invoiceType?: 'A' | 'B' | 'EXENTO'; paymentMethod?: string },
@@ -323,6 +323,7 @@ export class OrdersService {
         if (initialStateId === OrderState.Paid && items && items.length > 0) {
           await this.finalizeStockDeduction(tx, items.map(i => ({ productId: BigInt(i.productId), amount: Number(i.quantity) })));
           
+          // Ejecutamos el SP para calcular y guardar el Neto en la BD
           await tx.$queryRaw`
             SELECT * FROM procesar_pago_orden(
               ${order.id}::bigint, 
@@ -361,7 +362,7 @@ export class OrdersService {
     }
   }
 
-  // ─── Actualizar / Sincronizar Borrador ────────────────────────────────
+  // ─── Actualizar / Sincronizar Borrador 
 
   async updateOrder(
     payload: UpdateOrderPayload & { paymentMethod?: string },
@@ -442,7 +443,7 @@ export class OrdersService {
     }
   }
 
-  // ─── Cambiar Estado (Usa Procedimientos Almacenados) ──────────────────
+  // ─── Cambiar Estado (Usa Procedimientos Almacenados) 
 
   async updateOrderState(
     payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B' | 'EXENTO'; paymentMethod?: string },
