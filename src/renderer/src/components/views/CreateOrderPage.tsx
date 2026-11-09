@@ -249,6 +249,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     if (nextStateNeedsReason && !formData.notes.trim()) return dispatch(setGlobalAlert("Indicá el motivo del rechazo."))
 
     setIsSaving(true)
+    let generatedOrderId: number | null = currentOrderId
 
     try {
       const selectedAddress = addresses.find((a) => Number(a.id) === finalAddressId) || (initialOrder as any)?.shippingAddress
@@ -258,7 +259,8 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
         clientId: finalClientId,
         shippingAddressId: finalAddressId,
         sellerId,
-        total: items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0),
+        // Se envía el total bruto (ej. $245.000) para que el SP lo divida y guarde el neto.
+        total: items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0), 
         shippingStreet: selectedAddress?.street ?? "",
         shippingNumber: Number(selectedAddress?.number ?? 0),
         shippingFloor: selectedAddress?.floor ?? null,
@@ -269,7 +271,6 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
       }
 
       if (!currentOrderId) {
-        // CREACIÓN: Se crea la orden de cero con todos los ítems y el backend reserva el stock
         const payload = {
           ...details,
           initialStateId: formData.currentStateId,
@@ -278,8 +279,11 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
         }
         const response = await window.electronAPI?.createOrder?.(payload as any)
         assertSuccess(response, "Error al crear la orden.")
+        
+        if (response?.orderId) {
+          generatedOrderId = Number(response.orderId)
+        }
       } else {
-        // ACTUALIZACIÓN: Se actualizan los datos y el backend ajusta el stock reservado
         const updateRes = await window.electronAPI?.updateOrder?.({ id: String(currentOrderId), ...details } as any)
         assertSuccess(updateRes, "Error al actualizar los datos.")
 
@@ -300,10 +304,9 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
       const isCancelledOrRejected = formData.currentStateId === OrderState.Cancelled || formData.currentStateId === OrderState.Rejected
 
-      if ((isPayingNow || isCancelledOrRejected) && (currentOrderId || true)) {
+      if ((isPayingNow || isCancelledOrRejected) && generatedOrderId) {
         try {
-          // Usamos el ID de la respuesta o el actual
-          await window.electronAPI?.openOrderInvoice?.(String(currentOrderId))
+          await window.electronAPI?.openOrderInvoice?.(String(generatedOrderId))
         } catch (invoiceErr) {
           console.error("No se pudo abrir el comprobante:", invoiceErr)
         }
@@ -346,7 +349,12 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
   const rawSubtotal = items.reduce((acc, item) => acc + item.quantity * item.unitPrice, 0)
   const isExento = formData.invoiceType === 'EXENTO'
-  const displayTotal = isExento ? Number((rawSubtotal / 1.21).toFixed(2)) : rawSubtotal
+  
+  // 1. Calculamos el monto neto (si es exento, dividimos el bruto por 1.21)
+  const netAmount = isExento ? Number((rawSubtotal / 1.21).toFixed(2)) : rawSubtotal
+  
+  // 2. El Total a pagar será el Neto si es exento, o el bruto si es Factura A/B
+  const displayTotal = isExento ? netAmount : rawSubtotal
 
   return (
     <div className="w-full max-w-4xl mx-auto flex flex-col gap-6 p-6">
@@ -373,7 +381,6 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
       </div>
 
       <form onSubmit={handleSubmit} className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-gray-200 dark:border-white/10 flex flex-col gap-6 shadow-sm">
-        {/* ... (Campos de factura, estado, cliente, dirección - igual que antes) ... */}
         
         {hasInvoice && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -564,8 +571,8 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
           
           <div className="mt-4 flex flex-col items-end gap-1">
             <div className="text-xs text-slate-500 dark:text-slate-400 flex gap-4">
-              <span>Neto {isExento ? 'Exento' : 'Gravado'}: ${(rawSubtotal / 1.21).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              {!isExento && (
+              <span>Neto {isExento ? 'Exento' : 'Gravado'}: ${netAmount.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              {!isExento && formData.invoiceType === 'A' && (
                 <span>IVA (21%): ${(rawSubtotal - (rawSubtotal / 1.21)).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
               )}
             </div>

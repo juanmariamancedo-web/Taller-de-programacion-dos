@@ -34,7 +34,6 @@ export class InvoiceService {
     const isInvoiceA = rawInvoiceType === 'A'
     const isExempt = rawInvoiceType === 'EXENTO'
 
-    // Definición estricta de la condición fiscal según el comprobante solicitado
     let clientTaxCondition = 'CONSUMIDOR_FINAL'
     if (isInvoiceA) {
       clientTaxCondition = 'RESPONSABLE_INSCRIPTO'
@@ -49,7 +48,6 @@ export class InvoiceService {
     const currentStateId = Number(order.currentStateId)
     const isCancelledOrRejected = !forceInvoice && (currentStateId === OrderState.Rejected || currentStateId === OrderState.Cancelled)
 
-    // Definición del título del comprobante según el tipo
     let documentTitle = `FACTURA B`
     let badgeLabel = 'B'
     if (isInvoiceA) {
@@ -64,21 +62,28 @@ export class InvoiceService {
       documentTitle = `NOTA DE CRÉDITO ${badgeLabel}`
     }
 
-    const total = Number(order.total)
+    // El monto base que viene de la BD
+    const dbTotal = Number(order.total)
 
-    // Cálculos fiscales unificados:
-    // Si es exento, la BD ya guardó el total neto (no dividimos de nuevo).
-    // Si no es exento, el total incluye IVA, así que lo desglosamos.
-    let netAmount, vatAmount, finalTotal;
+    // ─── CÁLCULO A PRUEBA DE BALAS ─────────────────────────────────────────
+    // Si es Exento, el Neto es el Total dividido por 1.21, y el Total final es ese Neto.
+    // Si es A, se desglosa el IVA. Si es B, todo es igual.
+    let netAmount = dbTotal
+    let vatAmount = 0
+    let finalTotal = dbTotal
 
     if (isExempt) {
-      netAmount = total;
-      vatAmount = 0;
-      finalTotal = total;
-    } else {
-      netAmount = Number((total / 1.21).toFixed(2));
-      vatAmount = Number((total - netAmount).toFixed(2));
-      finalTotal = total;
+      // Si el SP no se actualizó y guardó $245.000, acá lo dividimos a $202.479,34.
+      // Si el SP sí se actualizó y guardó $202.479,34, volvería a dividir... 
+      // Para evitar eso, calculamos el Neto en base a la suma de los ítems.
+      const itemsTotal = order.itemOrders.reduce((acc, item) => acc + (Number(item.unitPrice) * Number(item.amount)), 0)
+      netAmount = Number((itemsTotal / 1.21).toFixed(2))
+      vatAmount = 0
+      finalTotal = netAmount
+    } else if (isInvoiceA) {
+      netAmount = Number((dbTotal / 1.21).toFixed(2))
+      vatAmount = Number((dbTotal - netAmount).toFixed(2))
+      finalTotal = dbTotal
     }
 
     const rows = order.itemOrders
@@ -105,7 +110,6 @@ export class InvoiceService {
     .company-info h2 { font-size: 16px; margin: 0 0 4px; font-weight: bold; }
     .company-info p { margin: 2px 0; color: #444; font-size: 11px; }
     
-    /* Letra central tipo A/B de AFIP */
     .invoice-type-box { position: absolute; left: 50%; transform: translateX(-50%); top: 0; width: 50px; border: 2px solid #111; text-align: center; background: #fff; }
     .invoice-type-letter { font-size: 24px; font-weight: bold; display: block; line-height: 1; padding: 4px 0; border-bottom: 1px solid #111; }
     .invoice-type-code { font-size: 10px; font-weight: bold; padding: 2px 0; }
@@ -203,13 +207,13 @@ export class InvoiceService {
       ${
         isCancelledOrRejected
           ? `
-        <div class="totals-row"><span>Neto Anulado:</span> <span>${money(-netAmount)}</span></div>
+        <div class="totals-row"><span>${isExempt ? 'Neto Exento' : 'Neto Gravado'}:</span> <span>${money(-netAmount)}</span></div>
         ${!isExempt ? `<div class="totals-row"><span>IVA (21%):</span> <span>${money(-vatAmount)}</span></div>` : ''}
-        <div class="transparency-notice">${isExempt ? 'Sujeto Exento - IVA no alcanzado' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
+        <div class="transparency-notice">${isExempt ? 'Sujeto Exento (IVA no gravado)' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
         <div class="totals-row final"><span>Total Reintegrado:</span> <span>${money(-finalTotal)}</span></div>
       `
           : `
-        <div class="totals-row"><span>Neto ${isExempt ? 'Exento' : 'Gravado'}:</span> <span>${money(netAmount)}</span></div>
+        <div class="totals-row"><span>${isExempt ? 'Neto Exento' : 'Neto Gravado'}:</span> <span>${money(netAmount)}</span></div>
         ${!isExempt ? `<div class="totals-row"><span>IVA (21%):</span> <span>${money(vatAmount)}</span></div>` : ''}
         <div class="transparency-notice">${isExempt ? 'Sujeto Exento (IVA no gravado)' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
         <div class="totals-row final"><span>Total:</span> <span>${money(finalTotal)}</span></div>

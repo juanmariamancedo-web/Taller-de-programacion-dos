@@ -170,20 +170,17 @@ BEGIN
     END IF;
 
     IF p_invoice_type = 'A' THEN
-        -- Factura A: El total guardado incluye IVA, se desglosa el neto y el IVA
         v_net := ROUND(v_total / 1.21, 2);
         v_vat := ROUND(v_total - v_net, 2);
         v_new_total := v_total;
         
     ELSIF p_invoice_type = 'EXENTO' THEN
-        -- Factura Exenta: El total que viene de la orden es BRUTO. 
-        -- Calculamos el neto una única vez para guardarlo en la BD.
+        -- ACÁ ESTÁ LA CORRECCIÓN: Dividimos y guardamos el Neto
         v_net := ROUND(v_total / 1.21, 2); 
         v_vat := 0.00;
-        v_new_total := v_net; -- El total final de la orden exenta pasa a ser el neto
+        v_new_total := v_net; -- Se guarda $202.479,34
         
     ELSE
-        -- Factura B: Consumidor final con IVA incluido
         v_net := v_total;
         v_vat := 0.00;
         v_new_total := v_total;
