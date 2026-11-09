@@ -115,7 +115,10 @@ export class OrdersService {
   // ─── Consultas ──────────────────────────────────────────────────────────
 
   async getOrders(searchParams?: SearchParams, sessionContext?: UserSessionContext | null) {
-    void sessionContext;
+    const activeSession = await this.resolveSession(sessionContext);
+    const role = this.getSessionRole(activeSession);
+    const currentUserId = this.getSessionUserId(activeSession);
+
     const page = searchParams?.page ?? 1;
     const limit = 5;
 
