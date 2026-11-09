@@ -83,6 +83,8 @@ export interface SearchParams {
   page: number
   sort: string
   includeInactive?: boolean
+  stateFilter?: string   // <-- NUEVO (Filtro para órdenes)
+  statusFilter?: string  // <-- NUEVO (Filtro para usuarios)
 }
 
 // --- TIPOS DE ORDENES ---
@@ -112,13 +114,23 @@ export interface CreateOrderResponse {
   success: boolean
   orderId?: number
   message?: string
+  failedProductId?: number
 }
-
 
 export interface OrderMutationResponse {
   success: boolean
   orderId?: number
   message?: string
+  failedProductId?: number
+}
+
+// --- RESERVA DE STOCK EN EDICIÓN ---
+export interface ReserveOrderStockPayload {
+  orderId: number | string
+  items: Array<{
+    productId: number
+    quantity: number
+  }>
 }
 
 // --- DASHBOARD ---
@@ -390,6 +402,8 @@ export interface ProductListItem {
   name: string
   price: number
   stock: number
+  reservedStock?: number
+  availableStock?: number
   lowStock: number
   image: string
   isActive: boolean
@@ -449,28 +463,31 @@ export interface UpdateOrderStatePayload {
   currentStateId: number
   trackingNumber?: string
   notes?: string
+  location?: string
+  invoiceType?: 'A' | 'B' | 'EXENTO'
+  paymentMethod?: string
 }
 
 export interface CreateOrderPayload {
-  clientId: number | string;
-  sellerId?: number | string;
-  shippingAddressId?: number | string;
-  initialStateId?: number; // Creada (por defecto), Pendiente o Pagada
+  clientId?: number | bigint; 
+  sellerId: number | bigint;
+  shippingAddressId?: number | bigint;
   total: number;
-  items: Array<{
-    productId: number;
+  items: {
+    productId: number | bigint;
     quantity: number;
     unitPrice: number;
-  }>;
+  }[];
+  initialStateId?: number;
 }
 
 export interface UpdateOrderPayload {
   id: number | string;
   clientId?: number | string;
   sellerId?: number | string;
-  shippingAddressId?: number | string; // <-- Agregar
+  shippingAddressId?: number | string;
   currentStateId?: number | string;
-  trackingNumber?: string;             // <-- Agregar
+  trackingNumber?: string;
   total?: number;
   items?: Array<{
     productId: number;
@@ -512,6 +529,8 @@ export interface IElectronAPI {
   createOrder: (payload: CreateOrderPayload) => Promise<CreateOrderResponse>
   updateOrder: (payload: UpdateOrderPayload) => Promise<OrderMutationResponse>
   updateOrderState: (payload: UpdateOrderStatePayload) => Promise<OrderMutationResponse>
+  reserveOrderStock: (payload: ReserveOrderStockPayload) => Promise<OrderMutationResponse>
+  releaseOrderReservation: (orderId: number | string) => Promise<OrderMutationResponse>
 
   // Clientes y Direcciones
   getProvinces: () => Promise<ProvinceOption[]>
@@ -530,6 +549,8 @@ export interface IElectronAPI {
   updateProduct: (input: UpdateProductInput) => Promise<ProductMutationResponse>
   setProductStatus: (input: ProductStatusInput) => Promise<ProductMutationResponse>
   updateProductStock: (input: ProductStockInput) => Promise<ProductMutationResponse>
+  reserveStock: (productId: string, quantity: number, previousQuantity?: number) => Promise<{ success: boolean; message?: string }>
+  onStockUpdated: (callback: () => void) => Unsubscribe
 
   // Autenticación y Sesión
   login: (credentials: Credentials) => Promise<AuthResponse>

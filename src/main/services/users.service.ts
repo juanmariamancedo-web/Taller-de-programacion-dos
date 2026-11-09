@@ -48,6 +48,7 @@ export class UsersService {
 
     const search = searchParams?.search?.trim();
 
+    // Armamos el filtro base (por username si hay búsqueda)
     const where: Prisma.UserWhereInput = search
       ? {
           username: {
@@ -56,6 +57,13 @@ export class UsersService {
           },
         }
       : {};
+
+    // ⚡ Aplicamos el filtro de Estado (Activo / Inactivo)
+    if (searchParams?.statusFilter === 'active') {
+      where.isActive = true;
+    } else if (searchParams?.statusFilter === 'inactive') {
+      where.isActive = false;
+    }
 
     const [totalUsers, users] = await prisma.$transaction([
       prisma.user.count({ where }),

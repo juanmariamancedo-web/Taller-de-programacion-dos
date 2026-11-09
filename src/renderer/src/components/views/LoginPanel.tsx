@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { setSession } from '../../store/slices/appSlice';
+import { setCurrentTab, setSession } from '../../store/slices/appSlice';
 
 interface Props {
   children: React.ReactNode;
@@ -65,6 +65,9 @@ export default function LoginPanel({ children }: Props) {
       setUsername("")
       setPassword("")
       handleSetSession(activeSession);
+
+      // Cuando se inicia session siempre se redirige al home
+      dispatch(setCurrentTab("dashboard"))
 
     } catch (error) {
       console.error('Error imprevisto en IPC:', error);
