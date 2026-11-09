@@ -69,7 +69,8 @@ export class InvoiceService {
     let vatAmount = 0
     const finalTotal = total
 
-    if (isInvoiceA) {
+    // ⚡ ACÁ EL CAMBIO: Si NO es Exento (es decir, es A o B), calculamos y mostramos el IVA
+    if (!isExempt) {
       netAmount = Number((total / 1.21).toFixed(2))
       vatAmount = Number((total - netAmount).toFixed(2))
     }
@@ -120,7 +121,6 @@ export class InvoiceService {
     .totals-box { width: 300px; }
     .totals-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
     .totals-row.final { font-size: 16px; font-weight: bold; border-top: 2px solid #111; margin-top: 5px; padding-top: 5px; }
-    .transparency-notice { font-size: 10px; color: #555; margin-top: 4px; font-style: italic; text-align: right; }
     .alert-banner { font-weight: bold; color: #dc2626; margin-bottom: 8px; }
     .exemption-banner { font-weight: bold; color: #2563eb; margin-bottom: 8px; }
   </style>
@@ -152,7 +152,7 @@ export class InvoiceService {
   </div>
 
   ${isCancelledOrRejected ? '<div class="alert-banner">COMPROBANTE DE ANULACIÓN (NOTA DE CRÉDITO)</div>' : ''}
-  ${isExempt ? '<div class="exemption-banner">OPERACIÓN EXENTA - LEY DE TRANSPARENCIA FISCAL</div>' : ''}
+  ${isExempt ? '<div class="exemption-banner">OPERACIÓN EXENTA</div>' : ''}
 
   <div class="client-box">
     <table>
@@ -197,13 +197,11 @@ export class InvoiceService {
           ? `
         <div class="totals-row"><span>${isExempt ? 'Neto Exento' : 'Neto Gravado'}:</span> <span>${money(-netAmount)}</span></div>
         ${!isExempt ? `<div class="totals-row"><span>IVA (21%):</span> <span>${money(-vatAmount)}</span></div>` : ''}
-        <div class="transparency-notice">${isExempt ? 'Sujeto Exento (IVA no gravado)' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
         <div class="totals-row final"><span>Total Reintegrado:</span> <span>${money(-finalTotal)}</span></div>
       `
           : `
         <div class="totals-row"><span>${isExempt ? 'Neto Exento' : 'Neto Gravado'}:</span> <span>${money(netAmount)}</span></div>
         ${!isExempt ? `<div class="totals-row"><span>IVA (21%):</span> <span>${money(vatAmount)}</span></div>` : ''}
-        <div class="transparency-notice">${isExempt ? 'Sujeto Exento (IVA no gravado)' : 'Ley 27.743 - Transparencia Fiscal al Consumidor'}</div>
         <div class="totals-row final"><span>Total:</span> <span>${money(finalTotal)}</span></div>
       `
       }

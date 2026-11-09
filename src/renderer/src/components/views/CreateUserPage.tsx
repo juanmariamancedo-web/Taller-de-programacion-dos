@@ -10,7 +10,9 @@ export default function UserForm() {
   // Obtener el usuario a editar desde Redux
   const userToEdit = useAppSelector((state) => state.app.userToEdit)
 
-  const [success, setSuccess] = useState(false)
+  // Cambiamos 'success' por un objeto que guarda si fue edición o creación
+  const [successData, setSuccessData] = useState<{ isEdit: boolean } | null>(null)
+  
   const [saveError, setSaveError] = useState('')
   const [roles, setRoles] = useState<Prisma.UserRoleGetPayload<{}>[]>([])
 
@@ -39,7 +41,6 @@ export default function UserForm() {
           const fetchedRoles = Array.isArray(response.data) ? response.data : [response.data]
           setRoles(fetchedRoles)
 
-          // Si es modo creación y hay roles, seleccionar el primero por defecto si no hay uno
           if (!userToEdit && fetchedRoles.length > 0 && formData.roleId === 0) {
             setFormData((prev) => ({ ...prev, roleId: Number(fetchedRoles[0].id) }))
           }
@@ -58,7 +59,7 @@ export default function UserForm() {
       setFormData({
         username: userToEdit.username || '',
         roleId: Number(userToEdit.roleId ?? userToEdit.role?.id ?? 0),
-        password: '', // En edición se deja vacío salvo que se desee cambiar
+        password: '',
         passwordRepeat: '',
         isActive: userToEdit.isActive ?? true,
       })
@@ -73,20 +74,20 @@ export default function UserForm() {
     }
   }, [userToEdit, roles])
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-        const { name, value, type } = e.target
-        const val = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target
+    const val = type === 'checkbox' ? (e.target as HTMLInputElement).checked : value
 
-        setFormData((prev) => ({
-            ...prev,
-            [name]:
-            name === 'roleId'
-                ? Number(val)
-                : name === 'username'
-                ? val.toString().replace(/\s+/g, '') // Removemos todos los espacios en tiempo real
-                : val,
-        }))
-    }
+    setFormData((prev) => ({
+      ...prev,
+      [name]:
+        name === 'roleId'
+          ? Number(val)
+          : name === 'username'
+          ? val.toString().replace(/\s+/g, '')
+          : val,
+    }))
+  }
 
   function checkErrors(): boolean {
     const newErrors = {
@@ -99,15 +100,12 @@ export default function UserForm() {
 
     let nuevosErrores = false
 
-    // Validar nombre de usuario (mínimo 4 caracteres)
     if (formData.username.length < 4) {
       newErrors.username = 'El nombre de usuario debe tener como mínimo 4 caracteres'
       nuevosErrores = true
     }
 
-    // Validación de Contraseña
     if (!userToEdit) {
-      // En CREACIÓN: la contraseña es obligatoria
       if (formData.password.length < 6) {
         newErrors.password = 'La contraseña debe tener como mínimo 6 caracteres'
         nuevosErrores = true
@@ -117,7 +115,6 @@ export default function UserForm() {
         nuevosErrores = true
       }
     } else {
-      // En EDICIÓN: la contraseña es opcional, pero si la ingresan debe cumplir requisitos
       if (formData.password.length > 0) {
         if (formData.password.length < 6) {
           newErrors.password = 'La contraseña debe tener como mínimo 6 caracteres'
@@ -130,7 +127,6 @@ export default function UserForm() {
       }
     }
 
-    // Validar selección de Rol
     if (!formData.roleId || formData.roleId <= 0) {
       newErrors.roleId = 'Seleccioná un rol válido'
       nuevosErrores = true
@@ -144,7 +140,6 @@ export default function UserForm() {
 
     return !nuevosErrores
   }
-  
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -155,9 +150,9 @@ export default function UserForm() {
 
     try {
       let response: any
+      const isEdit = Boolean(userToEdit?.id)
 
       if (userToEdit?.id) {
-        // --- MODO ACTUALIZACIÓN ---
         const payload: any = {
           id: Number(userToEdit.id),
           username: formData.username,
@@ -165,14 +160,12 @@ export default function UserForm() {
           isActive: formData.isActive,
         }
 
-        // Solo adjuntar contraseña si fue modificada
         if (formData.password.trim().length > 0) {
           payload.password = formData.password
         }
 
         response = await window.electronAPI?.updateUser?.(payload)
       } else {
-        // --- MODO CREACIÓN ---
         response = await window.electronAPI?.createUser?.({
           username: formData.username,
           roleId: formData.roleId,
@@ -186,7 +179,9 @@ export default function UserForm() {
         return
       }
 
-      setSuccess(true)
+      // ⚡ Guardamos si era edición o creación para mostrar el cartel correcto
+      setSuccessData({ isEdit })
+      
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Error de comunicación con Electron.')
     }
@@ -204,7 +199,7 @@ export default function UserForm() {
       passwordRepeat: '',
       isActive: true,
     })
-    setSuccess(false)
+    setSuccessData(null)
   }
 
   function onNavigateBack() {
@@ -212,8 +207,16 @@ export default function UserForm() {
     dispatch(setCurrentTab('users'))
   }
 
-  if (success) {
-    return <UserSuccess onReset={onReset} username={formData.username} onNavigateBack={onNavigateBack} />
+  // Mostramos el cartel pasándole la prop 'isEdit' (necesitas adaptar UserSuccess para recibirla)
+  if (successData) {
+    return (
+      <UserSuccess 
+        onReset={onReset} 
+        username={formData.username} 
+        onNavigateBack={onNavigateBack} 
+        isEdit={successData.isEdit} // <-- Le pasamos la prop
+      />
+    )
   }
 
   return (
