@@ -29,6 +29,60 @@ export interface UserSessionContext {
 
 type Tx = Prisma.TransactionClient;
 
+const procesarPagoOrdenSql = `
+CREATE OR REPLACE FUNCTION procesar_pago_orden(
+  p_order_id BIGINT,
+  p_invoice_type VARCHAR,
+  p_paid_state_id BIGINT
+)
+RETURNS TABLE (
+  order_id BIGINT,
+  total_amount NUMERIC,
+  invoice_type VARCHAR,
+  net_amount NUMERIC,
+  vat_amount NUMERIC
+)
+LANGUAGE plpgsql
+AS $function$
+DECLARE
+  v_total NUMERIC;
+  v_new_total NUMERIC;
+  v_net NUMERIC;
+  v_vat NUMERIC;
+BEGIN
+  SELECT total INTO v_total FROM orders WHERE id = p_order_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'La orden con ID % no existe.', p_order_id;
+  END IF;
+
+  IF p_invoice_type = 'A' OR p_invoice_type = 'EXENTO' THEN
+    v_net := ROUND(v_total / 1.21, 2);
+    v_vat := ROUND(v_total - v_net, 2);
+    v_new_total := CASE WHEN p_invoice_type = 'EXENTO' THEN v_net ELSE v_total END;
+  ELSE
+    v_net := v_total;
+    v_vat := 0.00;
+    v_new_total := v_total;
+  END IF;
+
+  UPDATE orders
+  SET current_state_id = p_paid_state_id,
+      invoice_type = p_invoice_type,
+      total = v_new_total,
+      updated_at = NOW()
+  WHERE id = p_order_id;
+
+  order_id := p_order_id;
+  total_amount := v_new_total;
+  invoice_type := p_invoice_type;
+  net_amount := v_net;
+  vat_amount := v_vat;
+  RETURN NEXT;
+END;
+$function$;
+`;
+
 /** Estados que cierran la orden sin entregarla: el stock vuelve al inventario. */
 const releasesStock = (stateId: number) =>
   stateId === OrderState.Rejected || stateId === OrderState.Cancelled;
@@ -121,7 +175,7 @@ export class OrdersService {
   // ─── Consultas ──────────────────────────────────────────────────────────
 
   async getOrders(searchParams?: SearchParams, sessionContext?: UserSessionContext | null) {
-    const activeSession = await this.resolveSession(sessionContext);
+    void sessionContext;
     const page = searchParams?.page ?? 1;
     const limit = 5;
 
@@ -142,9 +196,6 @@ export class OrdersService {
         : { createdAt: 'desc' as const };
 
     const search = searchParams?.search?.trim();
-    const role = this.getSessionRole(activeSession);
-    const currentUserId = this.getSessionUserId(activeSession);
-
     const where: Prisma.OrderWhereInput = {
       ...(search && {
         client: {
@@ -155,14 +206,6 @@ export class OrdersService {
         },
       }),
     };
-
-    if (role === 'seller' && currentUserId) {
-      where.sellerId = BigInt(currentUserId);
-    }
-
-    if (role === 'operator') {
-      where.currentStateId = { in: [BigInt(OrderState.Paid), BigInt(OrderState.InTransit)] };
-    }
 
     const [totalOrders, orders] = await prisma.$transaction([
       prisma.order.count({ where }),
@@ -558,6 +601,8 @@ export class OrdersService {
         }
 
         const updatedOrder = await prisma.$transaction(async (tx) => {
+          await tx.$executeRawUnsafe(procesarPagoOrdenSql);
+
           const spResult = await tx.$queryRaw<Array<{
             order_id: bigint;
             total_amount: number;

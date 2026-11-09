@@ -1,20 +1,10 @@
 import { DashboardDataResponse } from '../domain/types/electron-env';
 import { prisma } from '../infrastructure/db/prisma';
-import { authService } from './auth.service';
 
 export class DashboardService {
   async getDashboardData(sessionContext?: { id?: number | bigint; roleName?: string } | null): Promise<DashboardDataResponse> {
-    const activeSession = sessionContext || (await authService.getActiveSession?.());
-    const roleName = activeSession?.roleName?.toLowerCase();
-    const rawUserId = (activeSession as any)?.userId ?? activeSession?.id;
-    const currentUserId = rawUserId !== undefined ? BigInt(rawUserId) : undefined;
-
-    // Filtros base de órdenes según el rol
+    void sessionContext;
     const orderWhereClause: any = {};
-
-    if (roleName === 'seller' && currentUserId) {
-      orderWhereClause.sellerId = currentUserId;
-    }
 
     const [
       registeredClients,
@@ -70,13 +60,6 @@ export class DashboardService {
 
       prisma.itemOrder.groupBy({
         by: ['productId'],
-        ...(roleName === 'seller' && currentUserId && {
-          where: {
-            order: {
-              sellerId: currentUserId,
-            },
-          },
-        }),
         _sum: {
           amount: true,
         },

@@ -105,6 +105,7 @@ export default function Catalogo(): JSX.Element {
   const [productLoadError, setProductLoadError] = useState<string | null>(null)
   const [productActionError, setProductActionError] = useState<string | null>(null)
   const [savingProduct, setSavingProduct] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const { page, sort } = useAppSelector((state) => state.app)
   const dispatch = useAppDispatch()
@@ -216,27 +217,37 @@ export default function Catalogo(): JSX.Element {
     return nextErrors
   }
 
-  const handleImageSelection = (event: React.ChangeEvent<HTMLInputElement>): void => {
+  const handleImageSelection = async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = event.target.files?.[0]
+    event.target.value = ''
     if (!file) return
 
-    if (!file.type.startsWith('image/')) {
-      setErrors((currentErrors) => ({
-        ...currentErrors,
-        image: 'Seleccioná un archivo de imagen válido.'
-      }))
-      event.target.value = ''
+    if (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) {
+      setErrors((currentErrors) => ({ ...currentErrors, image: 'Elegi una imagen de hasta 5 mb' }))
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        updateForm('image', reader.result)
+    setUploadingImage(true)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      const response = await window.electronAPI?.uploadProductImage(dataUrl)
+      if (!response?.success || !response.data) {
+        throw new Error(response?.message ?? 'No se pudo subir la imagen.')
       }
+      updateForm('image', response.data.url)
+    } catch (error) {
+      setErrors((currentErrors) => ({
+        ...currentErrors,
+        image: error instanceof Error ? error.message : 'Error al subir.'
+      }))
+    } finally {
+      setUploadingImage(false)
     }
-    reader.readAsDataURL(file)
-    event.target.value = ''
   }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -487,9 +498,10 @@ export default function Catalogo(): JSX.Element {
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200 dark:border-white/10 dark:bg-white/5 dark:text-gray-200 dark:hover:bg-white/10"
+                disabled={uploadingImage}
+                className="rounded-lg border border-gray-300 bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-gray-200 dark:hover:bg-white/10"
               >
-                Explorar archivos
+                {uploadingImage ? 'Subiendo ...' : 'Explorar archivos'}
               </button>
               <input
                 ref={fileInputRef}

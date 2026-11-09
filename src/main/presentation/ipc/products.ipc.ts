@@ -7,8 +7,23 @@ import {
     UpdateProductInput
 } from '../../domain/types/electron-env';
 import { productsService } from '../../services/products.service';
+import { clodinaryService } from '../../services/cloudinary.services';
+
 
 export function registerProductsIPC(): void {
+
+
+    ipcMain.handle('products:upload-image', async (_event, dataUrl: string) => {
+        try {
+            return { success: true, data: { url: await clodinaryService.uploadImage(dataUrl) } };
+} catch (error) {
+    return {
+    success: false,
+    message: error instanceof Error ? error.message : 'No se pudo subir la imagen.' 
+        };
+        }
+    });
+    
     ipcMain.handle('products:get-categories', async () => {
         try {
             return { success: true, data: await productsService.getProductCategories() };
@@ -18,6 +33,7 @@ export function registerProductsIPC(): void {
                 message: error instanceof Error ? error.message : 'No se pudieron cargar las categorías.'
             };
         }
+
     });
 
     ipcMain.handle('products:create', async (_event, input: ProductInput) => {

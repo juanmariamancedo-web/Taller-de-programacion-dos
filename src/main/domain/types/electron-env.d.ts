@@ -201,6 +201,7 @@ export interface OrdersReportFilters {
 export interface TimelinePoint {
   label: string
   count: number
+  salesTotal: number
 }
 
 export interface SellerSalesData {
@@ -524,6 +525,7 @@ export interface IElectronAPI {
   // Productos
   getProducts: (searchParams: SearchParams) => Promise<ProductsResponse>
   getProductCategories: () => Promise<ProductCategoriesResponse>
+  uploadProductImage: (dataUrl: string) => Promise<{ success: boolean; data?: { url: string }; message?: string }>
   createProduct: (input: ProductInput) => Promise<ProductMutationResponse>
   updateProduct: (input: UpdateProductInput) => Promise<ProductMutationResponse>
   setProductStatus: (input: ProductStatusInput) => Promise<ProductMutationResponse>
