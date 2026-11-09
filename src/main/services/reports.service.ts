@@ -48,13 +48,6 @@ function getTimelineLabel(date: Date, granularity: 'week' | 'month'): string {
 
 export class ReportsService {
   private async getSellerFilter(): Promise<{ sellerId?: bigint }> {
-    const session = await authService.getActiveSession()
-    if (session && (
-      session.roleId === 3 ||
-      ['seller', 'vendedor'].includes(session.roleName.toLowerCase())
-    )) {
-      return { sellerId: BigInt(session.id) }
-    }
     return {}
   }
 
@@ -295,14 +288,22 @@ export class ReportsService {
     )
     const granularity = filters.granularity ?? 'month'
     const timelineOrders = await prisma.order.findMany({
-      where: { ...sellerFilter, ...(createdAt ? { createdAt } : {}) },
-      select: { createdAt: true }
+      where: {
+        ...sellerFilter,
+        currentState: { name: { in: ['paid', 'dispatched', 'in_transit', 'delivered'] } },
+        ...(createdAt ? { createdAt } : {})
+      },
+      select: { createdAt: true, total: true }
     })
-    const timelineMap = new Map<string, number>()
+    const timelineMap = new Map<string, { count: number; salesTotal: number }>()
     for (const order of timelineOrders) {
       if (!order.createdAt) continue
       const label = getTimelineLabel(order.createdAt, granularity)
-      timelineMap.set(label, (timelineMap.get(label) ?? 0) + 1)
+      const current = timelineMap.get(label) ?? { count: 0, salesTotal: 0 }
+      timelineMap.set(label, {
+        count: current.count + 1,
+        salesTotal: current.salesTotal + Number(order.total)
+      })
     }
 
     if (timelineOrders.length) {
@@ -319,7 +320,7 @@ export class ReportsService {
         const end = new Date(Date.UTC(maxDate.getUTCFullYear(), maxDate.getUTCMonth(), 1))
         while (cursor <= end) {
           const label = getTimelineLabel(cursor, 'month')
-          if (!timelineMap.has(label)) timelineMap.set(label, 0)
+          if (!timelineMap.has(label)) timelineMap.set(label, { count: 0, salesTotal: 0 })
           cursor.setUTCMonth(cursor.getUTCMonth() + 1)
         }
       } else {
@@ -331,13 +332,21 @@ export class ReportsService {
         end.setUTCDate(end.getUTCDate() - (endDay === 0 ? 6 : endDay - 1))
         while (cursor <= end) {
           const label = getTimelineLabel(cursor, 'week')
-          if (!timelineMap.has(label)) timelineMap.set(label, 0)
+          if (!timelineMap.has(label)) timelineMap.set(label, { count: 0, salesTotal: 0 })
           cursor.setUTCDate(cursor.getUTCDate() + 7)
         }
       }
     }
 
-    const timeline = [...timelineMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([label, count]) => ({ label, count }))
+    const timeline = [...timelineMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([label, values]) => {
+        return {
+          label,
+          count: values.count,
+          salesTotal: values.salesTotal
+        }
+      })
 
     return {
       rows,
@@ -351,7 +360,11 @@ export class ReportsService {
 
   async getSellerSales(): Promise<import('../domain/types/electron-env').SellerSalesData> {
     const session = await authService.getActiveSession()
-    if (!session || (![3].includes(session.roleId) && !['seller', 'vendedor'].includes(session.roleName.toLowerCase()))) {
+    if (!session) throw new Error('Debe iniciar sesión para consultar las ventas.')
+    if (
+      session.roleId !== 3 &&
+      !['seller', 'vendedor'].includes(session.roleName.toLowerCase())
+    ) {
       throw new Error('Solo los vendedores pueden consultar sus ventas.')
     }
 

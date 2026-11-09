@@ -108,6 +108,8 @@ const api = {
     ipcRenderer.invoke('address:getAddresses', clientId, searchParams),
 
   // --- MÓDULO DE PRODUCTOS ---
+  uploadProductImage: (dataUrl: string): Promise<{success: boolean; data?: { url: string}; message?: string}> =>
+    ipcRenderer.invoke('products:upload-image', dataUrl),
   getProducts: (params: SearchParams): Promise<ProductsResponse> =>
     ipcRenderer.invoke('products:getProducts', params),
   getProductCategories: (): Promise<ProductCategoriesResponse> =>

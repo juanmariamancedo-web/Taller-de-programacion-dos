@@ -115,7 +115,7 @@ export class OrdersService {
   // ─── Consultas ──────────────────────────────────────────────────────────
 
   async getOrders(searchParams?: SearchParams, sessionContext?: UserSessionContext | null) {
-    const activeSession = await this.resolveSession(sessionContext);
+    void sessionContext;
     const page = searchParams?.page ?? 1;
     const limit = 5;
 
@@ -136,9 +136,6 @@ export class OrdersService {
         : { createdAt: 'desc' as const };
 
     const search = searchParams?.search?.trim();
-    const role = this.getSessionRole(activeSession);
-    const currentUserId = this.getSessionUserId(activeSession);
-
     const where: Prisma.OrderWhereInput = {
       ...(search && {
         client: { name: { contains: search, mode: 'insensitive' } },
