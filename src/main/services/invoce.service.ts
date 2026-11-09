@@ -62,28 +62,16 @@ export class InvoiceService {
       documentTitle = `NOTA DE CRÉDITO ${badgeLabel}`
     }
 
-    // El monto base que viene de la BD
-    const dbTotal = Number(order.total)
+    // Leemos el total de la BD (que ahora guarda el Neto para EXENTO)
+    const total = Number(order.total)
 
-    // ─── CÁLCULO A PRUEBA DE BALAS ─────────────────────────────────────────
-    // Si es Exento, el Neto es el Total dividido por 1.21, y el Total final es ese Neto.
-    // Si es A, se desglosa el IVA. Si es B, todo es igual.
-    let netAmount = dbTotal
+    let netAmount = total
     let vatAmount = 0
-    let finalTotal = dbTotal
+    const finalTotal = total
 
-    if (isExempt) {
-      // Si el SP no se actualizó y guardó $245.000, acá lo dividimos a $202.479,34.
-      // Si el SP sí se actualizó y guardó $202.479,34, volvería a dividir... 
-      // Para evitar eso, calculamos el Neto en base a la suma de los ítems.
-      const itemsTotal = order.itemOrders.reduce((acc, item) => acc + (Number(item.unitPrice) * Number(item.amount)), 0)
-      netAmount = Number((itemsTotal / 1.21).toFixed(2))
-      vatAmount = 0
-      finalTotal = netAmount
-    } else if (isInvoiceA) {
-      netAmount = Number((dbTotal / 1.21).toFixed(2))
-      vatAmount = Number((dbTotal - netAmount).toFixed(2))
-      finalTotal = dbTotal
+    if (isInvoiceA) {
+      netAmount = Number((total / 1.21).toFixed(2))
+      vatAmount = Number((total - netAmount).toFixed(2))
     }
 
     const rows = order.itemOrders
