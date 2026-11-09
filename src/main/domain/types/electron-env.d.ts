@@ -83,6 +83,8 @@ export interface SearchParams {
   page: number
   sort: string
   includeInactive?: boolean
+  stateFilter?: string   // <-- NUEVO (Filtro para órdenes)
+  statusFilter?: string  // <-- NUEVO (Filtro para usuarios)
 }
 
 // --- TIPOS DE ORDENES ---
@@ -545,7 +547,7 @@ export interface IElectronAPI {
   updateProduct: (input: UpdateProductInput) => Promise<ProductMutationResponse>
   setProductStatus: (input: ProductStatusInput) => Promise<ProductMutationResponse>
   updateProductStock: (input: ProductStockInput) => Promise<ProductMutationResponse>
-  reserveStock: (productId: string, quantity: number, previousQuantity?: number) => Promise<{ success: boolean; message?: string }> // <-- NUEVA
+  reserveStock: (productId: string, quantity: number, previousQuantity?: number) => Promise<{ success: boolean; message?: string }>
   onStockUpdated: (callback: () => void) => Unsubscribe
 
   // Autenticación y Sesión

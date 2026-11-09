@@ -4,7 +4,7 @@ import { Sort } from "../Sort"
 import { useEffect, useState } from "react"
 import { OrderWithState } from "../../../../main/domain/types/electron-env"
 import { useAppDispatch, useAppSelector } from "../../store/hooks"
-import { setCurrentTab, setOrderToEdit } from "../../store/slices/appSlice"
+import { setCurrentTab, setOrderToEdit, setOrderStateFilter } from "../../store/slices/appSlice"
 import { useReportNavigation } from './useReportNavigation'
 
 export default function OrdersPage() {
@@ -20,6 +20,7 @@ export default function OrdersPage() {
     const search = useAppSelector((store) => store.app.search);
     const page = useAppSelector((store) => store.app.page);
     const session = useAppSelector((store) => store.app.session);
+    const orderStateFilter = useAppSelector((store) => store.app.orderStateFilter);
 
     // Normalizar roles de usuario
     const roleName = session?.roleName?.toLowerCase() || '';
@@ -38,7 +39,10 @@ export default function OrdersPage() {
                 setIsLoading(true);
                 setError(null);
 
-                const response = await window.electronAPI?.getOrders({ page, sort, search });
+                const response = await window.electronAPI?.getOrders({ 
+                    page, sort, search, 
+                    stateFilter: orderStateFilter 
+                });
                 
                 if (response?.success && response.data) {
                     setPages(response.totalPages ?? 1);
@@ -54,7 +58,7 @@ export default function OrdersPage() {
         };
 
         fetchOrders();
-    }, [search, sort, page]);
+    }, [search, sort, page, orderStateFilter]);
 
     const handleEdit = (order: OrderWithState) => {
         dispatch(setOrderToEdit(order));
@@ -66,7 +70,6 @@ export default function OrdersPage() {
         dispatch(setCurrentTab("order-create"));
     };
 
-    // Permite abrir el panel a Vendedor, Operador, Supervisor y Admin
     const canEditSpecificOrder = (_order: OrderWithState) => {
         if (isAdmin || isSupervisor || isOperador || isVendedor) return true;
         return false;
@@ -80,6 +83,29 @@ export default function OrdersPage() {
                 </h1>
 
                 <div className="flex flex-wrap items-center justify-center gap-3">
+                    {/* Filtro de Estado Estilizado */}
+                    <div className="relative">
+                        <select
+                            value={orderStateFilter}
+                            onChange={(e) => dispatch(setOrderStateFilter(e.target.value))}
+                            className="appearance-none rounded-lg border border-gray-300 bg-white pl-4 pr-10 py-2.5 text-sm font-semibold text-gray-700 outline-none dark:border-white/10 dark:bg-zinc-900 dark:text-gray-200 cursor-pointer hover:bg-gray-50 dark:hover:bg-zinc-800 transition"
+                        >
+                            <option value="">Todos los estados</option>
+                            <option value="1">Creada (Borrador)</option>
+                            <option value="2">Pendiente</option>
+                            <option value="3">Pagada</option>
+                            <option value="4">En Tránsito</option>
+                            <option value="5">Entregada</option>
+                            <option value="6">Rechazada</option>
+                            <option value="7">Cancelada</option>
+                        </select>
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-gray-500">
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </div>
+                    </div>
+
                     <button
                         type="button"
                         onClick={() => navigateToReport('ordenes')}
@@ -87,6 +113,7 @@ export default function OrdersPage() {
                     >
                         Reportes
                     </button>
+                    
                     {canCreateOrder && (
                         <button
                             type="button"
@@ -109,21 +136,11 @@ export default function OrdersPage() {
                 <table className="w-full min-w-[640px] bg-white dark:bg-white/5 text-sm text-gray-900 dark:text-white">
                     <thead className="bg-gray-100 dark:bg-white/10 border-b border-gray-200 dark:border-white/10">
                         <tr className="text-left text-sm font-semibold text-gray-700 dark:text-gray-200">
-                            <th className="px-4 py-3">
-                                <Sort className="" name="ID" serverArg="id" />
-                            </th>
-                            <th className="px-4 py-3">
-                                <Sort className="" name="Cliente" serverArg="client" />
-                            </th>
-                            <th className="px-4 py-3">
-                                <Sort className="" name="Total" serverArg="total" />
-                            </th>
-                            <th className="px-4 py-3">
-                                <Sort className="" name="Estado" serverArg="state" />
-                            </th>
-                            {canManageOrders && (
-                                <th className="px-4 py-3 text-center">Acciones</th>
-                            )}
+                            <th className="px-4 py-3"><Sort className="" name="ID" serverArg="id" /></th>
+                            <th className="px-4 py-3"><Sort className="" name="Cliente" serverArg="client" /></th>
+                            <th className="px-4 py-3"><Sort className="" name="Total" serverArg="total" /></th>
+                            <th className="px-4 py-3"><Sort className="" name="Estado" serverArg="state" /></th>
+                            {canManageOrders && <th className="px-4 py-3 text-center">Acciones</th>}
                         </tr>
                     </thead>
 
@@ -134,39 +151,31 @@ export default function OrdersPage() {
                                 const isInitialState = Number(order.currentState?.id ?? 1) === 1;
 
                                 return (
-                                    <tr
-                                        key={String(order.id)}
-                                        className="hover:bg-gray-50 dark:hover:bg-white/5 transition"
-                                    >
-                                        <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">
-                                            #{String(order.id)}
-                                        </td>
-
+                                    <tr key={String(order.id)} className="hover:bg-gray-50 dark:hover:bg-white/5 transition">
+                                        <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">#{String(order.id)}</td>
                                         <td className="px-4 py-3 text-gray-700 dark:text-gray-300 font-medium">
                                             {order.client ? `${order.client.name} ${order.client.lastname}` : 'Cliente Desconocido'}
                                         </td>
-
                                         <td className="px-4 py-3 text-gray-700 dark:text-gray-300 font-semibold">
                                             ${Number(order.total).toLocaleString("es-AR", { minimumFractionDigits: 2 })}
                                         </td>
-
                                         <td className="px-4 py-3">
                                             <div className="flex flex-col items-start gap-1">
                                                 <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
                                                     order.currentState?.name === "delivered" || Number(order.currentState?.id) === 5
                                                         ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                                                        : order.currentState?.name === "dispatched" || order.currentState?.name === "in_transit" || Number(order.currentState?.id) === 3 || Number(order.currentState?.id) === 4
+                                                        : order.currentState?.name === "dispatched" || order.currentState?.name === "in_transit" || Number(order.currentState?.id) === 4
                                                         ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                                                        : order.currentState?.name === "paid" || order.currentState?.name === "created" || Number(order.currentState?.id) === 1 || Number(order.currentState?.id) === 2
+                                                        : order.currentState?.name === "paid" || order.currentState?.name === "pending" || Number(order.currentState?.id) === 2 || Number(order.currentState?.id) === 3
                                                         ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                                                        : order.currentState?.name === "created" || Number(order.currentState?.id) === 1
+                                                        ? "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
                                                         : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                                                 }`}>
                                                     {order.currentState?.name ?? 'Sin estado'}
                                                 </span>
                                                 {order.trackingNumber && (
-                                                    <span className="text-[11px] font-mono text-gray-400">
-                                                        TRK: {order.trackingNumber}
-                                                    </span>
+                                                    <span className="text-[11px] font-mono text-gray-400">TRK: {order.trackingNumber}</span>
                                                 )}
                                             </div>
                                         </td>
@@ -177,19 +186,12 @@ export default function OrdersPage() {
                                                     <button
                                                         type="button"
                                                         onClick={() => handleEdit(order)}
-                                                        title={`Ver u ordenar #${String(order.id)}`}
                                                         className="rounded-lg bg-blue-100 px-3 py-1.5 font-semibold text-blue-700 transition hover:bg-blue-200 dark:bg-blue-500/20 dark:text-blue-300"
                                                     >
-                                                        {isOperador 
-                                                            ? "Gestionar Envío" 
-                                                            : isVendedor 
-                                                            ? isInitialState ? "Editar" : "Ver Detalles" 
-                                                            : "Gestionar"}
+                                                        {isOperador ? "Gestionar Envío" : isVendedor ? (isInitialState ? "Editar" : "Ver Detalles") : "Gestionar"}
                                                     </button>
                                                 ) : (
-                                                    <span className="text-xs text-gray-400 italic">
-                                                        Bloqueada
-                                                    </span>
+                                                    <span className="text-xs text-gray-400 italic">Bloqueada</span>
                                                 )}
                                             </td>
                                         )}

@@ -20,7 +20,11 @@ export interface AppState {
   clientToEdit: ClientListItem | null;
   orderToEdit: OrderWithState | null;
   userToEdit: UserListItem | null;
-  globalAlert: string | null; // <-- Estado global para las alertas
+  globalAlert: string | null;
+  
+  // Filtros adicionales
+  orderStateFilter: string;
+  userStatusFilter: string;
 }
 
 const initialState: AppState = {
@@ -34,6 +38,10 @@ const initialState: AppState = {
   orderToEdit: null,
   userToEdit: null,
   globalAlert: null, 
+  
+  // Inicializamos los filtros vacíos (muestra todos)
+  orderStateFilter: '',
+  userStatusFilter: '',
 }
 
 export const appSlice = createSlice({
@@ -42,6 +50,7 @@ export const appSlice = createSlice({
   reducers: {
     setSearch: (state, action: PayloadAction<string>) => {
       state.search = action.payload
+      state.page = 1 // Al buscar, volvemos a la primera página
     },
     setSort: (state, action: PayloadAction<string>) => {
       state.sort = action.payload
@@ -52,6 +61,17 @@ export const appSlice = createSlice({
     setPage: (state, action: PayloadAction<number>) => {
       state.page = action.payload
     },
+    
+    // --- Filtros ---
+    setOrderStateFilter: (state, action: PayloadAction<string>) => {
+      state.orderStateFilter = action.payload
+      state.page = 1 // Al filtrar, volvemos a la primera página
+    },
+    setUserStatusFilter: (state, action: PayloadAction<string>) => {
+      state.userStatusFilter = action.payload
+      state.page = 1
+    },
+
     setClientToEdit: (state, action: PayloadAction<ClientListItem | null>) => {
       state.clientToEdit = action.payload
     },
@@ -85,6 +105,8 @@ export const {
   setSort, 
   setCurrentTab, 
   setPage, 
+  setOrderStateFilter,
+  setUserStatusFilter,
   setClientToEdit,
   setOrderToEdit,
   setUserToEdit,
