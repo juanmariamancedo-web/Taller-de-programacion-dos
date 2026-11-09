@@ -323,7 +323,7 @@ export class OrdersService {
         if (initialStateId === OrderState.Paid && items && items.length > 0) {
           await this.finalizeStockDeduction(tx, items.map(i => ({ productId: BigInt(i.productId), amount: Number(i.quantity) })));
           
-          // ⚡ Ejecutamos el SP para calcular y guardar el Neto en la BD
+          // Ejecutamos el SP para calcular y guardar el Neto en la BD
           await tx.$queryRaw`
             SELECT * FROM procesar_pago_orden(
               ${order.id}::bigint, 
