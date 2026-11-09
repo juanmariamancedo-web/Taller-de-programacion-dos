@@ -4,7 +4,7 @@ import { Sort } from "../Sort"
 import { useEffect, useState } from "react";
 import { UserListItem } from "../../../../main/domain/types/electron-env";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
-import { setCurrentTab, setUserToEdit } from "../../store/slices/appSlice";
+import { setCurrentTab, setUserToEdit, setUserStatusFilter } from "../../store/slices/appSlice";
 
 export default function UsersPanel() {
     const [users, setUsers] = useState<UserListItem[]>([]);
@@ -15,6 +15,7 @@ export default function UsersPanel() {
     const sort = useAppSelector((state) => state.app.sort);
     const search = useAppSelector((state) => state.app.search);
     const page = useAppSelector((state) => state.app.page);
+    const userStatusFilter = useAppSelector((state) => state.app.userStatusFilter);
 
     const dispatch = useAppDispatch();
 
@@ -23,7 +24,10 @@ export default function UsersPanel() {
             try {
                 setIsLoading(true);
                 setError(null);
-                const response = await window.electronAPI?.getUsers({ page, sort, search });
+                const response = await window.electronAPI?.getUsers({ 
+                    page, sort, search,
+                    statusFilter: userStatusFilter 
+                });
                 
                 if (response?.success && response.data) {
                     setPages(response.totalPages ?? 1);
@@ -39,7 +43,7 @@ export default function UsersPanel() {
         };
 
         fetchUsers();
-    }, [sort, search, page]);
+    }, [sort, search, page, userStatusFilter]);
 
     const handleCreateNew = () => {
         dispatch(setUserToEdit(null));
@@ -57,14 +61,28 @@ export default function UsersPanel() {
                 <h1 className="text-gray-900 dark:text-white text-3xl md:text-4xl lg:text-5xl font-bold">
                     Usuarios
                 </h1>
-                <button
-                    type="button"
-                    onClick={handleCreateNew}
-                    className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
-                >
-                    <span className="text-xl leading-none">+</span>
-                    Agregar usuario
-                </button>
+                
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                    {/* Filtro de Estado de Usuario */}
+                    <select
+                        value={userStatusFilter}
+                        onChange={(e) => dispatch(setUserStatusFilter(e.target.value))}
+                        className="rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm font-semibold text-gray-700 outline-none dark:border-white/10 dark:bg-zinc-900 dark:text-gray-200"
+                    >
+                        <option value="">Todos los estados</option>
+                        <option value="active">Solo Activos</option>
+                        <option value="inactive">Solo Inactivos</option>
+                    </select>
+
+                    <button
+                        type="button"
+                        onClick={handleCreateNew}
+                        className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-700"
+                    >
+                        <span className="text-xl leading-none">+</span>
+                        Agregar usuario
+                    </button>
+                </div>
             </div>
 
             <Search />

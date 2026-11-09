@@ -153,6 +153,10 @@ export class OrdersService {
       where.currentStateId = { in: [BigInt(OrderState.Paid), BigInt(OrderState.InTransit)] };
     }
 
+    if (searchParams?.stateFilter) {
+      where.currentStateId = BigInt(searchParams.stateFilter);
+    }
+
     const [totalOrders, orders] = await prisma.$transaction([
       prisma.order.count({ where }),
       prisma.order.findMany({
