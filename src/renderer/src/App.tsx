@@ -17,6 +17,7 @@ import { ClientsReport, OrdersReport, ProductsReport } from './components/views/
 import GlobalAlert from './components/GlobalAlert'
 import MySales from './components/views/MySales'
 import DatabaseBackup from './components/views/DatabaseBackup'
+import HelpManual from './components/HelpManual'
 
 function App(): React.JSX.Element {
   const currentTab = useAppSelector((state) => state.app.currentTab)
@@ -125,6 +126,7 @@ function App(): React.JSX.Element {
         </main>
       </div>
       <GlobalAlert />
+      <HelpManual />
     </>
   )
 }
