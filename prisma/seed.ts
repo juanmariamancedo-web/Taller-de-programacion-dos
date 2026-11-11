@@ -27,7 +27,7 @@ async function main() {
     rolesMap[roleName] = role.id
   }
 
-  // 2. Usuarios por tipo (Varios vendedores y roles estándar)
+  // 2. Usuarios por tipo (combinamos vendedores, admin y operadores del sistema)
   console.log('Cargando usuarios...')
   const defaultPassword = await bcrypt.hash('123456', 10)
 
@@ -55,6 +55,8 @@ async function main() {
     createdUsers[userData.username] = user
   }
 
+  const sellerUsers = [createdUsers['seller_juan'], createdUsers['seller_maria']]
+
   // 3. Categorías de Productos
   console.log('Cargando categorías...')
   const categoriesData = [
@@ -81,7 +83,7 @@ async function main() {
   }
   const categoriesByName = new Map(createdCategories.map((category) => [category.name, category]))
 
-  // 4. Productos
+  // 4. Productos representativos de una tienda de repuestos y herramientas
   console.log('Cargando productos de prueba...')
   const productsData = [
     {
@@ -155,6 +157,24 @@ async function main() {
       image: 'https://via.placeholder.com/150',
       isActive: true,
       categoryId: categoriesByName.get('Electrónica')!.id
+    },
+    {
+      name: 'Llave Combinada 1/2 Pulgada',
+      price: 28000.0,
+      stock: 18,
+      lowStock: 4,
+      image: 'https://via.placeholder.com/150',
+      isActive: true,
+      categoryId: categoriesByName.get('Herramienta')!.id
+    },
+    {
+      name: 'Amortiguador Delantero Fiat Palio',
+      price: 52000.0,
+      stock: 14,
+      lowStock: 3,
+      image: 'https://via.placeholder.com/150',
+      isActive: true,
+      categoryId: categoriesByName.get('Repuestos')!.id
     }
   ]
 
