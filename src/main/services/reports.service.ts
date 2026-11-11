@@ -46,6 +46,11 @@ function getTimelineLabel(date: Date, granularity: 'week' | 'month'): string {
   return monday.toISOString().slice(0, 10)
 }
 
+function formatClientName(client?: { name: string; lastname: string } | null): string {
+  if (!client) return 'Consumidor Final'
+  return `${client.name} ${client.lastname}`.trim()
+}
+
 export class ReportsService {
   private async getSellerFilter(): Promise<{ sellerId?: bigint }> {
     return {}
@@ -98,7 +103,7 @@ export class ReportsService {
         orderId: order.id.toString(),
         orderDate: order.createdAt?.toISOString() ?? null,
         sellerName: order.seller.username,
-        clientName: `${order.client.name} ${order.client.lastname}`,
+        clientName: formatClientName(order.client),
         orderState: order.currentState.name,
         orderTotal: salesTotal,
         items: order.itemOrders.map((item) => {
@@ -159,11 +164,12 @@ export class ReportsService {
     const details: ClientReportData['details'] = []
     let totalSpent = 0
     for (const order of orders) {
-      const clientId = order.clientId.toString()
+      const clientId = order.clientId?.toString() ?? '0'
       const amountSpent = Number(order.total)
+      const clientName = formatClientName(order.client)
       const client = clients.get(clientId) ?? {
         clientId,
-        clientName: `${order.client.name} ${order.client.lastname}`,
+        clientName,
         purchases: 0,
         amountSpent: 0
       }
@@ -175,7 +181,7 @@ export class ReportsService {
         orderId: order.id.toString(),
         orderDate: order.createdAt?.toISOString() ?? null,
         sellerName: order.seller.username,
-        clientName: `${order.client.name} ${order.client.lastname}`,
+        clientName,
         orderState: order.currentState.name,
         orderTotal: amountSpent,
         items: order.itemOrders.map((item) => {
@@ -266,7 +272,7 @@ export class ReportsService {
         orderId,
         orderDate: item.order.createdAt?.toISOString() ?? null,
         sellerName: item.order.seller.username,
-        clientName: `${item.order.client.name} ${item.order.client.lastname}`,
+        clientName: formatClientName(item.order.client),
         productName: item.product.name,
         quantity: quantitySold,
         unitPrice: Number(item.unitPrice),
@@ -389,7 +395,7 @@ export class ReportsService {
       orders: orders.map((order) => ({
         id: order.id.toString(),
         createdAt: order.createdAt?.toISOString() ?? null,
-        clientName: `${order.client.name} ${order.client.lastname}`,
+        clientName: formatClientName(order.client),
         state: order.currentState.name,
         total: Number(order.total)
       }))
