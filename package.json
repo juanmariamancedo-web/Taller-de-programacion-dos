@@ -14,7 +14,7 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron .",
     "dev": "electron-vite dev",
-    "build": "npx prisma generate && tsc && electron-vite build",
+    "build": "npx prisma generate && npm run typecheck && electron-vite build",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
