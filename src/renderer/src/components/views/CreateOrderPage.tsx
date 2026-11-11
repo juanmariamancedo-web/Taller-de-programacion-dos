@@ -320,9 +320,11 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
 
       dispatch(setOrderToEdit(null))
       setTimeout(() => dispatch(setCurrentTab("orders")), 150)
+      return
     } catch (err) {
       console.error("Error al guardar la orden:", err)
       dispatch(setGlobalAlert(err instanceof Error ? err.message : "Error de comunicación."))
+      return
     } finally {
       setIsSaving(false)
     }
