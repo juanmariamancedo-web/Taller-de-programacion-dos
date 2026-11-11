@@ -443,16 +443,29 @@ export class OrdersService {
     }
   }
 
-  // ─── Cambiar Estado (Usa Procedimientos Almacenados) 
-
+  // ─── Cambiar Estado (Usa Procedimientos Almacenados)   
   async updateOrderState(
-    payload: UpdateOrderStatePayload & { location?: string; invoiceType?: 'A' | 'B' | 'EXENTO'; paymentMethod?: string },
+    payload: UpdateOrderStatePayload & {
+      location?: string;
+      invoiceType?: 'A' | 'B' | 'EXENTO';
+      paymentMethod?: string;
+    },
     sessionContext?: UserSessionContext | null
   ): Promise<OrderMutationResponse> {
     try {
       const activeSession = await this.resolveSession(sessionContext);
       const role = this.getSessionRole(activeSession);
-      const { id, currentStateId, trackingNumber, notes, location, invoiceType, paymentMethod } = payload;
+
+      const {
+        id,
+        currentStateId,
+        trackingNumber,
+        notes,
+        location,
+        invoiceType,
+        paymentMethod,
+      } = payload;
+
       const orderId = BigInt(id);
       const targetStateId = Number(currentStateId);
 
@@ -461,58 +474,113 @@ export class OrdersService {
         include: { itemOrders: true },
       });
 
-      if (!existingOrder) throw new Error('La orden especificada no existe.');
-
-      this.assertSellerOwnsOrder(role, existingOrder.sellerId, this.getSessionUserId(activeSession));
-
-      const currentState = Number(existingOrder.currentStateId);
-      if (!canChangeState(currentState, targetStateId, role)) {
-        throw new Error(`Tu rol no puede pasar la orden de "${getStateLabel(currentState)}" a "${getStateLabel(targetStateId)}".`);
+      if (!existingOrder) {
+        throw new Error('La orden especificada no existe.');
       }
 
-      if (requiresTracking(targetStateId) && !trackingNumber?.trim() && !existingOrder.trackingNumber) {
-        throw new Error('El número de seguimiento (tracking) es obligatorio para poner la orden en camino.');
+      this.assertSellerOwnsOrder(
+        role,
+        existingOrder.sellerId,
+        this.getSessionUserId(activeSession)
+      );
+
+      const currentState = Number(existingOrder.currentStateId);
+
+      if (!canChangeState(currentState, targetStateId, role)) {
+        throw new Error(
+          `Tu rol no puede pasar la orden de "${getStateLabel(currentState)}" a "${getStateLabel(targetStateId)}".`
+        );
+      }
+
+      if (
+        requiresTracking(targetStateId) &&
+        !trackingNumber?.trim() &&
+        !existingOrder.trackingNumber
+      ) {
+        throw new Error(
+          'El número de seguimiento (tracking) es obligatorio para poner la orden en camino.'
+        );
       }
 
       if (requiresReason(targetStateId) && !notes?.trim()) {
-        throw new Error('Indicá el motivo del rechazo o la cancelación.');
+        throw new Error(
+          'Indicá el motivo del rechazo o la cancelación.'
+        );
       }
 
-      const isLeavingDraft = currentState === OrderState.Created && targetStateId !== OrderState.Created;
+      const isLeavingDraft =
+        currentState === OrderState.Created &&
+        targetStateId !== OrderState.Created;
 
+      // Procesamiento de pago
       if (targetStateId === OrderState.Paid) {
         const selectedInvoiceType = invoiceType?.toUpperCase();
-        if (selectedInvoiceType !== 'A' && selectedInvoiceType !== 'B' && selectedInvoiceType !== 'EXENTO') {
-          throw new Error('Debe especificar si la factura es de tipo A, B o Exento para marcar la orden como pagada.');
+
+        if (
+          selectedInvoiceType !== 'A' &&
+          selectedInvoiceType !== 'B' &&
+          selectedInvoiceType !== 'EXENTO'
+        ) {
+          throw new Error(
+            'Debe especificar si la factura es de tipo A, B o Exento para marcar la orden como pagada.'
+          );
         }
 
-        if (!paymentMethod?.trim()) throw new Error('Debe indicar un método de pago para marcar la orden como pagada.');
+        if (!paymentMethod?.trim()) {
+          throw new Error(
+            'Debe indicar un método de pago para marcar la orden como pagada.'
+          );
+        }
 
         const updatedOrder = await prisma.$transaction(async (tx) => {
-          if (currentState === OrderState.Created || currentState === OrderState.Pending) {
-             await this.releaseReservedStock(tx, orderId);
+          if (
+            currentState === OrderState.Created ||
+            currentState === OrderState.Pending
+          ) {
+            await this.releaseReservedStock(tx, orderId);
           }
 
-          await this.finalizeStockDeduction(tx, existingOrder.itemOrders.map(i => ({ productId: i.productId, amount: i.amount })));
+          await this.finalizeStockDeduction(
+            tx,
+            existingOrder.itemOrders.map((i) => ({
+              productId: i.productId,
+              amount: i.amount,
+            }))
+          );
 
           const spResult = await tx.$queryRaw<Array<{
-            order_id: bigint; total_amount: number; invoice_type: string; net_amount: number; vat_amount: number;
+            order_id: bigint;
+            total_amount: number;
+            invoice_type: string;
+            net_amount: number;
+            vat_amount: number;
           }>>`
             SELECT * FROM procesar_pago_orden(
-              ${orderId}::bigint, 
-              ${selectedInvoiceType}::varchar, 
+              ${orderId}::bigint,
+              ${selectedInvoiceType}::varchar,
               ${BigInt(OrderState.Paid)}::bigint
             )
           `;
 
-          if (!spResult || spResult.length === 0) throw new Error('Error al ejecutar el procedimiento almacenado de facturación.');
+          if (!spResult || spResult.length === 0) {
+            throw new Error(
+              'Error al ejecutar el procedimiento almacenado de facturación.'
+            );
+          }
 
           const fiscalData = spResult[0];
 
           let addressSnapshotUpdates = {};
+
           if (isLeavingDraft && existingOrder.shippingAddressId) {
-            const snapshot = await this.fetchAddressSnapshot(tx, existingOrder.shippingAddressId);
-            if (snapshot) addressSnapshotUpdates = snapshot;
+            const snapshot = await this.fetchAddressSnapshot(
+              tx,
+              existingOrder.shippingAddressId
+            );
+
+            if (snapshot) {
+              addressSnapshotUpdates = snapshot;
+            }
           }
 
           const updated = await tx.order.update({
@@ -525,12 +593,18 @@ export class OrdersService {
             },
           });
 
-          const addressIdToUse = existingOrder.shippingAddressId ?? (await tx.address.findFirst({ where: { clientId: existingOrder.clientId! } }))?.id;
+          const addressIdToUse =
+            existingOrder.shippingAddressId ??
+            (
+              await tx.address.findFirst({
+                where: { clientId: existingOrder.clientId! },
+              })
+            )?.id;
 
           if (addressIdToUse) {
             await tx.orderStatusHistory.create({
               data: {
-                orderId: orderId,
+                orderId,
                 stateId: BigInt(targetStateId),
                 addressId: addressIdToUse,
                 notes: `Orden pagada con Factura ${selectedInvoiceType}. Método: ${paymentMethod.trim()}. Neto: $${fiscalData.net_amount}, IVA 21%: $${fiscalData.vat_amount}.`,
@@ -548,36 +622,66 @@ export class OrdersService {
         };
       }
 
+      // Actualización de estado
       const updatedOrder = await prisma.$transaction(async (tx) => {
-        if (releasesStock(targetStateId) && (currentState === OrderState.Created || currentState === OrderState.Pending)) {
-           await this.releaseReservedStock(tx, orderId);
+        if (
+          releasesStock(targetStateId) &&
+          (
+            currentState === OrderState.Created ||
+            currentState === OrderState.Pending
+          )
+        ) {
+          await this.releaseReservedStock(tx, orderId);
         }
 
-        if (releasesStock(targetStateId) && currentState === OrderState.Created) {
-          await tx.$executeRaw`SELECT sp_anular_orden_borrador(${orderId}::bigint)`;
-        } else {
-          const noteParts = [location?.trim() && `Ubicación: ${location.trim()}.`, notes?.trim()].filter(Boolean);
-          const finalNotes = noteParts.length > 0 ? noteParts.join(' ') : `Estado actualizado a "${getStateLabel(targetStateId)}"`;
+        const noteParts = [
+          location?.trim() && `Ubicación: ${location.trim()}.`,
+          notes?.trim(),
+        ].filter(Boolean);
 
+        const finalNotes =
+          noteParts.length > 0
+            ? noteParts.join(' ')
+            : `Estado actualizado a "${getStateLabel(targetStateId)}"`;
+
+        // Los borradores tienen una función específica de anulación.
+        if (currentState === OrderState.Created) {
+          await tx.$executeRaw`
+            SELECT sp_anular_orden_borrador(
+              ${orderId}::bigint,
+              ${BigInt(targetStateId)}::bigint,
+              ${finalNotes}::text
+            )
+          `;
+        } else {
           await tx.$executeRaw`
             SELECT sp_cambiar_estado_orden(
-              ${orderId}::bigint, 
-              ${BigInt(targetStateId)}::bigint, 
+              ${orderId}::bigint,
+              ${BigInt(targetStateId)}::bigint,
               ${finalNotes}::text
             )
           `;
         }
 
         let addressSnapshotUpdates = {};
+
         if (isLeavingDraft && existingOrder.shippingAddressId) {
-          const snapshot = await this.fetchAddressSnapshot(tx, existingOrder.shippingAddressId);
-          if (snapshot) addressSnapshotUpdates = snapshot;
+          const snapshot = await this.fetchAddressSnapshot(
+            tx,
+            existingOrder.shippingAddressId
+          );
+
+          if (snapshot) {
+            addressSnapshotUpdates = snapshot;
+          }
         }
 
         return tx.order.update({
           where: { id: orderId },
           data: {
-            ...(trackingNumber?.trim() && { trackingNumber: trackingNumber.trim() }),
+            ...(trackingNumber?.trim() && {
+              trackingNumber: trackingNumber.trim(),
+            }),
             ...addressSnapshotUpdates,
           },
         });
@@ -590,11 +694,20 @@ export class OrdersService {
           ? 'Orden cerrada y stock liberado correctamente.'
           : 'Estado de la orden actualizado correctamente.',
       };
+
     } catch (err: any) {
-      console.error('Error en servicio de órdenes (updateOrderState):', err);
-      return { success: false, message: err.message || 'Error en la operación de la base de datos' };
+      console.error(
+        'Error en servicio de órdenes (updateOrderState):',
+        err
+      );
+
+      return {
+        success: false,
+        message: err.message || 'Error en la operación de la base de datos',
+      };
     }
   }
+
 
   async updateItemQuantity(
     orderId: number | bigint,
