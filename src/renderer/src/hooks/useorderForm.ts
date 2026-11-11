@@ -198,15 +198,33 @@ export function useOrderForm(initialOrder?: OrderWithState | null) {
     }
 
     if (canEditDetails) {
-      if (!finalClientId || finalClientId <= 0) return dispatch(setGlobalAlert("Debe seleccionar un cliente de la lista."))
-      if (!finalAddressId || finalAddressId <= 0) return dispatch(setGlobalAlert("Debe seleccionar una dirección de la lista."))
-      if (items.some((i) => i.productId <= 0)) return dispatch(setGlobalAlert("Todos los ítems deben tener un producto seleccionado"))
+      if (!finalClientId || finalClientId <= 0) {
+        dispatch(setGlobalAlert("Debe seleccionar un cliente de la lista."))
+        return
+      }
+      if (!finalAddressId || finalAddressId <= 0) {
+        dispatch(setGlobalAlert("Debe seleccionar una dirección de la lista."))
+        return
+      }
+      if (items.some((i) => i.productId <= 0)) {
+        dispatch(setGlobalAlert("Todos los ítems deben tener un producto seleccionado"))
+        return
+      }
     }
 
     const isPayingNow = formData.currentStateId === OrderState.Paid
-    if (isPayingNow && !formData.paymentMethod.trim()) return dispatch(setGlobalAlert("Debe seleccionar un método de pago."))
-    if (nextStateNeedsTracking && !formData.trackingNumber.trim()) return dispatch(setGlobalAlert("El número de seguimiento es obligatorio."))
-    if (nextStateNeedsReason && !formData.notes.trim()) return dispatch(setGlobalAlert("Indicá el motivo del rechazo."))
+    if (isPayingNow && !formData.paymentMethod.trim()) {
+      dispatch(setGlobalAlert("Debe seleccionar un método de pago."))
+      return
+    }
+    if (nextStateNeedsTracking && !formData.trackingNumber.trim()) {
+      dispatch(setGlobalAlert("El número de seguimiento es obligatorio."))
+      return
+    }
+    if (nextStateNeedsReason && !formData.notes.trim()) {
+      dispatch(setGlobalAlert("Indicá el motivo del rechazo."))
+      return
+    }
 
     setIsSaving(true)
     let generatedOrderId: number | null = currentOrderId
