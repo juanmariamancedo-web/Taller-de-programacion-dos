@@ -17,14 +17,7 @@ import {
 import { useSeletedAddressOnOrder } from "../../hooks/useSeletedAddressOnOrder"
 import useSeletedUserOnOrder from "../../hooks/useSeletedUserOnOrder"
 import { ItemOrder } from "../ItemOrder"
-
-export interface FormOrderItem {
-  id: string
-  productId: number
-  description: string
-  quantity: number
-  unitPrice: number
-}
+import type { FormOrderItem } from "../../types/FormOrderItem"
 
 interface OrderFormProps {
   initialOrder?: OrderWithState | null
@@ -126,8 +119,6 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
   const [formData, setFormData] = useState<FormData>(() => buildFormData(initialOrder))
   const [items, setItems] = useState<FormOrderItem[]>([newItem()])
   
-  const [stockErrorProductId, setStockErrorProductId] = useState<number | null>(null)
-
   const stateChanged = formData.currentStateId !== orderStateId
   const nextStateNeedsTracking = stateChanged && requiresTracking(formData.currentStateId)
   const nextStateNeedsReason = stateChanged && requiresReason(formData.currentStateId)
@@ -177,17 +168,14 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
       dispatch(setGlobalAlert("Debe seleccionar un cliente antes de agregar ítems."))
       return
     }
-    setStockErrorProductId(null)
     setItems((prev) => [...prev, newItem()])
   }
 
   const handleRemoveItem = (id: string) => {
-    setStockErrorProductId(null)
     setItems((prev) => (prev.length === 1 ? prev : prev.filter((item) => item.id !== id)))
   }
 
   const handleUpdateItem = (id: string, updatedFields: Partial<FormOrderItem>) => {
-    setStockErrorProductId(null)
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...updatedFields } : item)))
   }
 
@@ -222,7 +210,7 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     
     let finalClientId = formData.clientId
@@ -238,15 +226,33 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     }
 
     if (canEditDetails) {
-      if (!finalClientId || finalClientId <= 0) return dispatch(setGlobalAlert("Debe seleccionar un cliente de la lista."))
-      if (!finalAddressId || finalAddressId <= 0) return dispatch(setGlobalAlert("Debe seleccionar una dirección de la lista."))
-      if (items.some((i) => i.productId <= 0)) return dispatch(setGlobalAlert("Todos los ítems deben tener un producto seleccionado"))
+      if (!finalClientId || finalClientId <= 0) {
+        dispatch(setGlobalAlert("Debe seleccionar un cliente de la lista."))
+        return
+      }
+      if (!finalAddressId || finalAddressId <= 0) {
+        dispatch(setGlobalAlert("Debe seleccionar una dirección de la lista."))
+        return
+      }
+      if (items.some((i) => i.productId <= 0)) {
+        dispatch(setGlobalAlert("Todos los ítems deben tener un producto seleccionado"))
+        return
+      }
     }
 
     const isPayingNow = formData.currentStateId === OrderState.Paid
-    if (isPayingNow && !formData.paymentMethod.trim()) return dispatch(setGlobalAlert("Debe seleccionar un método de pago."))
-    if (nextStateNeedsTracking && !formData.trackingNumber.trim()) return dispatch(setGlobalAlert("El número de seguimiento es obligatorio."))
-    if (nextStateNeedsReason && !formData.notes.trim()) return dispatch(setGlobalAlert("Indicá el motivo del rechazo."))
+    if (isPayingNow && !formData.paymentMethod.trim()) {
+      dispatch(setGlobalAlert("Debe seleccionar un método de pago."))
+      return
+    }
+    if (nextStateNeedsTracking && !formData.trackingNumber.trim()) {
+      dispatch(setGlobalAlert("El número de seguimiento es obligatorio."))
+      return
+    }
+    if (nextStateNeedsReason && !formData.notes.trim()) {
+      dispatch(setGlobalAlert("Indicá el motivo del rechazo."))
+      return
+    }
 
     setIsSaving(true)
     let generatedOrderId: number | null = currentOrderId
@@ -342,7 +348,6 @@ export default function CreateOrderPage({ initialOrder }: OrderFormProps) {
     ? "La orden es un borrador del vendedor: no podés modificar sus datos, pero sí cambiar su estado."
     : "La orden ya fue confirmada: los datos y los ítems no se pueden modificar."
 
-  const statusHistory = (initialOrder as any)?.statusHistory ?? []
   const disabledFieldClass = "cursor-not-allowed opacity-60 bg-gray-100 dark:bg-zinc-800"
   const addressDisabled = !canEditDetails || (formData.clientId <= 0 && searchTermClients.trim().length === 0)
   const isCancelledOrRejectedState = orderStateId === OrderState.Cancelled || orderStateId === OrderState.Rejected
