@@ -91,7 +91,7 @@ async function main() {
       price: 45000.0,
       stock: 15,
       lowStock: 3,
-      image: 'https://via.placeholder.com/150',
+      image: 'https://res.cloudinary.com/uibxxgbw/image/upload/v1794243941/productos/mxhpsm6mvfx44fehy5q2.jpg',
       isActive: true,
       categoryId: categoriesByName.get('Electrónica')!.id
     },
@@ -100,7 +100,7 @@ async function main() {
       price: 180000.0,
       stock: 5,
       lowStock: 2,
-      image: 'https://via.placeholder.com/150',
+      image: 'https://res.cloudinary.com/uibxxgbw/image/upload/v1794243872/productos/ztf19e2mwaumf1sejloy.jpg',
       isActive: true,
       categoryId: categoriesByName.get('Electrónica')!.id
     },
@@ -109,7 +109,7 @@ async function main() {
       price: 12500.5,
       stock: 25,
       lowStock: 5,
-      image: 'https://via.placeholder.com/150',
+      image: 'https://res.cloudinary.com/uibxxgbw/image/upload/v1794243976/productos/eq6rky1ozjgg1l5nfq5n.jpg',
       isActive: true,
       categoryId: categoriesByName.get('Repuestos')!.id
     },
@@ -118,7 +118,7 @@ async function main() {
       price: 68000.0,
       stock: 8,
       lowStock: 2,
-      image: 'https://via.placeholder.com/150',
+      image: 'https://res.cloudinary.com/uibxxgbw/image/upload/v1794243911/productos/z8fslz9usbddexenfnmf.jpg',
       isActive: true,
       categoryId: categoriesByName.get('Repuestos')!.id
     },
@@ -127,7 +127,7 @@ async function main() {
       price: 245000.0,
       stock: 4,
       lowStock: 1,
-      image: 'https://via.placeholder.com/150',
+      image: 'https://res.cloudinary.com/uibxxgbw/image/upload/v1794244072/productos/hxddhm0x8ebbtccyh2sf.webp',
       isActive: true,
       categoryId: categoriesByName.get('Herramienta')!.id
     },
@@ -136,7 +136,7 @@ async function main() {
       price: 32000.0,
       stock: 12,
       lowStock: 3,
-      image: 'https://via.placeholder.com/150',
+      image: 'https://res.cloudinary.com/uibxxgbw/image/upload/v1794243941/productos/mxhpsm6mvfx44fehy5q2.jpg',
       isActive: true,
       categoryId: categoriesByName.get('Herramienta')!.id
     },
@@ -145,7 +145,7 @@ async function main() {
       price: 155000.0,
       stock: 7,
       lowStock: 2,
-      image: 'https://via.placeholder.com/150',
+      image: 'https://res.cloudinary.com/uibxxgbw/image/upload/v1794243667/productos/vzxc0lqi95rgtuqsbk2s.jpg',
       isActive: true,
       categoryId: categoriesByName.get('Repuestos')!.id
     },
@@ -154,7 +154,7 @@ async function main() {
       price: 89000.0,
       stock: 6,
       lowStock: 2,
-      image: 'https://via.placeholder.com/150',
+      image: 'https://res.cloudinary.com/uibxxgbw/image/upload/v1794243794/productos/hbeirrgh8d0it9otscdp.jpg',
       isActive: true,
       categoryId: categoriesByName.get('Electrónica')!.id
     },
@@ -163,7 +163,7 @@ async function main() {
       price: 28000.0,
       stock: 18,
       lowStock: 4,
-      image: 'https://via.placeholder.com/150',
+      image: 'https://res.cloudinary.com/uibxxgbw/image/upload/v1794418998/images_6.jpg',
       isActive: true,
       categoryId: categoriesByName.get('Herramienta')!.id
     },
@@ -172,7 +172,7 @@ async function main() {
       price: 52000.0,
       stock: 14,
       lowStock: 3,
-      image: 'https://via.placeholder.com/150',
+      image: 'https://res.cloudinary.com/uibxxgbw/image/upload/v1794419048/images_7.jpg',
       isActive: true,
       categoryId: categoriesByName.get('Repuestos')!.id
     }
@@ -220,35 +220,35 @@ async function main() {
     {
       name: 'Juan',
       lastname: 'Pérez',
-      cuil: '20-34567890-9',
+      cuil: '20-34567890-6',
       email: 'juan.perez@example.com',
       phone: '+541144445555'
     },
     {
       name: 'María',
       lastname: 'Gómez',
-      cuil: '27-38901234-4',
+      cuil: '27-38901234-9',
       email: 'maria.gomez@example.com',
       phone: '+541155556666'
     },
     {
       name: 'Carlos',
       lastname: 'López',
-      cuil: '20-30123456-8',
+      cuil: '20-30123456-3',
       email: 'carlos.lopez@example.com',
       phone: '+541166667777'
     },
     {
       name: 'Laura',
       lastname: 'Fernández',
-      cuil: '27-32109876-3',
+      cuil: '27-32109876-8',
       email: 'laura.fernandez@example.com',
       phone: null
     },
     {
       name: 'Diego',
       lastname: 'Rodríguez',
-      cuil: '20-39876543-1',
+      cuil: '20-39876543-6',
       email: 'diego.rodriguez@example.com',
       phone: '+541188889999'
     }
@@ -259,7 +259,7 @@ async function main() {
   for (const clientData of clientsData) {
     const client = await prisma.client.upsert({
       where: { email: clientData.email },
-      update: {},
+      update: { cuil: clientData.cuil },
       create: clientData
     })
     createdClients.push(client)
