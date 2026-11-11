@@ -240,9 +240,13 @@ export function useOrderForm(initialOrder?: OrderWithState | null) {
         assertSuccess(response, "Error al crear la orden.")
         if (response?.orderId) generatedOrderId = Number(response.orderId)
       } else {
-        const updateRes = await window.electronAPI?.updateOrder?.({ id: String(currentOrderId), ...details } as any)
-        assertSuccess(updateRes, "Error al actualizar los datos.")
+        // Si la orden sigue en borrador (Created), permitimos actualizar detalles e ítems
+        if (canEditDetails) {
+          const updateRes = await window.electronAPI?.updateOrder?.({ id: String(currentOrderId), ...details } as any)
+          assertSuccess(updateRes, "Error al actualizar los datos.")
+        }
 
+        // Si cambió de estado, ejecutamos exclusivamente la actualización de estado
         if (formData.currentStateId !== orderStateId) {
           const statePayload = {
             id: String(currentOrderId),
