@@ -1,4 +1,4 @@
-import { FormOrderItem } from './views/CreateOrderPage'
+import type { FormOrderItem } from '../types/FormOrderItem'
 import { ChangeEvent, useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { ProductListItem } from '../../../main/domain/types/electron-env'
@@ -35,7 +35,6 @@ export function ItemOrder({
   disabled = false,
   selectedProductIds,
   stockError = false,
-  currentStateId = 1,
   onUpdateItem,
   onRemoveItem,
 }: ItemOrderProps) {
