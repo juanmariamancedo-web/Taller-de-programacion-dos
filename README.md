@@ -36,6 +36,8 @@ Crea un archivo llamado **`.env`** en la raíz del proyecto (al mismo nivel que 
 
 ```env
 DATABASE_URL="postgresql://admin:admin123@localhost:5432/taller_db?schema=public"
+CLOUDINARY_CLOUD_NAME="uibxxgbw"
+CLOUDINARY_UPLOAD_PRESET="productos_unsigned"
 
 ```
 
